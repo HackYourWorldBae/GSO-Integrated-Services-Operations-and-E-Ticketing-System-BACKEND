@@ -1,0 +1,887 @@
+<?php
+
+namespace App\Controllers\API;
+
+use App\Controllers\BaseController;
+use App\Models\TicketModel;
+use App\Models\FgmuTicketDetailModel;
+use App\Models\LeauTicketDetailModel;
+use App\Models\SsuVehiclePassDetailModel;
+use App\Models\SsuIncidentDetailModel;
+use App\Models\TasuBookingDetailModel;
+use App\Models\TicketAttachmentModel;
+use App\Models\TicketLogModel;
+use CodeIgniter\HTTP\ResponseInterface;
+use Config\Database;
+
+/**
+ * TicketController
+ *
+ * Handles the full ticket lifecycle from submission to archival.
+ *
+ * Endpoints:
+ *  POST  /api/v1/tickets/intake           - Consolidated multi-service form submission
+ *  GET   /api/v1/tickets/my-requests      - Requestor's own active tickets
+ *  GET   /api/v1/tickets/completed        - Requestor's completed/archived tickets
+ *  GET   /api/v1/tickets/queue/:unitCode  - Pending queue for an admin sub-unit
+ *  GET   /api/v1/tickets/:id              - Single ticket detail view
+ *  PATCH /api/v1/tickets/:id/approve      - Admin approves a ticket
+ *  PATCH /api/v1/tickets/:id/decline      - Admin declines a ticket
+ *  PATCH /api/v1/tickets/:id/complete     - Mark ticket as resolved/completed
+ *  GET   /api/v1/tickets/:id/logs         - Audit trail for a ticket
+ */
+class TicketController extends BaseController
+{
+    private TicketModel $ticketModel;
+    private TicketLogModel $logModel;
+
+    // Unit code => Unit ID mapping (mirrors the seeds in the schema)
+    private const UNIT_MAP = [
+        'FGMU' => 1,
+        'LEAU' => 2,
+        'SSU'  => 3,
+        'TASU' => 4,
+    ];
+
+    public function __construct()
+    {
+        $this->ticketModel = new TicketModel();
+        $this->logModel    = new TicketLogModel();
+    }
+
+    // -------------------------------------------------------------------------
+    // Requestor Dashboard
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get active (non-archived) tickets for the currently authenticated user.
+     */
+    public function myRequests(): ResponseInterface
+    {
+        $userId  = $this->currentUserId();
+        $tickets = $this->ticketModel->getActiveByUser($userId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Active tickets retrieved.', ['tickets' => $tickets]);
+    }
+
+    /**
+     * Get completed/archived tickets for the currently authenticated user.
+     */
+    public function completedRequests(): ResponseInterface
+    {
+        $userId  = $this->currentUserId();
+        $tickets = $this->ticketModel->getArchivedByUser($userId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Completed tickets retrieved.', ['tickets' => $tickets]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Admin & Dispatcher Queues
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get the pending ticket queue for a given unit.
+     */
+    public function pendingQueue(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $tickets = $this->ticketModel->getPendingQueue($unitId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Pending queue retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
+    }
+
+    /**
+     * Get approved tickets awaiting dispatch for a given unit.
+     */
+    public function dispatchQueue(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $tickets = $this->ticketModel->getDispatchQueue($unitId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Dispatch queue retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
+    }
+
+    /**
+     * Get in-progress tickets for a unit.
+     */
+    public function activeTickets(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $tickets = $this->ticketModel->getActiveTickets($unitId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Active tickets retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
+    }
+
+    /**
+     * Get archived tickets for a unit (with optional search/filter params).
+     */
+    public function archives(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $filters = [
+            'search'    => sanitize_string($this->request->getGet('search') ?? ''),
+            'status'    => sanitize_string($this->request->getGet('status') ?? ''),
+            'date_from' => sanitize_string($this->request->getGet('date_from') ?? ''),
+            'date_to'   => sanitize_string($this->request->getGet('date_to') ?? ''),
+        ];
+
+        $tickets = $this->ticketModel->getArchivedByUnit($unitId, $filters);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Archived tickets retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
+    }
+
+    /**
+     * Get unit dashboard stats (pending, processing, resolved counts).
+     */
+    public function unitStats(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $stats = $this->ticketModel->getStatsByUnit($unitId);
+        return $this->successResponse('Unit statistics retrieved.', ['stats' => $stats]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Single Ticket
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get a single ticket with its unit-specific detail data and attachments.
+     */
+    public function show(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        // Enrich with unit-specific details
+        $enriched = $this->enrichTickets([$ticket]);
+        $ticket   = $enriched[0];
+
+        // Attachments
+        $attachmentModel      = new TicketAttachmentModel();
+        $ticket['attachments'] = $attachmentModel->getByTicket($ticketId);
+
+        // Logs
+        $ticket['logs'] = $this->logModel->getByTicket($ticketId);
+
+        return $this->successResponse('Ticket retrieved.', ['ticket' => $ticket]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Ticket Status Transitions
+    // -------------------------------------------------------------------------
+
+    /**
+     * Admin approves a ticket (pending -> approved, step 1 -> 2).
+     */
+    public function approve(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Only pending tickets can be approved. Current status: {$ticket['status']}.");
+        }
+
+        $unitId = (int) $ticket['unit_id'];
+        $isTasu = $unitId === 4;
+
+        $this->ticketModel->update($ticketId, [
+            'status'      => 'approved',
+            'status_label'=> $isTasu ? 'Trip Scheduled' : 'Queued for Dispatch',
+            'current_step'=> 2,
+            'reviewed_at' => date('Y-m-d H:i:s'),
+            'reviewed_by' => $this->currentUserId(),
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket approved — queued for dispatch.');
+
+        return $this->successResponse('Ticket approved successfully.', ['ticket_id' => $ticketId, 'status' => 'approved']);
+    }
+
+    /**
+     * Admin declines a ticket (pending -> declined) with a reason.
+     */
+    public function decline(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Only pending tickets can be declined. Current status: {$ticket['status']}.");
+        }
+
+        $body   = $this->request->getJSON(true) ?? [];
+        $reason = sanitize_string($body['decline_reason'] ?? '');
+
+        if (empty($reason)) {
+            return $this->errorResponse('A decline reason is required.', ['decline_reason' => ['Required.']], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->ticketModel->update($ticketId, [
+            'status'        => 'declined',
+            'status_label'  => 'Declined',
+            'decline_reason'=> $reason,
+            'current_step'  => 1,
+            'reviewed_at'   => date('Y-m-d H:i:s'),
+            'reviewed_by'   => $this->currentUserId(),
+            'updated_at'    => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', "Ticket declined. Reason: {$reason}");
+
+        return $this->successResponse('Ticket declined.', ['ticket_id' => $ticketId, 'status' => 'declined']);
+    }
+
+    /**
+     * Mark a ticket as completed/resolved (processing -> resolved, step 3 -> 4).
+     * Triggers archival and awaits user feedback.
+     */
+    public function complete(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if (!in_array($ticket['status'], ['processing', 'approved'])) {
+            return $this->errorResponse("Only processing or approved tickets can be marked as completed.");
+        }
+
+        $unitId   = (int) $ticket['unit_id'];
+        $unitCode = array_search($unitId, self::UNIT_MAP);
+
+        $statusLabel = match($unitCode) {
+            'TASU'  => 'Trip Completed',
+            'SSU'   => 'Sticker Issued',
+            default => 'Completed',
+        };
+
+        $this->ticketModel->update($ticketId, [
+            'status'       => 'resolved',
+            'status_label' => $statusLabel,
+            'current_step' => 4,
+            'is_archived'  => 1,
+            'completed_at' => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        // Also mark the active assignment as completed
+        $db = Database::connect();
+        $db->query(
+            "UPDATE ticket_assignments SET completed_at = NOW() WHERE ticket_id = ? AND completed_at IS NULL",
+            [$ticketId]
+        );
+
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket marked as completed and archived.');
+
+        return $this->successResponse('Ticket completed and archived.', ['ticket_id' => $ticketId, 'status' => 'resolved']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Consolidated Multi-Service Intake
+    // -------------------------------------------------------------------------
+
+    /**
+     * Submit a consolidated service request from the ServicesListView/FormsView flow.
+     *
+     * Accepts a multi-unit payload:
+     * {
+     *   fgmu: { services: [...], details: {...} },
+     *   leau: { services: [...], details: {...} },
+     *   ssu:  { vehiclePass: {...}, incidentReport: {...} },
+     *   tasu: { ... }
+     * }
+     *
+     * All inserts are wrapped in a single DB transaction.
+     */
+    public function submitIntake(): ResponseInterface
+    {
+        $body   = $this->request->getJSON(true) ?? [];
+        $userId = $this->currentUserId();
+
+        if (empty($body)) {
+            return $this->errorResponse('Request body is empty.');
+        }
+
+        $db             = Database::connect();
+        $createdTickets = [];
+
+        $db->transStart();
+
+        try {
+            // --- 1. FGMU Intake ---
+            if (!empty($body['fgmu']['services'])) {
+                $fgmuDetails = sanitize_array($body['fgmu']['details'] ?? []);
+                $fgmuModel   = new FgmuTicketDetailModel();
+
+                foreach ($body['fgmu']['services'] as $srv) {
+                    $ticketId = $this->ticketModel->generateTicketId('FGMU', self::UNIT_MAP['FGMU']);
+                    $service  = sanitize_string($srv['service'] ?? 'Facilities Maintenance');
+
+                    $this->ticketModel->insert([
+                        'id'          => $ticketId,
+                        'user_id'     => $userId,
+                        'unit_id'     => self::UNIT_MAP['FGMU'],
+                        'service_type'=> $service,
+                        'description' => sanitize_string($fgmuDetails['job_description'] ?? 'Facilities maintenance request.'),
+                        'status'      => 'pending',
+                        'status_label'=> 'Pending Approval',
+                        'current_step'=> 1,
+                        'location'    => sanitize_string($fgmuDetails['college_building'] ?? ''),
+                        'office_room' => sanitize_string($fgmuDetails['office_room'] ?? ''),
+                        'submitted_at'=> date('Y-m-d H:i:s'),
+                        'updated_at'  => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $fgmuModel->insert([
+                        'ticket_id'       => $ticketId,
+                        'college_building'=> sanitize_string($fgmuDetails['college_building'] ?? ''),
+                        'office_room'     => sanitize_string($fgmuDetails['office_room'] ?? ''),
+                        'source_of_fund'  => sanitize_string($fgmuDetails['source_of_fund'] ?? ''),
+                    ]);
+
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "FGMU service request: {$service}");
+                    $createdTickets[] = $ticketId;
+                }
+            }
+
+            // --- 2. LEAU Intake ---
+            if (!empty($body['leau']['services'])) {
+                $leauDetails = sanitize_array($body['leau']['details'] ?? []);
+                $leauModel   = new LeauTicketDetailModel();
+
+                foreach ($body['leau']['services'] as $srv) {
+                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU']);
+                    $service  = sanitize_string($srv['service'] ?? 'Janitorial & Landscaping');
+
+                    $this->ticketModel->insert([
+                        'id'          => $ticketId,
+                        'user_id'     => $userId,
+                        'unit_id'     => self::UNIT_MAP['LEAU'],
+                        'service_type'=> $service,
+                        'description' => sanitize_string($leauDetails['job_description'] ?? 'Grounds maintenance request.'),
+                        'status'      => 'pending',
+                        'status_label'=> 'Pending Approval',
+                        'current_step'=> 1,
+                        'location'    => sanitize_string($leauDetails['college_building'] ?? ''),
+                        'office_room' => sanitize_string($leauDetails['office_room'] ?? ''),
+                        'submitted_at'=> date('Y-m-d H:i:s'),
+                        'updated_at'  => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $leauModel->insert([
+                        'ticket_id'       => $ticketId,
+                        'college_building'=> sanitize_string($leauDetails['college_building'] ?? ''),
+                        'office_room'     => sanitize_string($leauDetails['office_room'] ?? ''),
+                        'source_of_fund'  => sanitize_string($leauDetails['source_of_fund'] ?? ''),
+                    ]);
+
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU service request: {$service}");
+                    $createdTickets[] = $ticketId;
+                }
+            }
+
+            // --- 3. SSU Vehicle Pass ---
+            if (!empty($body['ssu']['vehiclePass'])) {
+                $vp        = sanitize_array($body['ssu']['vehiclePass']);
+                $vd        = $vp['vehicleDetails'] ?? [];
+                $ticketId  = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
+                $makeSeries= sanitize_string($vd['makeSeries'] ?? 'Vehicle');
+                $plateNo   = sanitize_string($vd['plateNo'] ?? 'N/A');
+
+                $this->ticketModel->insert([
+                    'id'          => $ticketId,
+                    'user_id'     => $userId,
+                    'unit_id'     => self::UNIT_MAP['SSU'],
+                    'service_type'=> 'Vehicle Pass Application',
+                    'description' => "Vehicle pass application for {$makeSeries} ({$plateNo})",
+                    'status'      => 'pending',
+                    'status_label'=> 'Pending Verification',
+                    'current_step'=> 1,
+                    'submitted_at'=> date('Y-m-d H:i:s'),
+                    'updated_at'  => date('Y-m-d H:i:s'),
+                ]);
+
+                (new SsuVehiclePassDetailModel())->insert([
+                    'ticket_id'        => $ticketId,
+                    'account_type'     => sanitize_string($vp['accountType'] ?? ''),
+                    'applicant_name'   => sanitize_string($vp['name'] ?? ''),
+                    'college_office'   => sanitize_string($vp['collegeOffice'] ?? ''),
+                    'contact_no'       => sanitize_string($vp['contactNo'] ?? ''),
+                    'driver_name'      => sanitize_string($vp['driverName'] ?? ''),
+                    'driver_contact'   => sanitize_string($vp['driverContact'] ?? ''),
+                    'complete_address' => sanitize_string($vp['completeAddress'] ?? ''),
+                    'registered_owner' => sanitize_string($vd['registeredOwner'] ?? ''),
+                    'plate_no'         => $plateNo,
+                    'make_series'      => $makeSeries,
+                    'type_color'       => sanitize_string($vd['typeColor'] ?? ''),
+                    'id_type_no'       => sanitize_string($vp['idTypeNo'] ?? ''),
+                    'valid_until'      => !empty($vp['validUntil']) ? $vp['validUntil'] : null,
+                    'privacy_agreed'   => (bool) ($vp['privacyAgreed'] ?? false),
+                    'disclosure_agreed'=> (bool) ($vp['disclosureAgreed'] ?? false),
+                    'applicant_signature'=> $vp['signature'] ?? null,
+                ]);
+
+                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "SSU Vehicle Pass for {$plateNo}");
+                $createdTickets[] = $ticketId;
+            }
+
+            // --- 4. SSU Incident Report ---
+            if (!empty($body['ssu']['incidentReport'])) {
+                $inc      = sanitize_array($body['ssu']['incidentReport']);
+                $ticketId = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
+                $typeStr  = is_array($inc['incidents'] ?? null) ? implode(', ', $inc['incidents']) : ($inc['otherIncident'] ?? 'Incident');
+
+                $this->ticketModel->insert([
+                    'id'          => $ticketId,
+                    'user_id'     => $userId,
+                    'unit_id'     => self::UNIT_MAP['SSU'],
+                    'service_type'=> 'Incident Report',
+                    'description' => sanitize_string($inc['how'] ?? 'Incident reported to campus security.'),
+                    'status'      => 'pending',
+                    'status_label'=> 'Under Review',
+                    'current_step'=> 1,
+                    'location'    => sanitize_string($inc['where'] ?? ''),
+                    'submitted_at'=> date('Y-m-d H:i:s'),
+                    'updated_at'  => date('Y-m-d H:i:s'),
+                ]);
+
+                (new SsuIncidentDetailModel())->insert([
+                    'ticket_id'        => $ticketId,
+                    'other_incident'   => sanitize_string($inc['otherIncident'] ?? ''),
+                    'other_information'=> sanitize_string($inc['otherInformation'] ?? ''),
+                    'follow_up'        => (bool) ($inc['followUp'] ?? false),
+                    'who_involved'     => sanitize_string($inc['who'] ?? ''),
+                    'where_occurred'   => sanitize_string($inc['where'] ?? ''),
+                    'when_occurred'    => sanitize_string($inc['when'] ?? ''),
+                    'how_narrative'    => sanitize_string($inc['how'] ?? ''),
+                    'reporter_name'    => sanitize_string($inc['reportedBy']['printedName'] ?? ''),
+                    'reporter_signature'=> $inc['reportedBy']['signature'] ?? null,
+                ]);
+
+                // Bridge table inserts for incident types, issues, and roles (3NF normalization)
+                if (!empty($inc['incidents']) && is_array($inc['incidents'])) {
+                    foreach ($inc['incidents'] as $type) {
+                        $cleanType = sanitize_string($type);
+                        $db->query("INSERT IGNORE INTO ssu_incident_types (type_name) VALUES (?)", [$cleanType]);
+                        $row = $db->query("SELECT id FROM ssu_incident_types WHERE type_name = ?", [$cleanType])->getRowArray();
+                        if ($row) {
+                            $db->query("INSERT IGNORE INTO ssu_incident_type_items (ticket_id, incident_type_id) VALUES (?, ?)", [$ticketId, $row['id']]);
+                        }
+                    }
+                }
+
+                if (!empty($inc['information']) && is_array($inc['information'])) {
+                    foreach ($inc['information'] as $info) {
+                        $cleanInfo = sanitize_string($info);
+                        $db->query("INSERT IGNORE INTO ssu_incident_issues (issue_name) VALUES (?)", [$cleanInfo]);
+                        $row = $db->query("SELECT id FROM ssu_incident_issues WHERE issue_name = ?", [$cleanInfo])->getRowArray();
+                        if ($row) {
+                            $db->query("INSERT IGNORE INTO ssu_incident_issue_items (ticket_id, issue_id) VALUES (?, ?)", [$ticketId, $row['id']]);
+                        }
+                    }
+                }
+
+                $roles = $inc['reportedBy']['roles'] ?? [];
+                if (!empty($roles) && is_array($roles)) {
+                    foreach ($roles as $role) {
+                        $cleanRole = sanitize_string($role);
+                        $db->query("INSERT IGNORE INTO ssu_incident_roles (role_name) VALUES (?)", [$cleanRole]);
+                        $row = $db->query("SELECT id FROM ssu_incident_roles WHERE role_name = ?", [$cleanRole])->getRowArray();
+                        if ($row) {
+                            $db->query("INSERT IGNORE INTO ssu_incident_role_items (ticket_id, role_id) VALUES (?, ?)", [$ticketId, $row['id']]);
+                        }
+                    }
+                }
+
+                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "SSU Incident Report: {$typeStr}");
+                $createdTickets[] = $ticketId;
+            }
+
+            // --- 5. TASU Vehicle Booking ---
+            if (!empty($body['tasu'])) {
+                $ts       = sanitize_array($body['tasu']);
+                $ticketId = $this->ticketModel->generateTicketId('TASU', self::UNIT_MAP['TASU']);
+
+                $this->ticketModel->insert([
+                    'id'          => $ticketId,
+                    'user_id'     => $userId,
+                    'unit_id'     => self::UNIT_MAP['TASU'],
+                    'service_type'=> 'Vehicle Request',
+                    'description' => sanitize_string($ts['purposeOfTravel'] ?? 'University vehicle booking request.'),
+                    'status'      => 'pending',
+                    'status_label'=> 'Pending Approval',
+                    'current_step'=> 1,
+                    'location'    => sanitize_string($ts['destination'] ?? ''),
+                    'submitted_at'=> date('Y-m-d H:i:s'),
+                    'updated_at'  => date('Y-m-d H:i:s'),
+                ]);
+
+                (new TasuBookingDetailModel())->insert([
+                    'ticket_id'                => $ticketId,
+                    'request_time'             => sanitize_string($ts['time'] ?? ''),
+                    'requesting_personnel'      => sanitize_string($ts['requestingPersonnel'] ?? ''),
+                    'office_college_department' => sanitize_string($ts['officeCollegeDepartment'] ?? ''),
+                    'agency_address'            => sanitize_string($ts['agencyAddress'] ?? ''),
+                    'num_passengers'            => max(1, (int) ($ts['numberOfPassengers'] ?? 1)),
+                    'date_of_travel'            => $ts['dateOfTravel'] ?? null,
+                    'destination'               => sanitize_string($ts['destination'] ?? ''),
+                    'purpose_of_travel'         => sanitize_string($ts['purposeOfTravel'] ?? ''),
+                ]);
+
+                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "TASU Vehicle Request to: " . ($ts['destination'] ?? 'N/A'));
+                $createdTickets[] = $ticketId;
+            }
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[TicketController::submitIntake] DB Error: ' . $e->getMessage());
+
+            return $this->errorResponse(
+                'An error occurred while submitting your request. Please try again.',
+                [],
+                ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse(
+                'Transaction failed. Please try again.',
+                [],
+                ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
+
+        return $this->successResponse(
+            count($createdTickets) . ' ticket(s) submitted successfully.',
+            ['ticket_ids' => $createdTickets],
+            ResponseInterface::HTTP_CREATED
+        );
+    }
+
+    /**
+     * Get audit trail logs for a ticket.
+     */
+    public function logs(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $logs = $this->logModel->getByTicket($ticketId);
+
+        return $this->successResponse('Ticket logs retrieved.', ['logs' => $logs]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Private Helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Enrich a list of tickets with their unit-specific details.
+     * Uses a single query per detail type to avoid N+1 queries.
+     */
+    private function enrichTickets(array $tickets): array
+    {
+        if (empty($tickets)) {
+            return $tickets;
+        }
+
+        $ticketIds = array_column($tickets, 'id');
+        $db        = Database::connect();
+
+        // Load all relevant detail records in bulk
+        $fgmuDetails  = $this->buildDetailMap($db, 'fgmu_ticket_details',      'ticket_id', $ticketIds);
+        $leauDetails  = $this->buildDetailMap($db, 'leau_ticket_details',      'ticket_id', $ticketIds);
+        $ssuVpDetails = $this->buildDetailMap($db, 'ssu_vehicle_pass_details', 'ticket_id', $ticketIds);
+        $ssuIrDetails = $this->buildDetailMap($db, 'ssu_incident_details',     'ticket_id', $ticketIds);
+        $tasuDetails  = $this->buildDetailMap($db, 'tasu_booking_details',     'ticket_id', $ticketIds);
+        $assignments  = $this->buildAssignmentMap($db, $ticketIds);
+
+        // Enrich SSU Incident Reports with 3NF bridge table arrays (incidents, information, roles)
+        if (!empty($ssuIrDetails)) {
+            $irIds = array_keys($ssuIrDetails);
+            $placeholders = implode(',', array_fill(0, count($irIds), '?'));
+
+            $typeRows = $db->query("
+                SELECT i.ticket_id, t.type_name 
+                FROM ssu_incident_type_items i 
+                JOIN ssu_incident_types t ON t.id = i.incident_type_id 
+                WHERE i.ticket_id IN ({$placeholders})
+            ", $irIds)->getResultArray();
+
+            $issueRows = $db->query("
+                SELECT i.ticket_id, t.issue_name 
+                FROM ssu_incident_issue_items i 
+                JOIN ssu_incident_issues t ON t.id = i.issue_id 
+                WHERE i.ticket_id IN ({$placeholders})
+            ", $irIds)->getResultArray();
+
+            $roleRows = $db->query("
+                SELECT i.ticket_id, t.role_name 
+                FROM ssu_incident_role_items i 
+                JOIN ssu_incident_roles t ON t.id = i.role_id 
+                WHERE i.ticket_id IN ({$placeholders})
+            ", $irIds)->getResultArray();
+
+            foreach ($ssuIrDetails as $id => &$detail) {
+                $detail['incidents']   = array_values(array_column(array_filter($typeRows,  fn($r) => $r['ticket_id'] === $id), 'type_name'));
+                $detail['information'] = array_values(array_column(array_filter($issueRows, fn($r) => $r['ticket_id'] === $id), 'issue_name'));
+                $detail['roles']       = array_values(array_column(array_filter($roleRows,  fn($r) => $r['ticket_id'] === $id), 'role_name'));
+                $detail['reportedBy']  = [
+                    'printedName' => $detail['reporter_name'] ?? '',
+                    'signature'   => $detail['reporter_signature'] ?? '',
+                    'roles'       => $detail['roles'],
+                ];
+            }
+            unset($detail);
+        }
+
+        foreach ($tickets as &$ticket) {
+            $id = $ticket['id'];
+
+            $ticket['details'] = match($ticket['unit_id']) {
+                1       => $fgmuDetails[$id]  ?? null,
+                2       => $leauDetails[$id]  ?? null,
+                3       => $ssuVpDetails[$id] ?? $ssuIrDetails[$id] ?? null,
+                4       => $tasuDetails[$id]  ?? null,
+                default => null,
+            };
+
+            $ticket['assignment'] = $assignments[$id] ?? null;
+        }
+        unset($ticket);
+
+        return $tickets;
+    }
+
+    /**
+     * Query a detail table and return a map keyed by ticket_id.
+     */
+    private function buildDetailMap(\CodeIgniter\Database\ConnectionInterface $db, string $table, string $keyColumn, array $ids): array
+    {
+        if (empty($ids)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $rows = $db->query("SELECT * FROM {$table} WHERE {$keyColumn} IN ({$placeholders})", $ids)->getResultArray();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $map[$row[$keyColumn]] = $row;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Query ticket_assignments and return a map keyed by ticket_id.
+     */
+    private function buildAssignmentMap(\CodeIgniter\Database\ConnectionInterface $db, array $ticketIds): array
+    {
+        if (empty($ticketIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+
+        $rows = $db->query("
+            SELECT ta.*, p.name AS personnel_name, v.model_name AS vehicle_name, v.plate_no AS vehicle_plate
+            FROM ticket_assignments ta
+            LEFT JOIN personnel p ON p.id = ta.personnel_id
+            LEFT JOIN vehicles v  ON v.id = ta.vehicle_id
+            WHERE ta.ticket_id IN ({$placeholders})
+              AND ta.completed_at IS NULL
+        ", $ticketIds)->getResultArray();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $map[$row['ticket_id']] = $row;
+        }
+
+        return $map;
+    }
+
+    // -------------------------------------------------------------------------
+    // Attachments (Upload & Download)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Upload one or more attachments to a specific ticket.
+     */
+    public function uploadAttachment(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        // Security check: only ticket owner or admins can upload
+        $userId = $this->currentUserId();
+        $role = $this->currentUserRole();
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director'])) {
+            return $this->forbiddenResponse('You do not have permission to upload files to this ticket.');
+        }
+
+        $files = $this->request->getFiles();
+
+        if (empty($files) || !isset($files['attachments'])) {
+            return $this->errorResponse('No files uploaded. Use "attachments[]" key in your form-data.');
+        }
+
+        $attachments = $files['attachments'];
+        if (!is_array($attachments)) {
+            $attachments = [$attachments];
+        }
+
+        $attachmentModel = new TicketAttachmentModel();
+        $uploadedData = [];
+        $errors = [];
+
+        // Determine year from created_at or fallback to current year
+        $year = date('Y', strtotime($ticket['created_at'] ?? date('Y-m-d')));
+        $uploadPath = WRITEPATH . "uploads/tickets/{$year}/{$ticketId}/";
+
+        foreach ($attachments as $file) {
+            if ($file->isValid() && !$file->hasMoved()) {
+                // Validate size (5MB max)
+                $sizeMb = $file->getSizeByUnit('mb');
+                if ($sizeMb > 5) {
+                    $errors[] = $file->getName() . ' exceeds the 5MB size limit.';
+                    continue;
+                }
+
+                // Validate mime type
+                $mime = $file->getMimeType();
+                $allowedMimes = [
+                    'image/jpeg', 'image/png', 'image/jpg',
+                    'application/pdf', 
+                    'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                ];
+
+                if (!in_array($mime, $allowedMimes)) {
+                    $errors[] = $file->getName() . ' has an invalid file type.';
+                    continue;
+                }
+
+                $newName = $file->getRandomName();
+                $originalName = $file->getClientName();
+                $fileSize = $file->getSize();
+
+                if ($file->move($uploadPath, $newName)) {
+                    $record = [
+                        'ticket_id'       => $ticketId,
+                        'file_name'       => $originalName,
+                        'file_path'       => "tickets/{$year}/{$ticketId}/{$newName}",
+                        'file_type'       => $mime,
+                        'file_size_bytes' => $fileSize,
+                        'uploaded_at'     => date('Y-m-d H:i:s'),
+                    ];
+                    
+                    $attachmentModel->insert($record);
+                    $record['id'] = $attachmentModel->getInsertID();
+                    $uploadedData[] = $record;
+                } else {
+                    $errors[] = "Failed to move " . $file->getName();
+                }
+            } else {
+                if ($file->getError() !== UPLOAD_ERR_NO_FILE) {
+                    $errors[] = "Error uploading " . $file->getName() . " - " . $file->getErrorString();
+                }
+            }
+        }
+
+        if (empty($uploadedData) && !empty($errors)) {
+            return $this->errorResponse('File upload failed.', $errors);
+        }
+
+        return $this->successResponse('Files uploaded successfully.', [
+            'attachments' => $uploadedData,
+            'errors'      => $errors
+        ]);
+    }
+
+    /**
+     * Download or view an attachment securely.
+     */
+    public function downloadAttachment(int $attachmentId)
+    {
+        $attachmentModel = new TicketAttachmentModel();
+        $attachment = $attachmentModel->find($attachmentId);
+
+        if (!$attachment) {
+            return $this->response->setStatusCode(404)->setBody('Attachment not found.');
+        }
+
+        $ticket = $this->ticketModel->find($attachment['ticket_id']);
+        if (!$ticket) {
+            return $this->response->setStatusCode(404)->setBody('Associated ticket not found.');
+        }
+
+        // Security check
+        $userId = $this->currentUserId();
+        $role = $this->currentUserRole();
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+            return $this->response->setStatusCode(403)->setBody('Forbidden.');
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $attachment['file_path'];
+
+        if (!is_file($fullPath)) {
+            return $this->response->setStatusCode(404)->setBody('File not found on server.');
+        }
+
+        return $this->response->download($fullPath, null)->setFileName($attachment['file_name']);
+    }
+}

@@ -41,7 +41,7 @@ class Cors extends BaseConfig
         parent::__construct();
 
         // Dynamically add production FRONTEND_URL if set in .env
-        $productionUrl = getenv('FRONTEND_URL');
+        $productionUrl = env('APP_FRONTEND_URL');
         if (!empty($productionUrl) && !in_array($productionUrl, $this->default['allowedOrigins'], true)) {
             $this->default['allowedOrigins'][] = rtrim($productionUrl, '/');
         }

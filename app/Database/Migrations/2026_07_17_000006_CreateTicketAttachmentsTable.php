@@ -54,7 +54,7 @@ class CreateTicketAttachmentsTable extends Migration
             ],
             'uploaded_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
         ]);

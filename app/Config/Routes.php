@@ -47,7 +47,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('tickets/queue/(:segment)',          'TicketController::pendingQueue/$1',   ['filter' => 'role:admin,dispatcher']);
         $routes->get('tickets/dispatch/(:segment)',       'TicketController::dispatchQueue/$1',  ['filter' => 'role:admin,dispatcher']);
         $routes->get('tickets/active/(:segment)',         'TicketController::activeTickets/$1',  ['filter' => 'role:admin,dispatcher,worker,driver']);
-        $routes->get('tickets/archive/(:segment)',        'TicketController::archives/$1',       ['filter' => 'role:admin,dispatcher,director']);
+        $routes->get('tickets/archives/(:segment)',       'TicketController::archives/$1',       ['filter' => 'role:admin,dispatcher,director']);
         $routes->get('tickets/stats/(:segment)',          'TicketController::unitStats/$1',      ['filter' => 'role:admin,dispatcher,director']);
 
         // -- Ticket Actions (Admin Role) --
@@ -55,8 +55,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/decline',      'TicketController::decline/$1',        ['filter' => 'role:admin']);
         $routes->patch('tickets/(:segment)/complete',     'TicketController::complete/$1',       ['filter' => 'role:admin,dispatcher,worker,driver']);
 
-        // -- Dispatch (Dispatchers) --
+        // -- Dispatch (Dispatchers & Workers) --
         $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);
+        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:admin,dispatcher,worker,driver']);
+        $routes->get('dispatch/active/all',                       'DispatchController::allActive',               ['filter' => 'role:admin,dispatcher,worker,driver']);
         $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin,dispatcher']);
         $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin,dispatcher']);
         $routes->get('dispatch/worker/(:segment)',                'DispatchController::workerDashboard/$1',      ['filter' => 'role:admin,dispatcher,worker,driver']);

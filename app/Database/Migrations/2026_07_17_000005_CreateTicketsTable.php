@@ -94,7 +94,7 @@ class CreateTicketsTable extends Migration
             ],
             'submitted_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
             'reviewed_at' => [
@@ -113,7 +113,7 @@ class CreateTicketsTable extends Migration
             ],
             'updated_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
                 'extra'   => 'ON UPDATE CURRENT_TIMESTAMP',
             ],

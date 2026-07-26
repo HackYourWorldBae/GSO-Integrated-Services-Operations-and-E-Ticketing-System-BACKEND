@@ -161,13 +161,18 @@ class TicketController extends BaseController
      */
     public function unitStats(string $unitCode): ResponseInterface
     {
+        if (strtoupper($unitCode) === 'ALL') {
+            $stats = $this->ticketModel->getAdvancedStatsByUnit(null);
+            return $this->successResponse('Global statistics retrieved.', ['stats' => $stats]);
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
         }
 
-        $stats = $this->ticketModel->getStatsByUnit($unitId);
+        $stats = $this->ticketModel->getAdvancedStatsByUnit($unitId);
         return $this->successResponse('Unit statistics retrieved.', ['stats' => $stats]);
     }
 
@@ -225,7 +230,9 @@ class TicketController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status'      => 'approved',
             'status_label'=> $isTasu ? 'Trip Scheduled' : 'Queued for Dispatch',
-            'current_step'=> 2,
+            // FGMU/LEAU/SSU: step 3 = Admin Approval active in the 6-step frontend timeline
+            // TASU: step 2 = Approval in the 4-step frontend timeline
+            'current_step'=> $isTasu ? 2 : 3,
             'reviewed_at' => date('Y-m-d H:i:s'),
             'reviewed_by' => $this->currentUserId(),
             'updated_at'  => date('Y-m-d H:i:s'),
@@ -301,20 +308,34 @@ class TicketController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status'       => 'resolved',
             'status_label' => $statusLabel,
-            'current_step' => 4,
-            'is_archived'  => 1,
+            'current_step' => ($unitCode === 'TASU') ? 4 : 6,
             'completed_at' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 
-        // Also mark the active assignment as completed
+        // Mark the active assignment as completed and set worker to available
         $db = Database::connect();
+        
+        // Find personnel assigned to this ticket before we close it
+        $assignments = $db->query(
+            "SELECT personnel_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
+            [$ticketId]
+        )->getResultArray();
+
+        $personnelModel = new \App\Models\PersonnelModel();
+        foreach ($assignments as $a) {
+            $personnelModel->update($a['personnel_id'], [
+                'status' => 'available',
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+        }
+
         $db->query(
             "UPDATE ticket_assignments SET completed_at = NOW() WHERE ticket_id = ? AND completed_at IS NULL",
             [$ticketId]
         );
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket marked as completed and archived.');
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket marked as completed. Awaiting user feedback.');
 
         return $this->successResponse('Ticket completed and archived.', ['ticket_id' => $ticketId, 'status' => 'resolved']);
     }
@@ -356,8 +377,8 @@ class TicketController extends BaseController
                 $fgmuDetails = sanitize_array($body['fgmu']['details'] ?? []);
                 $fgmuModel   = new FgmuTicketDetailModel();
 
-                foreach ($body['fgmu']['services'] as $srv) {
-                    $ticketId = $this->ticketModel->generateTicketId('FGMU', self::UNIT_MAP['FGMU']);
+                foreach ($body['fgmu']['services'] as $idx => $srv) {
+                    $ticketId = $this->ticketModel->generateTicketId('FGMU', self::UNIT_MAP['FGMU'], $idx);
                     $service  = sanitize_string($srv['service'] ?? 'Facilities Maintenance');
 
                     $this->ticketModel->insert([
@@ -368,7 +389,7 @@ class TicketController extends BaseController
                         'description' => sanitize_string($fgmuDetails['job_description'] ?? 'Facilities maintenance request.'),
                         'status'      => 'pending',
                         'status_label'=> 'Pending Approval',
-                        'current_step'=> 1,
+                        'current_step'=> 2,
                         'location'    => sanitize_string($fgmuDetails['college_building'] ?? ''),
                         'office_room' => sanitize_string($fgmuDetails['office_room'] ?? ''),
                         'submitted_at'=> date('Y-m-d H:i:s'),
@@ -392,8 +413,8 @@ class TicketController extends BaseController
                 $leauDetails = sanitize_array($body['leau']['details'] ?? []);
                 $leauModel   = new LeauTicketDetailModel();
 
-                foreach ($body['leau']['services'] as $srv) {
-                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU']);
+                foreach ($body['leau']['services'] as $idx => $srv) {
+                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], $idx);
                     $service  = sanitize_string($srv['service'] ?? 'Janitorial & Landscaping');
 
                     $this->ticketModel->insert([
@@ -404,7 +425,7 @@ class TicketController extends BaseController
                         'description' => sanitize_string($leauDetails['job_description'] ?? 'Grounds maintenance request.'),
                         'status'      => 'pending',
                         'status_label'=> 'Pending Approval',
-                        'current_step'=> 1,
+                        'current_step'=> 2,
                         'location'    => sanitize_string($leauDetails['college_building'] ?? ''),
                         'office_room' => sanitize_string($leauDetails['office_room'] ?? ''),
                         'submitted_at'=> date('Y-m-d H:i:s'),
@@ -683,10 +704,15 @@ class TicketController extends BaseController
             unset($detail);
         }
 
+        $attachmentsMap = $this->buildAttachmentMap($db, $ticketIds);
+
         foreach ($tickets as &$ticket) {
             $id = $ticket['id'];
+            
+            // Critical for frontend timeline and categorizations
+            $ticket['unit_code'] = array_search($ticket['unit_id'], self::UNIT_MAP) ?: null;
 
-            $ticket['details'] = match($ticket['unit_id']) {
+            $ticket['details'] = match((int) $ticket['unit_id']) {
                 1       => $fgmuDetails[$id]  ?? null,
                 2       => $leauDetails[$id]  ?? null,
                 3       => $ssuVpDetails[$id] ?? $ssuIrDetails[$id] ?? null,
@@ -694,7 +720,8 @@ class TicketController extends BaseController
                 default => null,
             };
 
-            $ticket['assignment'] = $assignments[$id] ?? null;
+            $ticket['assignment']  = $assignments[$id] ?? null;
+            $ticket['attachments'] = $attachmentsMap[$id] ?? [];
         }
         unset($ticket);
 
@@ -716,6 +743,26 @@ class TicketController extends BaseController
         $map = [];
         foreach ($rows as $row) {
             $map[$row[$keyColumn]] = $row;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Query attachments and return a grouped map keyed by ticket_id.
+     */
+    private function buildAttachmentMap(\CodeIgniter\Database\ConnectionInterface $db, array $ticketIds): array
+    {
+        if (empty($ticketIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+        $rows = $db->query("SELECT * FROM ticket_attachments WHERE ticket_id IN ({$placeholders})", $ticketIds)->getResultArray();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $map[$row['ticket_id']][] = $row;
         }
 
         return $map;
@@ -773,7 +820,9 @@ class TicketController extends BaseController
 
         $files = $this->request->getFiles();
 
-        if (empty($files) || !isset($files['attachments'])) {
+        $attachments = $this->request->getFileMultiple('attachments') ?? ($files['attachments'] ?? null);
+
+        if (empty($attachments)) {
             return $this->errorResponse('No files uploaded. Use "attachments[]" key in your form-data.');
         }
 

@@ -25,8 +25,14 @@ class DatabaseSeeder extends Seeder
 
         // 3. Feedback delay reason codes
         $this->call('FeedbackDelayReasonsSeeder');
+        
+        // 4. Mock Users for testing
+        $this->call('UsersSeeder');
 
-        // 4. TASU vehicle fleet (17 vehicles) — depends on UnitsSeeder (unit_id: 4)
+        // 5. Vehicles
         $this->call('VehiclesSeeder');
+
+        // 6. Personnel
+        $this->call('PersonnelSeeder');
     }
 }

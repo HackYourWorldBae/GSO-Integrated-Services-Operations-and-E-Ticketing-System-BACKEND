@@ -59,7 +59,7 @@ class CreateTicketLogsTable extends Migration
             ],
             'created_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
         ]);

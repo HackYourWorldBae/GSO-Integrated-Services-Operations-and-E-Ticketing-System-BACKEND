@@ -32,7 +32,7 @@ class AuthController extends BaseController
     /**
      * Login
      *
-     * Accepts either a 7-digit student ID or an email address as identifier.
+     * Accepts an email address as identifier.
      * Returns a signed JWT access token on success.
      */
     public function login(): ResponseInterface
@@ -46,24 +46,18 @@ class AuthController extends BaseController
         // --- Input Validation ---
         if (empty($identifier) || empty($password)) {
             return $this->errorResponse(
-                'Please provide both your Student ID / Email and password.',
+                'Please provide both your Email and password.',
                 ['identifier' => ['Required.'], 'password' => ['Required.']],
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
         }
 
         // --- Identify User Type by Identifier Format ---
-        $user = null;
-
-        if (preg_match('/^[0-9]{7}$/', $identifier)) {
-            // Student: 7-digit ID
-            $user = $this->userModel->findByStudentId($identifier);
-        } elseif (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
-            // Employee / Admin / Staff: Email address
+        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
             $user = $this->userModel->findByEmail($identifier);
         } else {
             return $this->errorResponse(
-                'Identifier must be a valid 7-digit Student ID or an email address.',
+                'Identifier must be a valid email address.',
                 [],
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
@@ -72,7 +66,7 @@ class AuthController extends BaseController
         // --- User Not Found ---
         if (!$user) {
             return $this->errorResponse(
-                'Invalid credentials. Please check your ID/Email and password.',
+                'Invalid credentials. Please check your Email and password.',
                 [],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );

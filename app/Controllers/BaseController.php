@@ -37,6 +37,7 @@ abstract class BaseController extends Controller
     public function initController(RequestInterface $request, ResponseInterface $response, LoggerInterface $logger): void
     {
         parent::initController($request, $response, $logger);
+        helper('sanitize');
     }
 
     // -------------------------------------------------------------------------

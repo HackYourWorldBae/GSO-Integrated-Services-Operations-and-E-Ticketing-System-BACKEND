@@ -68,6 +68,33 @@ class TicketAssignmentModel extends Model
     }
 
     /**
+     * Get ALL active assignments across all workers (for generic testing dashboard).
+     */
+    public function getAllActiveAssignments(): array
+    {
+        $db = \Config\Database::connect();
+
+        return $db->query("
+            SELECT
+                ta.*,
+                t.id            AS ticket_id,
+                t.service_type,
+                t.description,
+                t.status        AS ticket_status,
+                t.location,
+                t.office_room,
+                t.submitted_at,
+                p.name          AS worker_name,
+                p.status        AS worker_status
+            FROM ticket_assignments ta
+            JOIN tickets t ON t.id = ta.ticket_id
+            JOIN personnel p ON p.id = ta.personnel_id
+            WHERE ta.completed_at IS NULL
+            ORDER BY ta.assigned_at DESC
+        ")->getResultArray();
+    }
+
+    /**
      * Get completed (historical) assignments for a worker.
      */
     public function getWorkerHistory(string $personnelId): array

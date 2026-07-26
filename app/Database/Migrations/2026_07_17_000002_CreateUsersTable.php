@@ -11,7 +11,6 @@ use CodeIgniter\Database\Migration;
  *   student, employee, admin, dispatcher, director, worker, driver
  *
  * - `id`                : UUID (VARCHAR 36) — no auto-increment
- * - `student_id_number` : Used as the login identifier for students
  * - `unit_id`           : FK to units — NULL for students; set for unit staff
  * - `is_verified`       : TINYINT 0/1 — email verification gate
  * - `status`            : Controls login access (Active, Pending, Rejected, Suspended)
@@ -90,12 +89,12 @@ class CreateUsersTable extends Migration
             ],
             'created_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
             'updated_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
                 'extra'   => 'ON UPDATE CURRENT_TIMESTAMP',
             ],
@@ -103,7 +102,6 @@ class CreateUsersTable extends Migration
 
         $this->forge->addPrimaryKey('id');
         $this->forge->addUniqueKey('email');
-        $this->forge->addUniqueKey('student_id_number');
         $this->forge->addKey('role',   false, false, 'idx_users_role');
         $this->forge->addKey('status', false, false, 'idx_users_status');
 

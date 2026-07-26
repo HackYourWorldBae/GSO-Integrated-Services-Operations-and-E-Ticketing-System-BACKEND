@@ -30,7 +30,6 @@ class UserModel extends Model
         'contact_number',
         'role',
         'unit_id',
-        'student_id_number',
         'id_card_image',
         'status',
         'is_verified',
@@ -63,7 +62,7 @@ class UserModel extends Model
      */
     public function findByStudentId(string $studentId): ?array
     {
-        return $this->where('student_id_number', $studentId)
+        return $this->where($studentId)
                     ->where('status', 'Active')
                     ->first();
     }

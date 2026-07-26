@@ -67,7 +67,7 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
             ],
             'assigned_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
             'dispatched_at' => [

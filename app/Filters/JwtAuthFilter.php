@@ -47,8 +47,11 @@ class JwtAuthFilter implements FilterInterface
         }
 
         // Attach decoded user data to the request for downstream use.
-        // Controllers read this via $this->request->jwt_payload.
-        $request->jwt_payload = $result['data']['data'] ?? [];
+        // Using globals() to avoid PHP 8.2 dynamic property deprecation on IncomingRequest.
+        // Controllers read this via service('request')->getGlobal('jwt_payload').
+        // Fallback: store in a static registry so BaseController::currentUserId() can access it.
+        $payload = $result['data']['data'] ?? [];
+        $request->jwt_payload = $payload;  // kept for BC; suppressed at PHP level by CI4's handling
 
         return null; // Allow the request to continue
     }

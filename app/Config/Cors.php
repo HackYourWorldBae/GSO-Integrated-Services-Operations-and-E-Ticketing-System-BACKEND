@@ -27,7 +27,7 @@ class Cors extends BaseConfig
         'supportsCredentials' => true,
 
         // Allow the Authorization header so Bearer JWT tokens can be sent.
-        'allowedHeaders' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-CSRF-TOKEN'],
+        'allowedHeaders' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-CSRF-TOKEN', 'X-Content-Type-Options'],
 
         'exposedHeaders' => [],
 

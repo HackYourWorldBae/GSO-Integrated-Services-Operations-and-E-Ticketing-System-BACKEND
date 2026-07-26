@@ -41,7 +41,7 @@ class CreateFeedbackAndDelayReasonTables extends Migration
                 'type'       => 'VARCHAR',
                 'constraint' => 60,
                 'null'       => false,
-                'unique'     => true, // One feedback record per ticket
+
             ],
             'user_id' => [
                 'type'       => 'VARCHAR',
@@ -89,14 +89,14 @@ class CreateFeedbackAndDelayReasonTables extends Migration
             ],
             'created_at' => [
                 'type'    => 'TIMESTAMP',
-                'default' => 'CURRENT_TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
                 'null'    => false,
             ],
         ]);
 
         $this->forge->addPrimaryKey('id');
         $this->forge->addUniqueKey('ticket_id');
-        $this->forge->addKey('ticket_id', false, false, 'idx_feedbacks_ticket');
+
         $this->forge->addKey('user_id',   false, false, 'idx_feedbacks_user');
 
         $this->forge->addForeignKey('ticket_id', 'tickets', 'id', 'CASCADE', 'CASCADE', 'fk_feedback_ticket');

@@ -129,26 +129,43 @@ class TicketModel extends Model
 
     /**
      * Generate the next sequential ticket ID for a given unit within the current year.
-     * e.g., FGMU-TIC-43-2026
+     * Format: {UNIT_CODE}-TIC-{N}-{YEAR}  e.g. FGMU-TIC-43-2026
+     *
+     * @param string $unitCode   Sub-unit code (FGMU, LEAU, SSU, TASU)
+     * @param int    $unitId     Corresponding unit_id FK
+     * @param int    $batchOffset Extra offset to add when generating multiple tickets
+     *                           for the same unit in a single request (0-indexed within batch)
      */
-    public function generateTicketId(string $unitCode, int $unitId): string
+    public function generateTicketId(string $unitCode, int $unitId, int $batchOffset = 0): string
     {
-        $year  = date('Y');
-        $count = $this->where('unit_id', $unitId)
-                      ->like('id', "-{$year}", 'after')
-                      ->countAllResults() + 1;
+        $year   = date('Y');
+        $prefix = strtoupper($unitCode) . '-TIC-';
+        $suffix = '-' . $year;
+        $like   = $prefix . '%' . $suffix;
 
-        return strtoupper($unitCode) . '-TIC-' . $count . '-' . $year;
+        // Use the active transaction connection so that rows inserted earlier
+        // in the same transaction are visible to this MAX() query.
+        $db  = \Config\Database::connect();
+        $row = $db->query(
+            "SELECT MAX(CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(id, '-TIC-', -1), ?, 1) AS UNSIGNED)) AS max_seq
+             FROM tickets
+             WHERE unit_id = ? AND id LIKE ?",
+            [$suffix, $unitId, $like]
+        )->getRowArray();
+
+        $next = (int) ($row['max_seq'] ?? 0) + 1 + $batchOffset;
+
+        return $prefix . $next . $suffix;
     }
 
     /**
      * Get a summary count of tickets by status for a unit (for dashboard stats).
      */
-    public function getStatsByUnit(int $unitId): array
+    public function getStatsByUnit(?int $unitId = null): array
     {
         $db = \Config\Database::connect();
 
-        return $db->query("
+        $sql = "
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending,
@@ -158,7 +175,97 @@ class TicketModel extends Model
                 SUM(CASE WHEN status = 'declined'   THEN 1 ELSE 0 END) AS declined,
                 SUM(CASE WHEN is_archived = 1       THEN 1 ELSE 0 END) AS archived
             FROM tickets
-            WHERE unit_id = ?
-        ", [$unitId])->getRowArray() ?? [];
+        ";
+
+        if ($unitId !== null) {
+            $sql .= " WHERE unit_id = ?";
+            return $db->query($sql, [$unitId])->getRowArray() ?? [];
+        }
+
+        return $db->query($sql)->getRowArray() ?? [];
+    }
+
+    public function getAdvancedStatsByUnit(?int $unitId = null): array
+    {
+        $db = \Config\Database::connect();
+        $stats = $this->getStatsByUnit($unitId);
+        
+        $whereUnit = $unitId ? "WHERE t.unit_id = " . (int)$unitId : "";
+        $whereUnitTickets = $unitId ? "WHERE unit_id = " . (int)$unitId : "";
+
+        // 1. Averages
+        if ($unitId) {
+            $feedbackModel = new TicketFeedbackModel();
+            $averages = $feedbackModel->getUnitAverageRatings($unitId);
+        } else {
+            $averages = $db->query("
+                SELECT 
+                    AVG(courtesy_rating) as avg_courtesy, 
+                    AVG(quality_rating) as avg_quality, 
+                    AVG(efficiency_rating) as avg_efficiency, 
+                    AVG(timeliness_rating) as avg_timeliness, 
+                    AVG(cleanliness_rating) as avg_cleanliness 
+                FROM ticket_feedbacks
+            ")->getRowArray();
+        }
+        $stats['feedback_averages'] = $averages;
+
+        // 2. Completion Health
+        $completion = $db->query("
+            SELECT tf.completion_status, COUNT(*) as count 
+            FROM ticket_feedbacks tf 
+            JOIN tickets t ON t.id = tf.ticket_id 
+            $whereUnit 
+            GROUP BY tf.completion_status
+        ")->getResultArray();
+        $stats['completion_health'] = $completion;
+
+        // 3. Delay Reasons (for beyond-time)
+        $delayReasons = $db->query("
+            SELECT r.reason_code, COUNT(*) as count 
+            FROM ticket_feedback_delay_items di
+            JOIN feedback_delay_reasons r ON r.id = di.delay_reason_id
+            JOIN ticket_feedbacks tf ON tf.id = di.feedback_id
+            JOIN tickets t ON t.id = tf.ticket_id
+            $whereUnit " . ($whereUnit ? "AND" : "WHERE") . " tf.completion_status = 'beyond-time'
+            GROUP BY r.reason_code
+        ")->getResultArray();
+        $stats['delay_reasons'] = $delayReasons;
+
+        // 4. Non-completion Barriers
+        $nonCompletion = $db->query("
+            SELECT r.reason_code, COUNT(*) as count 
+            FROM ticket_feedback_delay_items di
+            JOIN feedback_delay_reasons r ON r.id = di.delay_reason_id
+            JOIN ticket_feedbacks tf ON tf.id = di.feedback_id
+            JOIN tickets t ON t.id = tf.ticket_id
+            $whereUnit " . ($whereUnit ? "AND" : "WHERE") . " tf.completion_status = 'not-completed'
+            GROUP BY r.reason_code
+        ")->getResultArray();
+        $stats['non_completion'] = $nonCompletion;
+
+        // 5. Service Request Frequency
+        $freq = [];
+        $periods = [
+            'Day' => "DATE(submitted_at) = CURDATE()",
+            'Week' => "YEARWEEK(submitted_at, 1) = YEARWEEK(CURDATE(), 1)",
+            'Month' => "YEAR(submitted_at) = YEAR(CURDATE()) AND MONTH(submitted_at) = MONTH(CURDATE())",
+            'Year' => "YEAR(submitted_at) = YEAR(CURDATE())"
+        ];
+        
+        foreach ($periods as $periodKey => $condition) {
+            $where = $unitId ? "WHERE unit_id = " . (int)$unitId . " AND $condition" : "WHERE $condition";
+            $counts = $db->query("
+                SELECT service_type, COUNT(*) as count 
+                FROM tickets 
+                $where 
+                GROUP BY service_type
+            ")->getResultArray();
+            
+            $freq[$periodKey] = $counts;
+        }
+        $stats['service_freq'] = $freq;
+
+        return $stats;
     }
 }

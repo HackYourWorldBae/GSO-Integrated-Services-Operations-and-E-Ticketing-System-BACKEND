@@ -89,8 +89,13 @@ class DispatchController extends BaseController
 
         // Determine TASU-specific labels
         $isTasu      = ((int) $ticket['unit_id']) === 4;
-        $workerStatus = $isTasu ? 'on_trip' : 'working';
-        $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
+        
+        // When just dispatching, the worker is not working yet!
+        // We leave the status as 'available'. The database handles the assignment via the `ticket_assignments` table.
+        $workerStatus = 'available';
+        
+        // Update ticket to indicate it's been dispatched but NOT started
+        $statusLabel  = $isTasu ? 'Dispatched - Waiting for Departure' : 'Dispatched / Scheduled';
 
         // --- Insert assignment record ---
         $assignmentId = $this->assignmentModel->insert([
@@ -104,14 +109,16 @@ class DispatchController extends BaseController
         ], true); // true = return inserted ID
 
         // --- Update ticket status to processing ---
+        // Setting it to 'processing' moves it out of the dispatcher's pending queue,
+        // but 'status_label' ensures everyone knows it's only dispatched, not started.
         $this->ticketModel->update($ticketId, [
             'status'       => 'processing',
             'status_label' => $statusLabel,
-            'current_step' => 3,
+            'current_step' => $isTasu ? 3 : 4, // 4 = Dispatch & Schedule for FGMU/LEAU
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 
-        // --- Update worker status ---
+        // --- Update worker status (remain available until they start the job) ---
         $this->personnelModel->update($personnelId, [
             'status'     => $workerStatus,
             'updated_at' => date('Y-m-d H:i:s'),
@@ -234,5 +241,55 @@ class DispatchController extends BaseController
         $history = $this->assignmentModel->getWorkerHistory($personnelId);
 
         return $this->successResponse('Worker history retrieved.', ['history' => $history]);
+    }
+
+    /**
+     * Start a job (Worker Dashboard).
+     * Updates the assignment to working, sets ticket step to 4, and changes personnel status.
+     *
+     * Body: { ticket_id, personnel_id }
+     */
+    public function startJob(): ResponseInterface
+    {
+        $body = $this->request->getJSON(true) ?? [];
+        $ticketId    = sanitize_string($body['ticket_id'] ?? '');
+        $personnelId = sanitize_string($body['personnel_id'] ?? '');
+
+        if (!$ticketId || !$personnelId) {
+            return $this->errorResponse('ticket_id and personnel_id are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) return $this->notFoundResponse('Ticket');
+
+        $isTasu      = ((int) $ticket['unit_id']) === 4;
+        $workerStatus = $isTasu ? 'on_trip' : 'working';
+        $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
+
+        // Set ticket step to 5 (Job Started)
+        $this->ticketModel->update($ticketId, [
+            'status_label' => $statusLabel,
+            'current_step' => $isTasu ? 4 : 5,
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        // Lock personnel status to working
+        $this->personnelModel->update($personnelId, [
+            'status'     => $workerStatus,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Worker has actively started the job.");
+
+        return $this->successResponse('Job started successfully.');
+    }
+
+    /**
+     * Get ALL active assignments (for generic testing worker dashboard).
+     */
+    public function allActive(): ResponseInterface
+    {
+        $activeJobs = $this->assignmentModel->getAllActiveAssignments();
+        return $this->successResponse('All active assignments retrieved.', ['active_jobs' => $activeJobs]);
     }
 }

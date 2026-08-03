@@ -46,8 +46,17 @@ class TicketModel extends Model
      */
     public function getActiveByUser(string $userId): array
     {
+        // Active tickets are:
+        // 1. is_archived = 0 (Unrated tickets stay here forever)
+        // 2. is_archived = 1 but rated/declined within the last 24 hours (Stays for 1 day)
         return $this->where('user_id', $userId)
-                    ->where('is_archived', 0)
+                    ->groupStart()
+                        ->where('is_archived', 0)
+                        ->orGroupStart()
+                            ->where('is_archived', 1)
+                            ->where('updated_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)')
+                        ->groupEnd()
+                    ->groupEnd()
                     ->orderBy('submitted_at', 'DESC')
                     ->findAll();
     }
@@ -57,8 +66,11 @@ class TicketModel extends Model
      */
     public function getArchivedByUser(string $userId): array
     {
+        // Archived/Completed tickets are:
+        // is_archived = 1 AND it has been more than 1 day since it was archived
         return $this->where('user_id', $userId)
                     ->where('is_archived', 1)
+                    ->where('updated_at < DATE_SUB(NOW(), INTERVAL 1 DAY)')
                     ->orderBy('submitted_at', 'DESC')
                     ->findAll();
     }
@@ -171,7 +183,9 @@ class TicketModel extends Model
                 SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending,
                 SUM(CASE WHEN status = 'approved'   THEN 1 ELSE 0 END) AS approved,
                 SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
-                SUM(CASE WHEN status = 'resolved'   THEN 1 ELSE 0 END) AS resolved,
+                SUM(CASE WHEN status = 'processing' AND status_label IN ('Dispatched', 'Dispatched (Scheduled)', 'Dispatched / Scheduled') THEN 1 ELSE 0 END) AS scheduled,
+                SUM(CASE WHEN status = 'processing' AND status_label IN ('On Route / In Progress', 'Job Started') THEN 1 ELSE 0 END) AS active_working,
+                SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS resolved,
                 SUM(CASE WHEN status = 'declined'   THEN 1 ELSE 0 END) AS declined,
                 SUM(CASE WHEN is_archived = 1       THEN 1 ELSE 0 END) AS archived
             FROM tickets
@@ -247,10 +261,10 @@ class TicketModel extends Model
         // 5. Service Request Frequency
         $freq = [];
         $periods = [
-            'Day' => "DATE(submitted_at) = CURDATE()",
-            'Week' => "YEARWEEK(submitted_at, 1) = YEARWEEK(CURDATE(), 1)",
-            'Month' => "YEAR(submitted_at) = YEAR(CURDATE()) AND MONTH(submitted_at) = MONTH(CURDATE())",
-            'Year' => "YEAR(submitted_at) = YEAR(CURDATE())"
+            'Day' => "submitted_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)",
+            'Week' => "submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            'Month' => "submitted_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'Year' => "submitted_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
         ];
         
         foreach ($periods as $periodKey => $condition) {

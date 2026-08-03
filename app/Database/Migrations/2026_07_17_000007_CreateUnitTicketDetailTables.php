@@ -68,7 +68,10 @@ class CreateUnitTicketDetailTables extends Migration
             'contact_no'         => ['type' => 'VARCHAR', 'constraint' => 30],
             'driver_name'        => ['type' => 'VARCHAR', 'constraint' => 255, 'null' => true, 'default' => null],
             'driver_contact'     => ['type' => 'VARCHAR', 'constraint' => 30,  'null' => true, 'default' => null],
-            'complete_address'   => ['type' => 'TEXT'],
+            'house_street'       => ['type' => 'VARCHAR', 'constraint' => 255],
+            'barangay'           => ['type' => 'VARCHAR', 'constraint' => 100],
+            'city_municipality'  => ['type' => 'VARCHAR', 'constraint' => 100],
+            'province'           => ['type' => 'VARCHAR', 'constraint' => 100],
             'registered_owner'   => ['type' => 'VARCHAR', 'constraint' => 255],
             'plate_no'           => ['type' => 'VARCHAR', 'constraint' => 30],
             'make_series'        => ['type' => 'VARCHAR', 'constraint' => 150],
@@ -78,7 +81,6 @@ class CreateUnitTicketDetailTables extends Migration
             'privacy_agreed'     => ['type' => 'TINYINT', 'constraint' => 1, 'default' => 1],
             'disclosure_agreed'  => ['type' => 'TINYINT', 'constraint' => 1, 'default' => 1],
             'applicant_signature'=> ['type' => 'LONGTEXT', 'null' => true],
-            'charge_slip_no'     => ['type' => 'VARCHAR', 'constraint' => 60, 'null' => true, 'default' => null],
         ]);
         $this->forge->addPrimaryKey('ticket_id');
         $this->forge->addKey('plate_no', false, false, 'idx_ssu_pass_plate');

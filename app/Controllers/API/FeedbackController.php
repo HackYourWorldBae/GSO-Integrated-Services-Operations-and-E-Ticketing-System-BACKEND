@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\TicketFeedbackModel;
 use App\Models\TicketModel;
 use App\Models\TicketLogModel;
+use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -23,12 +24,14 @@ class FeedbackController extends BaseController
     private TicketFeedbackModel $feedbackModel;
     private TicketModel $ticketModel;
     private TicketLogModel $logModel;
+    private NotificationModel $notificationModel;
 
     public function __construct()
     {
         $this->feedbackModel = new TicketFeedbackModel();
         $this->ticketModel   = new TicketModel();
         $this->logModel      = new TicketLogModel();
+        $this->notificationModel = new NotificationModel();
     }
 
     /**
@@ -138,6 +141,16 @@ class FeedbackController extends BaseController
         }
 
         $this->logModel->logAction($ticketId, $userId, 'Feedback Submitted', "Rating: {$completionStatus}");
+
+        $admins = $db->query("SELECT id FROM users WHERE role IN ('admin', 'dispatcher') AND unit_id = ?", [$ticket['unit_id']])->getResultArray();
+        foreach($admins as $admin) {
+            $this->notificationModel->createNotification(
+                $admin['id'], 
+                'info', 
+                "Feedback Received", 
+                "User has submitted feedback for Ticket #{$ticketId}."
+            );
+        }
 
         return $this->successResponse('Feedback submitted successfully.', [
             'feedback_id' => $feedbackId,

@@ -35,24 +35,45 @@ class PersonnelModel extends Model
     {
         $db = \Config\Database::connect();
 
-        // Left join assignment to show what each worker is currently assigned to.
-        return $db->query("
-            SELECT
-                p.*,
-                ta.ticket_id       AS assigned_ticket_id,
-                ta.task_notes      AS ticket_task,
-                ta.implementation_date,
-                t.service_type,
-                t.status           AS ticket_status
-            FROM personnel p
-            LEFT JOIN ticket_assignments ta
-                ON ta.personnel_id = p.id
-                AND ta.completed_at IS NULL
-            LEFT JOIN tickets t
-                ON t.id = ta.ticket_id
-            WHERE p.unit_id = ?
-            ORDER BY p.specialty ASC, p.name ASC
-        ", [$unitId])->getResultArray();
+        $personnel = $this->where('unit_id', $unitId)
+                          ->orderBy('specialty', 'ASC')
+                          ->orderBy('name', 'ASC')
+                          ->findAll();
+
+        if (empty($personnel)) {
+            return [];
+        }
+
+        $personnelIds = array_column($personnel, 'id');
+        
+        $assignments = $db->table('ticket_assignments ta')
+            ->select('ta.*, t.service_type, t.status as ticket_status')
+            ->join('tickets t', 't.id = ta.ticket_id', 'left')
+            ->whereIn('ta.personnel_id', $personnelIds)
+            ->where('ta.completed_at IS NULL')
+            ->orderBy('ta.assigned_at', 'ASC')
+            ->get()->getResultArray();
+
+        $assignmentMap = [];
+        foreach ($assignments as $a) {
+            $assignmentMap[$a['personnel_id']][] = $a;
+        }
+
+        foreach ($personnel as &$p) {
+            $p['assignments'] = $assignmentMap[$p['id']] ?? [];
+            
+            // To maintain backward compatibility, extract current and next
+            $p['assigned_ticket_id'] = $p['assignments'][0]['ticket_id'] ?? null;
+            $p['ticket_task'] = $p['assignments'][0]['task_notes'] ?? null;
+            $p['implementation_date'] = $p['assignments'][0]['implementation_date'] ?? null;
+            $p['ticket_status'] = $p['assignments'][0]['ticket_status'] ?? null;
+            $p['service_type'] = $p['assignments'][0]['service_type'] ?? null;
+            
+            $p['next_assignment_id'] = $p['assignments'][1]['ticket_id'] ?? null;
+            $p['next_ticket_task'] = $p['assignments'][1]['task_notes'] ?? null;
+        }
+
+        return $personnel;
     }
 
     /**

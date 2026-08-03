@@ -19,7 +19,10 @@ class SsuVehiclePassDetailModel extends Model
         'contact_no',
         'driver_name',
         'driver_contact',
-        'complete_address',
+        'house_street',
+        'barangay',
+        'city_municipality',
+        'province',
         'registered_owner',
         'plate_no',
         'make_series',
@@ -29,6 +32,5 @@ class SsuVehiclePassDetailModel extends Model
         'privacy_agreed',
         'disclosure_agreed',
         'applicant_signature',
-        'charge_slip_no',
     ];
 }

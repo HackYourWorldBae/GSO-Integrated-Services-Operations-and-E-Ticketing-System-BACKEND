@@ -32,6 +32,10 @@ class JwtService
         $this->secret    = $secret;
         $this->expiresIn = (int) env('JWT_EXPIRES_IN', 3600);     // default 1 hour
         $this->refreshIn = (int) env('JWT_REFRESH_IN', 604800);   // default 7 days
+        
+        // Add a 60-second leeway to tolerate clock skew between the time the token
+        // is issued and when it is immediately validated on subsequent requests.
+        JWT::$leeway = 60;
     }
 
     /**

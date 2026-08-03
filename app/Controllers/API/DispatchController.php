@@ -8,6 +8,7 @@ use App\Models\TicketModel;
 use App\Models\TicketAssignmentModel;
 use App\Models\TicketMaterialModel;
 use App\Models\TicketLogModel;
+use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -30,6 +31,7 @@ class DispatchController extends BaseController
     private TicketAssignmentModel $assignmentModel;
     private TicketMaterialModel $materialModel;
     private TicketLogModel $logModel;
+    private NotificationModel $notificationModel;
 
     public function __construct()
     {
@@ -38,6 +40,7 @@ class DispatchController extends BaseController
         $this->assignmentModel = new TicketAssignmentModel();
         $this->materialModel   = new TicketMaterialModel();
         $this->logModel        = new TicketLogModel();
+        $this->notificationModel = new NotificationModel();
     }
 
     /**
@@ -73,8 +76,8 @@ class DispatchController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
-        if (!in_array($ticket['status'], ['approved', 'pending'], true)) {
-            return $this->errorResponse("Ticket must be approved or pending before assigning. Current status: {$ticket['status']}.");
+        if (!in_array($ticket['status'], ['approved', 'pending', 'processing'], true)) {
+            return $this->errorResponse("Ticket must be approved, pending, or processing before assigning. Current status: {$ticket['status']}.");
         }
 
         $worker = $this->personnelModel->find($personnelId);
@@ -136,6 +139,13 @@ class DispatchController extends BaseController
             $detail .= " — scheduled for {$implementationDate}";
         }
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Worker Assigned', $detail);
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'], 
+            'info', 
+            "Ticket #{$ticketId} Dispatched", 
+            $implementationDate ? "Your ticket has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket."
+        );
 
         return $this->successResponse('Worker assigned successfully.', [
             'assignment_id' => $assignmentId,

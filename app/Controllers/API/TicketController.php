@@ -11,6 +11,7 @@ use App\Models\SsuIncidentDetailModel;
 use App\Models\TasuBookingDetailModel;
 use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
+use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -34,6 +35,7 @@ class TicketController extends BaseController
 {
     private TicketModel $ticketModel;
     private TicketLogModel $logModel;
+    private NotificationModel $notificationModel;
 
     // Unit code => Unit ID mapping (mirrors the seeds in the schema)
     private const UNIT_MAP = [
@@ -45,8 +47,9 @@ class TicketController extends BaseController
 
     public function __construct()
     {
-        $this->ticketModel = new TicketModel();
-        $this->logModel    = new TicketLogModel();
+        $this->ticketModel       = new TicketModel();
+        $this->logModel          = new TicketLogModel();
+        $this->notificationModel = new NotificationModel();
     }
 
     // -------------------------------------------------------------------------
@@ -227,18 +230,56 @@ class TicketController extends BaseController
         $unitId = (int) $ticket['unit_id'];
         $isTasu = $unitId === 4;
 
-        $this->ticketModel->update($ticketId, [
-            'status'      => 'approved',
-            'status_label'=> $isTasu ? 'Trip Scheduled' : 'Queued for Dispatch',
+        $currentStep = 3;
+        if ($isTasu) {
+            $currentStep = 2;
+        } elseif ($unitId === 3 && $ticket['service_type'] === 'Vehicle Pass Application') {
+            $currentStep = 4;
+        }
+
+        $statusLabel = 'Queued for Dispatch';
+        $logMessage = 'Ticket approved — queued for dispatch.';
+        $newStatus = 'approved';
+
+        if ($isTasu) {
+            $statusLabel = 'Trip Scheduled';
+        } elseif ($unitId === 3 && $ticket['service_type'] === 'Vehicle Pass Application') {
+            $statusLabel = 'Ready for Pickup';
+            $logMessage = 'Ticket approved — vehicle pass sticker is ready for pickup.';
+        } elseif ($unitId === 3 && $ticket['service_type'] === 'Incident Report') {
+            $statusLabel = 'Report Acknowledged & Closed';
+            $logMessage = 'Incident report has been acknowledged and actioned. Ticket marked as closed.';
+            $newStatus = 'closed';
+            $currentStep = 3;
+        }
+
+        $updateData = [
+            'status'      => $newStatus,
+            'status_label'=> $statusLabel,
             // FGMU/LEAU/SSU: step 3 = Admin Approval active in the 6-step frontend timeline
             // TASU: step 2 = Approval in the 4-step frontend timeline
-            'current_step'=> $isTasu ? 2 : 3,
+            // SSU Vehicle Pass: step 4 = Ready for Pickup
+            'current_step'=> $currentStep,
             'reviewed_at' => date('Y-m-d H:i:s'),
             'reviewed_by' => $this->currentUserId(),
             'updated_at'  => date('Y-m-d H:i:s'),
-        ]);
+        ];
+        
+        if ($newStatus === 'closed') {
+            $updateData['is_archived'] = 1;
+            $updateData['completed_at'] = date('Y-m-d H:i:s');
+        }
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket approved — queued for dispatch.');
+        $this->ticketModel->update($ticketId, $updateData);
+
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'], 
+            'success', 
+            "Ticket #{$ticketId} Approved", 
+            "Your request for {$ticket['service_type']} has been approved."
+        );
 
         return $this->successResponse('Ticket approved successfully.', ['ticket_id' => $ticketId, 'status' => 'approved']);
     }
@@ -269,13 +310,21 @@ class TicketController extends BaseController
             'status'        => 'declined',
             'status_label'  => 'Declined',
             'decline_reason'=> $reason,
+            'is_archived'   => 1,
             'current_step'  => 1,
             'reviewed_at'   => date('Y-m-d H:i:s'),
             'reviewed_by'   => $this->currentUserId(),
             'updated_at'    => date('Y-m-d H:i:s'),
         ]);
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', "Ticket declined. Reason: {$reason}");
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Declined', "Ticket declined. Reason: {$reason}");
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'], 
+            'warning', 
+            "Ticket #{$ticketId} Declined", 
+            "Your request was declined. Reason: {$reason}"
+        );
 
         return $this->successResponse('Ticket declined.', ['ticket_id' => $ticketId, 'status' => 'declined']);
     }
@@ -305,13 +354,22 @@ class TicketController extends BaseController
             default => 'Completed',
         };
 
-        $this->ticketModel->update($ticketId, [
-            'status'       => 'resolved',
+        $newStatus = ($unitCode === 'SSU') ? 'closed' : 'resolved';
+        $logMessage = ($unitCode === 'SSU') ? 'Sticker pass issued. Ticket marked as closed.' : 'Ticket marked as completed. Awaiting user feedback.';
+
+        $updateData = [
+            'status'       => $newStatus,
             'status_label' => $statusLabel,
-            'current_step' => ($unitCode === 'TASU') ? 4 : 6,
+            'current_step' => ($unitCode === 'TASU') ? 4 : (($unitCode === 'SSU') ? 5 : 6),
             'completed_at' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
-        ]);
+        ];
+        
+        if ($unitCode === 'SSU') {
+            $updateData['is_archived'] = 1;
+        }
+
+        $this->ticketModel->update($ticketId, $updateData);
 
         // Mark the active assignment as completed and set worker to available
         $db = Database::connect();
@@ -335,9 +393,16 @@ class TicketController extends BaseController
             [$ticketId]
         );
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', 'Ticket marked as completed. Awaiting user feedback.');
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
-        return $this->successResponse('Ticket completed and archived.', ['ticket_id' => $ticketId, 'status' => 'resolved']);
+        $this->notificationModel->createNotification(
+            $ticket['user_id'], 
+            'success', 
+            "Ticket #{$ticketId} Completed", 
+            "Your request for {$ticket['service_type']} has been marked as completed."
+        );
+
+        return $this->successResponse('Ticket completed and archived.', ['ticket_id' => $ticketId, 'status' => $newStatus]);
     }
 
     // -------------------------------------------------------------------------
@@ -473,7 +538,10 @@ class TicketController extends BaseController
                     'contact_no'       => sanitize_string($vp['contactNo'] ?? ''),
                     'driver_name'      => sanitize_string($vp['driverName'] ?? ''),
                     'driver_contact'   => sanitize_string($vp['driverContact'] ?? ''),
-                    'complete_address' => sanitize_string($vp['completeAddress'] ?? ''),
+                    'house_street'     => sanitize_string($vp['houseStreet'] ?? ''),
+                    'barangay'         => sanitize_string($vp['barangay'] ?? ''),
+                    'city_municipality'=> sanitize_string($vp['cityMunicipality'] ?? ''),
+                    'province'         => sanitize_string($vp['province'] ?? ''),
                     'registered_owner' => sanitize_string($vd['registeredOwner'] ?? ''),
                     'plate_no'         => $plateNo,
                     'make_series'      => $makeSeries,
@@ -617,6 +685,22 @@ class TicketController extends BaseController
             );
         }
 
+        // --- Notify Admins ---
+        foreach ($createdTickets as $tId) {
+            $t = $this->ticketModel->find($tId);
+            if ($t) {
+                $admins = $db->query("SELECT id FROM users WHERE role IN ('admin', 'dispatcher') AND unit_id = ?", [$t['unit_id']])->getResultArray();
+                foreach($admins as $admin) {
+                    $this->notificationModel->createNotification(
+                        $admin['id'], 
+                        'info', 
+                        "New Ticket Submitted", 
+                        "Ticket #{$tId} for {$t['service_type']} requires review."
+                    );
+                }
+            }
+        }
+
         return $this->successResponse(
             count($createdTickets) . ' ticket(s) submitted successfully.',
             ['ticket_ids' => $createdTickets],
@@ -664,6 +748,7 @@ class TicketController extends BaseController
         $ssuIrDetails = $this->buildDetailMap($db, 'ssu_incident_details',     'ticket_id', $ticketIds);
         $tasuDetails  = $this->buildDetailMap($db, 'tasu_booking_details',     'ticket_id', $ticketIds);
         $assignments  = $this->buildAssignmentMap($db, $ticketIds);
+        $feedbacks    = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
 
         // Enrich SSU Incident Reports with 3NF bridge table arrays (incidents, information, roles)
         if (!empty($ssuIrDetails)) {
@@ -722,6 +807,7 @@ class TicketController extends BaseController
 
             $ticket['assignment']  = $assignments[$id] ?? null;
             $ticket['attachments'] = $attachmentsMap[$id] ?? [];
+            $ticket['feedback']    = $feedbacks[$id] ?? null;
         }
         unset($ticket);
 

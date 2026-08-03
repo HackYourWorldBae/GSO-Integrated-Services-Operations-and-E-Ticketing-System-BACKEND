@@ -87,6 +87,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- Director Analytics --
         $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director']);
         $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director']);
+
+        // -- Notifications --
+        $routes->get('notifications',             'NotificationController::index');
+        $routes->post('notifications/read/(:num)','NotificationController::markAsRead/$1');
+        $routes->post('notifications/read-all',   'NotificationController::markAllAsRead');
+        $routes->delete('notifications/clear',    'NotificationController::clearRead');
     });
 });
 

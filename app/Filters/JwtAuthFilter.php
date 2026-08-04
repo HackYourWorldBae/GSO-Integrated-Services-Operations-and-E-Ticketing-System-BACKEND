@@ -3,6 +3,7 @@
 namespace App\Filters;
 
 use App\Libraries\JwtService;
+use App\Libraries\RequestContext;
 use CodeIgniter\Filters\FilterInterface;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -11,9 +12,9 @@ use Config\Services;
 /**
  * JwtAuthFilter - Protects routes by validating Bearer tokens.
  *
- * Attaches the decoded token payload to the request so downstream
- * controllers can access the current user's ID, role, and unit without
- * re-querying the database on every request.
+ * Decodes the Bearer token and stores the payload in RequestContext so
+ * downstream controllers can access the current user's ID, role, and unit
+ * without re-querying the database on every request.
  */
 class JwtAuthFilter implements FilterInterface
 {
@@ -46,12 +47,12 @@ class JwtAuthFilter implements FilterInterface
                 ]);
         }
 
-        // Attach decoded user data to the request for downstream use.
-        // Using globals() to avoid PHP 8.2 dynamic property deprecation on IncomingRequest.
-        // Controllers read this via service('request')->getGlobal('jwt_payload').
-        // Fallback: store in a static registry so BaseController::currentUserId() can access it.
+        // Store the decoded JWT payload in the static RequestContext registry.
+        // This replaces the deprecated PHP 8.2 dynamic property assignment
+        // ($request->jwt_payload) and is safe under PHP-FPM/Apache concurrency
+        // since each worker process handles exactly one request at a time.
         $payload = $result['data']['data'] ?? [];
-        $request->jwt_payload = $payload;  // kept for BC; suppressed at PHP level by CI4's handling
+        RequestContext::setJwtPayload($payload);
 
         return null; // Allow the request to continue
     }

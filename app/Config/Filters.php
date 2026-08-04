@@ -4,6 +4,7 @@ namespace Config;
 
 use App\Filters\JwtAuthFilter;
 use App\Filters\RoleGuardFilter;
+use App\Filters\StatelessApiFilter;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -41,6 +42,9 @@ class Filters extends BaseFilters
         'role'            => RoleGuardFilter::class,
         'securityheaders' => \App\Filters\SecurityHeadersFilter::class,
         'throttle'        => \App\Filters\RateLimitFilter::class,
+        // Releases PHP session write-lock immediately on API routes so concurrent
+        // requests from multiple browser tabs do not block each other.
+        'stateless'       => StatelessApiFilter::class,
     ];
 
     /**
@@ -84,6 +88,7 @@ class Filters extends BaseFilters
             // 'honeypot',
             // 'csrf',
             // 'invalidchars',
+            'stateless', // Release PHP session lock immediately; allows concurrent API requests
         ],
         'after' => [
             // 'honeypot',

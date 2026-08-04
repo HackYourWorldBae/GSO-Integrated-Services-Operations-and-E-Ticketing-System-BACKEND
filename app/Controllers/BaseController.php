@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\RequestContext;
 use CodeIgniter\Controller;
 use CodeIgniter\API\ResponseTrait;
 use CodeIgniter\HTTP\CLIRequest;
@@ -90,10 +91,11 @@ abstract class BaseController extends Controller
 
     /**
      * Get the full JWT payload of the currently authenticated user.
+     * Populated by JwtAuthFilter via the RequestContext static registry.
      */
     protected function currentUser(): array
     {
-        return $this->request->jwt_payload ?? [];
+        return RequestContext::getJwtPayload();
     }
 
     /**

@@ -4,7 +4,7 @@ namespace Config;
 
 use CodeIgniter\Config\BaseConfig;
 use CodeIgniter\Session\Handlers\BaseHandler;
-use CodeIgniter\Session\Handlers\FileHandler;
+use CodeIgniter\Session\Handlers\DatabaseHandler;
 
 class Session extends BaseConfig
 {
@@ -13,16 +13,18 @@ class Session extends BaseConfig
      * Session Driver
      * --------------------------------------------------------------------------
      *
-     * The session storage driver to use:
-     * - `CodeIgniter\Session\Handlers\ArrayHandler` (for testing)
-     * - `CodeIgniter\Session\Handlers\FileHandler`
-     * - `CodeIgniter\Session\Handlers\DatabaseHandler`
-     * - `CodeIgniter\Session\Handlers\MemcachedHandler`
-     * - `CodeIgniter\Session\Handlers\RedisHandler`
+     * Switched from FileHandler to DatabaseHandler to eliminate PHP's exclusive
+     * per-session file lock. The file handler blocks concurrent requests from the
+     * same user (e.g. multiple browser tabs), causing dashboards to appear broken.
+     *
+     * DatabaseHandler uses row-level locking in MySQL, allowing many concurrent
+     * sessions to coexist without blocking each other.
+     *
+     * NOTE: Requires the `ci_sessions` table (see migration 2026_08_04_000001).
      *
      * @var class-string<BaseHandler>
      */
-    public string $driver = FileHandler::class;
+    public string $driver = DatabaseHandler::class;
 
     /**
      * --------------------------------------------------------------------------
@@ -50,15 +52,12 @@ class Session extends BaseConfig
      *
      * The location to save sessions to and is driver dependent.
      *
-     * For the 'files' driver, it's a path to a writable directory.
-     * WARNING: Only absolute paths are supported!
-     *
-     * For the 'database' driver, it's a table name.
-     * Please read up the manual for the format with other session drivers.
+     * For the 'database' driver, it's the table name where sessions are stored.
+     * The `ci_sessions` table is created by migration 2026_08_04_000001.
      *
      * IMPORTANT: You are REQUIRED to set a valid save path!
      */
-    public string $savePath = WRITEPATH . 'session';
+    public string $savePath = 'ci_sessions';
 
     /**
      * --------------------------------------------------------------------------

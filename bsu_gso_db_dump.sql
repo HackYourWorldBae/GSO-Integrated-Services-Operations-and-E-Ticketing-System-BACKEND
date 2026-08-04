@@ -62,7 +62,7 @@ CREATE TABLE `migrations` (
   `time` int(11) NOT NULL,
   `batch` int(11) unsigned NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=23 DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB AUTO_INCREMENT=24 DEFAULT CHARSET=utf8mb4;
 
 -- Dumping data for table `migrations`
 INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
@@ -75,7 +75,8 @@ INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migr
 ('19', '2026_07_17_000008', 'App\\Database\\Migrations\\CreateSsuLookupAndBridgeTables', 'default', 'App', '1784812910', '1'),
 ('20', '2026_07_17_000009', 'App\\Database\\Migrations\\CreateTicketAssignmentsAndMaterialsTables', 'default', 'App', '1784812910', '1'),
 ('21', '2026_07_17_000010', 'App\\Database\\Migrations\\CreateFeedbackAndDelayReasonTables', 'default', 'App', '1784812910', '1'),
-('22', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1');
+('22', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1'),
+('23', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812911', '2');
 
 
 -- Table structure for table `personnel`
@@ -522,5 +523,15 @@ INSERT INTO `vehicles` VALUES ('1', '4', 'SFS 625', 'Mitsubishi L300 Van', '2004
 ('15', '4', 'JM 2748', 'HINO Refrigerated Van (A)', '2017', 'Diesel', '4500 cc', 'Logistics', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Hino_Dutro_12.jpg/800px-Hino_Dutro_12.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('16', '4', 'SAC 1400', 'Toyota LiteAce Pick Up', '2024', 'Gasoline', '1.5L', 'Pickup', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Toyota_LiteAce_pickup_%281%29.jpg/800px-Toyota_LiteAce_pickup_%281%29.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('17', '4', 'JM 2503', 'HINO Refrigerated Van (B)', '2017', 'Diesel', '4500 cc', 'Logistics', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Hino_Dutro_12.jpg/800px-Hino_Dutro_12.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
+
+-- Table structure for table `ci_sessions`
+DROP TABLE IF EXISTS `ci_sessions`;
+CREATE TABLE `ci_sessions` (
+  `id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ip_address` varchar(45) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `timestamp` int(10) unsigned NOT NULL DEFAULT 0,
+  `data` blob NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS=1;

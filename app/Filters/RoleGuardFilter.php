@@ -2,6 +2,7 @@
 
 namespace App\Filters;
 
+use App\Libraries\RequestContext;
 use CodeIgniter\Filters\FilterInterface;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -13,7 +14,8 @@ use Config\Services;
  * Usage in Routes.php:
  *   $routes->get('/admin/...', '...', ['filter' => 'role:admin,dispatcher']);
  *
- * Must be applied AFTER JwtAuthFilter, which populates $request->jwt_payload.
+ * Must be applied AFTER JwtAuthFilter, which populates RequestContext with the
+ * decoded JWT payload via RequestContext::setJwtPayload().
  */
 class RoleGuardFilter implements FilterInterface
 {
@@ -24,7 +26,8 @@ class RoleGuardFilter implements FilterInterface
             return null; // No role restriction specified, allow through.
         }
 
-        $payload     = $request->jwt_payload ?? [];
+        // Read from RequestContext — populated by JwtAuthFilter before this runs.
+        $payload     = RequestContext::getJwtPayload();
         $currentRole = $payload['role'] ?? null;
 
         if ($currentRole === null) {

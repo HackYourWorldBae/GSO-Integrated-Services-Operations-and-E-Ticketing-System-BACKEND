@@ -2,15 +2,21 @@
 
 namespace App\Controllers\API;
 
-use CodeIgniter\RESTful\ResourceController;
-use CodeIgniter\API\ResponseTrait;
+use App\Controllers\BaseController;
 use App\Models\NotificationModel;
+use CodeIgniter\HTTP\ResponseInterface;
 
-class NotificationController extends ResourceController
+/**
+ * NotificationController
+ *
+ * Handles user notification endpoints.
+ * Extends BaseController to inherit RequestContext-based JWT user resolution,
+ * which replaced the deprecated $request->jwt_payload dynamic property
+ * that was broken by the concurrent users update.
+ */
+class NotificationController extends BaseController
 {
-    use ResponseTrait;
-
-    protected $notificationModel;
+    private NotificationModel $notificationModel;
 
     public function __construct()
     {
@@ -18,49 +24,15 @@ class NotificationController extends ResourceController
     }
 
     /**
-     * Get the current authenticated user's ID
+     * GET /api/v1/notifications
+     * Fetch the authenticated user's notifications.
      */
-    protected function currentUserId(): ?string
-    {
-        return $this->request->jwt_payload['id'] ?? null;
-    }
-
-    /**
-     * Helper to return standard success JSON
-     */
-    protected function successResponse(string $message, $data = [], int $status = 200)
-    {
-        return $this->respond([
-            'status'  => $status,
-            'message' => $message,
-            'data'    => $data
-        ], $status);
-    }
-
-    /**
-     * Helper to return standard error JSON
-     */
-    protected function errorResponse(string $message, $errors = [], int $status = 400)
-    {
-        $response = [
-            'status'  => $status,
-            'message' => $message,
-        ];
-        if (!empty($errors)) {
-            $response['errors'] = $errors;
-        }
-        return $this->respond($response, $status);
-    }
-
-    /**
-     * GET /api/notifications
-     * Fetch the user's notifications.
-     */
-    public function index()
+    public function index(): ResponseInterface
     {
         $userId = $this->currentUserId();
+
         if (!$userId) {
-            return $this->errorResponse('Unauthorized', [], 401);
+            return $this->errorResponse('Unauthorized.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
         $notifications = $this->notificationModel
@@ -70,42 +42,45 @@ class NotificationController extends ResourceController
 
         $unreadCount = count(array_filter($notifications, fn($n) => $n['is_read'] == 0));
 
-        return $this->successResponse('Notifications fetched successfully', [
+        return $this->successResponse('Notifications fetched successfully.', [
             'notifications' => $notifications,
-            'unread_count'  => $unreadCount
+            'unread_count'  => $unreadCount,
         ]);
     }
 
     /**
-     * POST /api/notifications/read/{id}
+     * POST /api/v1/notifications/read/{id}
      * Mark a specific notification as read.
      */
-    public function markAsRead($id)
+    public function markAsRead(int $id): ResponseInterface
     {
         $userId = $this->currentUserId();
+
         if (!$userId) {
-            return $this->errorResponse('Unauthorized', [], 401);
+            return $this->errorResponse('Unauthorized.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
         $notif = $this->notificationModel->find($id);
-        if (!$notif || $notif['user_id'] != $userId) {
-            return $this->errorResponse('Notification not found', [], 404);
+
+        if (!$notif || $notif['user_id'] !== $userId) {
+            return $this->notFoundResponse('Notification');
         }
 
         $this->notificationModel->update($id, ['is_read' => 1]);
 
-        return $this->successResponse('Notification marked as read');
+        return $this->successResponse('Notification marked as read.');
     }
 
     /**
-     * POST /api/notifications/read-all
+     * POST /api/v1/notifications/read-all
      * Mark all of the user's notifications as read.
      */
-    public function markAllAsRead()
+    public function markAllAsRead(): ResponseInterface
     {
         $userId = $this->currentUserId();
+
         if (!$userId) {
-            return $this->errorResponse('Unauthorized', [], 401);
+            return $this->errorResponse('Unauthorized.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
         $this->notificationModel
@@ -114,18 +89,19 @@ class NotificationController extends ResourceController
             ->set(['is_read' => 1])
             ->update();
 
-        return $this->successResponse('All notifications marked as read');
+        return $this->successResponse('All notifications marked as read.');
     }
 
     /**
-     * DELETE /api/notifications/clear
-     * Delete all READ notifications for the user.
+     * DELETE /api/v1/notifications/clear
+     * Delete all read notifications for the user.
      */
-    public function clearRead()
+    public function clearRead(): ResponseInterface
     {
         $userId = $this->currentUserId();
+
         if (!$userId) {
-            return $this->errorResponse('Unauthorized', [], 401);
+            return $this->errorResponse('Unauthorized.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
         $this->notificationModel
@@ -133,6 +109,6 @@ class NotificationController extends ResourceController
             ->where('is_read', 1)
             ->delete();
 
-        return $this->successResponse('Read notifications cleared successfully');
+        return $this->successResponse('Read notifications cleared successfully.');
     }
 }

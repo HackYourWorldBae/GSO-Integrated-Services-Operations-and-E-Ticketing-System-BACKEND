@@ -62,7 +62,7 @@ CREATE TABLE `migrations` (
   `time` int(11) NOT NULL,
   `batch` int(11) unsigned NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=24 DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB AUTO_INCREMENT=26 DEFAULT CHARSET=utf8mb4;
 
 -- Dumping data for table `migrations`
 INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
@@ -76,7 +76,9 @@ INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migr
 ('20', '2026_07_17_000009', 'App\\Database\\Migrations\\CreateTicketAssignmentsAndMaterialsTables', 'default', 'App', '1784812910', '1'),
 ('21', '2026_07_17_000010', 'App\\Database\\Migrations\\CreateFeedbackAndDelayReasonTables', 'default', 'App', '1784812910', '1'),
 ('22', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1'),
-('23', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812911', '2');
+('23', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812911', '2'),
+('24', '2026_07_17_000012', 'App\\Database\\Migrations\\CreateNotificationsTable', 'default', 'App', '1784812911', '3'),
+('25', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '3');
 
 
 -- Table structure for table `personnel`
@@ -523,6 +525,33 @@ INSERT INTO `vehicles` VALUES ('1', '4', 'SFS 625', 'Mitsubishi L300 Van', '2004
 ('15', '4', 'JM 2748', 'HINO Refrigerated Van (A)', '2017', 'Diesel', '4500 cc', 'Logistics', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Hino_Dutro_12.jpg/800px-Hino_Dutro_12.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('16', '4', 'SAC 1400', 'Toyota LiteAce Pick Up', '2024', 'Gasoline', '1.5L', 'Pickup', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Toyota_LiteAce_pickup_%281%29.jpg/800px-Toyota_LiteAce_pickup_%281%29.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('17', '4', 'JM 2503', 'HINO Refrigerated Van (B)', '2017', 'Diesel', '4500 cc', 'Logistics', 'available', 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Hino_Dutro_12.jpg/800px-Hino_Dutro_12.jpg', 'Benguet State University', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
+
+-- Table structure for table `notifications`
+DROP TABLE IF EXISTS `notifications`;
+CREATE TABLE `notifications` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'info',
+  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `message` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_read` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `otp_codes`
+DROP TABLE IF EXISTS `otp_codes`;
+CREATE TABLE `otp_codes` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `user_data` text COLLATE utf8mb4_unicode_ci,
+  PRIMARY KEY (`id`),
+  KEY `email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `ci_sessions`
 DROP TABLE IF EXISTS `ci_sessions`;

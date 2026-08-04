@@ -36,7 +36,6 @@ CREATE TABLE `fgmu_ticket_details` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `fgmu_ticket_details`
-INSERT INTO `fgmu_ticket_details` VALUES ('FGMU-TIC-1-2026', 'College of Agriculture (CA)', 'Room 305', '', NULL);
 
 
 -- Table structure for table `leau_ticket_details`
@@ -290,7 +289,6 @@ CREATE TABLE `ticket_assignments` (
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `ticket_assignments`
-INSERT INTO `ticket_assignments` VALUES ('1', 'FGMU-TIC-1-2026', 'c54b638d-e58d-4041-9ecf-5499d9e8bf34', NULL, '2026-07-30', '', 'Facilities Maintenance Work', '2026-07-24 13:26:17', NULL, '2026-07-24 21:31:11');
 
 
 -- Table structure for table `ticket_attachments`
@@ -309,7 +307,6 @@ CREATE TABLE `ticket_attachments` (
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `ticket_attachments`
-INSERT INTO `ticket_attachments` VALUES ('1', 'FGMU-TIC-1-2026', 'pexels-martin-mariani-2162253-3801516.jpg', 'tickets/2026/FGMU-TIC-1-2026/1784899367_e0992974d206c470c8f8.jpg', 'image/jpeg', '3748993', '2026-07-24 13:22:47');
 
 
 -- Table structure for table `ticket_feedback_delay_items`
@@ -346,7 +343,6 @@ CREATE TABLE `ticket_feedbacks` (
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `ticket_feedbacks`
-INSERT INTO `ticket_feedbacks` VALUES ('1', 'FGMU-TIC-1-2026', '3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'on-time', '4', '4', '4', '5', '5', 'good good', '2026-07-24 13:35:05');
 
 
 -- Table structure for table `ticket_logs`
@@ -367,12 +363,6 @@ CREATE TABLE `ticket_logs` (
 ) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `ticket_logs`
-INSERT INTO `ticket_logs` VALUES ('1', 'FGMU-TIC-1-2026', '3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'Ticket Submitted', 'FGMU service request: Concrete Works', '2026-07-24 13:22:46'),
-('2', 'FGMU-TIC-1-2026', 'cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'Status Changed', 'Ticket approved — queued for dispatch.', '2026-07-24 13:24:15'),
-('3', 'FGMU-TIC-1-2026', '4ad09d8a-975f-4ad9-8481-ff8b45781998', 'Worker Assigned', 'Assigned to Emily Davis — scheduled for 2026-07-30', '2026-07-24 13:26:17'),
-('4', 'FGMU-TIC-1-2026', '6693d9da-0742-43a4-b434-94f56d2fd84b', 'Job Started', 'Worker has actively started the job.', '2026-07-24 13:29:11'),
-('5', 'FGMU-TIC-1-2026', '6693d9da-0742-43a4-b434-94f56d2fd84b', 'Status Changed', 'Ticket marked as completed. Awaiting user feedback.', '2026-07-24 13:31:11'),
-('6', 'FGMU-TIC-1-2026', '3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'Feedback Submitted', 'Rating: on-time', '2026-07-24 13:35:05');
 
 
 -- Table structure for table `ticket_materials`
@@ -421,7 +411,6 @@ CREATE TABLE `tickets` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `tickets`
-INSERT INTO `tickets` VALUES ('FGMU-TIC-1-2026', '3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', '1', 'Concrete Works', 'Last Friday Night', 'closed', 'Closed', NULL, '6', 'College of Agriculture (CA)', 'Room 305', '1', '2026-07-24 13:22:46', '2026-07-24 13:24:15', 'cfcb614f-ebd4-43ee-afe8-39fb18516ad3', '2026-07-24 13:31:11', '2026-07-24 13:35:05');
 
 
 -- Table structure for table `units`

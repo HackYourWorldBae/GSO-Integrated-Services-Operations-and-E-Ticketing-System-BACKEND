@@ -111,9 +111,15 @@ class TicketAssignmentModel extends Model
                 t.location,
                 t.office_room,
                 t.submitted_at,
-                ta.completed_at
+                ta.completed_at,
+                tf.courtesy_rating,
+                tf.quality_rating,
+                tf.efficiency_rating,
+                tf.timeliness_rating,
+                tf.cleanliness_rating
             FROM ticket_assignments ta
             JOIN tickets t ON t.id = ta.ticket_id
+            LEFT JOIN ticket_feedbacks tf ON tf.ticket_id = t.id
             WHERE ta.personnel_id = ?
               AND ta.completed_at IS NOT NULL
             ORDER BY ta.completed_at DESC

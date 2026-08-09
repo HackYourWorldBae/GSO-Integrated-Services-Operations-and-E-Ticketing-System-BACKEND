@@ -40,28 +40,24 @@ class AuthController extends BaseController
         // Parse JSON body
         $body = $this->request->getJSON(true) ?? [];
 
-        $identifier = sanitize_string($body['identifier'] ?? '');
-        $password   = $body['password'] ?? '';  // Do NOT sanitize password — strip_tags can corrupt it
+        $rules = [
+            'identifier' => 'required|valid_email',
+            'password'   => 'required'
+        ];
 
-        // --- Input Validation ---
-        if (empty($identifier) || empty($password)) {
+        if (!$this->validateData($body, $rules)) {
             return $this->errorResponse(
-                'Please provide both your Email and password.',
-                ['identifier' => ['Required.'], 'password' => ['Required.']],
+                'Please provide a valid Email and password.',
+                $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
         }
 
-        // --- Identify User Type by Identifier Format ---
-        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
-            $user = $this->userModel->findByEmail($identifier);
-        } else {
-            return $this->errorResponse(
-                'Identifier must be a valid email address.',
-                [],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
-        }
+        $identifier = $body['identifier'];
+        $password   = $body['password'];
+
+        // --- Fetch User ---
+        $user = $this->userModel->findByEmail($identifier);
 
         // --- User Not Found ---
         if (!$user) {

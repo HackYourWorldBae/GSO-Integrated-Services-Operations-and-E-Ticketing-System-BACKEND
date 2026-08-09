@@ -37,12 +37,12 @@ class TicketFeedbackModel extends Model
 
         return $db->query("
             SELECT
-                AVG(tf.courtesy_rating)    AS avg_courtesy,
-                AVG(tf.quality_rating)     AS avg_quality,
-                AVG(tf.efficiency_rating)  AS avg_efficiency,
-                AVG(tf.timeliness_rating)  AS avg_timeliness,
-                AVG(tf.cleanliness_rating) AS avg_cleanliness,
-                COUNT(tf.id)               AS total_feedbacks
+                AVG(NULLIF(tf.courtesy_rating, 0))    AS avg_courtesy,
+                AVG(NULLIF(tf.quality_rating, 0))     AS avg_quality,
+                AVG(NULLIF(tf.efficiency_rating, 0))  AS avg_efficiency,
+                AVG(NULLIF(tf.timeliness_rating, 0))  AS avg_timeliness,
+                AVG(NULLIF(tf.cleanliness_rating, 0)) AS avg_cleanliness,
+                COUNT(tf.id)                          AS total_feedbacks
             FROM ticket_feedbacks tf
             JOIN tickets t ON t.id = tf.ticket_id
             WHERE t.unit_id = ?

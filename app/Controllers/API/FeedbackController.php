@@ -91,9 +91,13 @@ class FeedbackController extends BaseController
 
         $ratings = [];
         foreach ($ratingFields as $field) {
-            $val = (int) ($body[$field] ?? 5);
-            if ($val < 1 || $val > 5) {
-                return $this->errorResponse("Rating '{$field}' must be between 1 and 5.");
+            $val = (int) ($body[$field] ?? 0);
+            if ($completionStatus !== 'not-completed') {
+                if ($val < 1 || $val > 5) {
+                    return $this->errorResponse("Rating '{$field}' must be between 1 and 5.");
+                }
+            } else {
+                $val = 0; // Not completed implies no star rating
             }
             $ratings[$field] = $val;
         }

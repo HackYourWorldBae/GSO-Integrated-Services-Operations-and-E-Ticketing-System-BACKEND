@@ -803,17 +803,18 @@ class TicketController extends BaseController
                 $typeStr  = is_array($inc['incidents'] ?? null) ? implode(', ', $inc['incidents']) : ($inc['otherIncident'] ?? 'Incident');
 
                 $this->ticketModel->insert([
-                    'id'          => $ticketId,
-                    'user_id'     => $userId,
-                    'unit_id'     => self::UNIT_MAP['SSU'],
-                    'service_type'=> 'Incident Report',
-                    'description' => sanitize_string($inc['how'] ?? 'Incident reported to campus security.'),
-                    'status'      => 'pending',
-                    'status_label'=> 'Under Review',
-                    'current_step'=> 1,
-                    'location'    => sanitize_string($inc['where'] ?? ''),
-                    'submitted_at'=> date('Y-m-d H:i:s'),
-                    'updated_at'  => date('Y-m-d H:i:s'),
+                    'id'                    => $ticketId,
+                    'user_id'               => $userId,
+                    'unit_id'               => self::UNIT_MAP['SSU'],
+                    'service_type'          => 'Incident Report',
+                    'description'           => sanitize_string($inc['how'] ?? 'Incident reported to campus security.'),
+                    'status'                => 'pending',
+                    'status_label'          => 'Pending Review',
+                    'current_step'          => 2,
+                    'is_under_investigation'=> 0,
+                    'location'              => sanitize_string($inc['where'] ?? ''),
+                    'submitted_at'          => date('Y-m-d H:i:s'),
+                    'updated_at'            => date('Y-m-d H:i:s'),
                 ]);
 
                 (new SsuIncidentDetailModel())->insert([

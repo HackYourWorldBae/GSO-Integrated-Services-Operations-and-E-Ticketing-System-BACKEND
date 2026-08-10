@@ -30,6 +30,8 @@ class TicketModel extends Model
         'location',
         'office_room',
         'is_archived',
+        'is_under_investigation',
+        'ssu_notation',
         'submitted_at',
         'reviewed_at',
         'reviewed_by',
@@ -82,6 +84,19 @@ class TicketModel extends Model
     {
         return $this->where('unit_id', $unitId)
                     ->where('status', 'pending')
+                    ->where('is_archived', 0)
+                    ->orderBy('submitted_at', 'ASC')
+                    ->findAll();
+    }
+
+    /**
+     * Get SSU Incident Report tickets currently under investigation (not yet archived).
+     */
+    public function getUnderInvestigationQueue(int $unitId): array
+    {
+        return $this->where('unit_id', $unitId)
+                    ->where('service_type', 'Incident Report')
+                    ->where('is_under_investigation', 1)
                     ->where('is_archived', 0)
                     ->orderBy('submitted_at', 'ASC')
                     ->findAll();
@@ -279,6 +294,23 @@ class TicketModel extends Model
             $freq[$periodKey] = $counts;
         }
         $stats['service_freq'] = $freq;
+
+        // SSU specific analytics
+        if ($unitId === 3) {
+            $stats['incident_heatmap'] = $db->query("
+                SELECT it.type_name as category, COUNT(*) as count
+                FROM ssu_incident_type_items iti
+                JOIN ssu_incident_types it ON it.id = iti.incident_type_id
+                GROUP BY it.type_name
+            ")->getResultArray();
+
+            $stats['pass_pipeline'] = $db->query("
+                SELECT status, COUNT(*) as count
+                FROM tickets
+                WHERE unit_id = 3 AND service_type = 'Vehicle Pass Application'
+                GROUP BY status
+            ")->getResultArray();
+        }
 
         return $stats;
     }

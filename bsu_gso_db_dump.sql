@@ -77,7 +77,8 @@ INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migr
 ('22', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1'),
 ('23', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812911', '2'),
 ('24', '2026_07_17_000012', 'App\\Database\\Migrations\\CreateNotificationsTable', 'default', 'App', '1784812911', '3'),
-('25', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '3');
+('25', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '3'),
+('26', '2026_08_10_000001', 'App\\Database\\Migrations\\AddSsuIncidentWorkflowColumnsToTickets', 'default', 'App', '1755475200', '4');
 
 
 -- Table structure for table `personnel`
@@ -394,11 +395,13 @@ CREATE TABLE `tickets` (
   `location` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `office_room` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `is_archived` tinyint(1) NOT NULL DEFAULT '0',
+  `is_under_investigation` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'SSU only: 1 when flagged for active investigation',
+  `ssu_notation` text COLLATE utf8mb4_unicode_ci COMMENT 'SSU only: staff recommendation/notation communicated to reporter',
   `submitted_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `reviewed_at` timestamp NULL DEFAULT NULL,
   `reviewed_by` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `completed_at` timestamp NULL DEFAULT NULL,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `fk_tickets_reviewer` (`reviewed_by`),
   KEY `idx_tickets_user` (`user_id`),

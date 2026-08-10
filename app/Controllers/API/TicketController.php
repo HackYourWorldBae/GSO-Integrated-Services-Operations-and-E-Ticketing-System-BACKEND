@@ -237,51 +237,290 @@ class TicketController extends BaseController
             $currentStep = 4;
         }
 
+        $newStatus   = 'approved';
         $statusLabel = 'Queued for Dispatch';
-        $logMessage = 'Ticket approved — queued for dispatch.';
-        $newStatus = 'approved';
+        $logMessage  = 'Ticket approved — queued for dispatch.';
 
         if ($isTasu) {
             $statusLabel = 'Trip Scheduled';
         } elseif ($unitId === 3 && $ticket['service_type'] === 'Vehicle Pass Application') {
             $statusLabel = 'Ready for Pickup';
-            $logMessage = 'Ticket approved — vehicle pass sticker is ready for pickup.';
-        } elseif ($unitId === 3 && $ticket['service_type'] === 'Incident Report') {
-            $statusLabel = 'Report Acknowledged & Closed';
-            $logMessage = 'Incident report has been acknowledged and actioned. Ticket marked as closed.';
-            $newStatus = 'closed';
-            $currentStep = 3;
+            $logMessage  = 'Ticket approved — vehicle pass sticker is ready for pickup.';
         }
+        // SSU Incident Reports are handled by /investigate, /notation, and /resolve endpoints.
 
         $updateData = [
-            'status'      => $newStatus,
-            'status_label'=> $statusLabel,
-            // FGMU/LEAU/SSU: step 3 = Admin Approval active in the 6-step frontend timeline
-            // TASU: step 2 = Approval in the 4-step frontend timeline
-            // SSU Vehicle Pass: step 4 = Ready for Pickup
-            'current_step'=> $currentStep,
-            'reviewed_at' => date('Y-m-d H:i:s'),
-            'reviewed_by' => $this->currentUserId(),
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'status'       => $newStatus,
+            'status_label' => $statusLabel,
+            // FGMU/LEAU: step 3 | TASU: step 2 | SSU Vehicle Pass: step 4
+            'current_step' => $currentStep,
+            'reviewed_at'  => date('Y-m-d H:i:s'),
+            'reviewed_by'  => $this->currentUserId(),
+            'updated_at'   => date('Y-m-d H:i:s'),
         ];
-        
-        if ($newStatus === 'closed') {
-            $updateData['is_archived'] = 1;
-            $updateData['completed_at'] = date('Y-m-d H:i:s');
-        }
 
         $this->ticketModel->update($ticketId, $updateData);
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
         $this->notificationModel->createNotification(
-            $ticket['user_id'], 
-            'success', 
-            "Ticket #{$ticketId} Approved", 
+            $ticket['user_id'],
+            'success',
+            "Ticket #{$ticketId} Approved",
             "Your request for {$ticket['service_type']} has been approved."
         );
 
         return $this->successResponse('Ticket approved successfully.', ['ticket_id' => $ticketId, 'status' => 'approved']);
+    }
+
+    // -------------------------------------------------------------------------
+    // SSU Incident Report — Workflow Endpoints
+    // -------------------------------------------------------------------------
+
+    /**
+     * Marks an SSU Incident Report as "Under Investigation".
+     * Ticket is moved to the investigating queue (status = processing) but NOT archived.
+     *
+     * PATCH /tickets/:id/investigate
+     */
+    public function setUnderInvestigation(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
+            return $this->errorResponse('This action is only valid for SSU Incident Reports.');
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot be modified.');
+        }
+
+        $this->ticketModel->update($ticketId, [
+            'is_under_investigation' => 1,
+            'status'                 => 'processing',
+            'status_label'           => 'Under Investigation',
+            'current_step'           => 3,
+            'reviewed_at'            => date('Y-m-d H:i:s'),
+            'reviewed_by'            => $this->currentUserId(),
+            'updated_at'             => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Status Changed',
+            'Incident report flagged as Under Investigation by SSU staff.'
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Incident #{$ticketId} Under Investigation",
+            'Your incident report is now being actively investigated by SSU staff.'
+        );
+
+        return $this->successResponse(
+            'Ticket marked as Under Investigation.',
+            ['ticket_id' => $ticketId, 'status' => 'processing']
+        );
+    }
+
+    /**
+     * Reverts an SSU Incident Report from "Under Investigation" back to the pending queue.
+     * Clears is_under_investigation without archiving.
+     *
+     * PATCH /tickets/:id/uninvestigate
+     */
+    public function unsetUnderInvestigation(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
+            return $this->errorResponse('This action is only valid for SSU Incident Reports.');
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot be modified.');
+        }
+
+        $hasNotation = !empty($ticket['ssu_notation']);
+
+        $this->ticketModel->update($ticketId, [
+            'is_under_investigation' => 0,
+            'status'                 => $hasNotation ? 'processing' : 'pending',
+            'status_label'           => $hasNotation ? 'Notation Added' : 'Pending Review',
+            'current_step'           => $hasNotation ? 3 : 2,
+            'updated_at'             => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Status Changed',
+            'Incident removed from active investigation queue by SSU staff.'
+        );
+
+        return $this->successResponse(
+            'Ticket removed from Under Investigation.',
+            ['ticket_id' => $ticketId]
+        );
+    }
+
+    /**
+     * Adds a recommendation/notation to an SSU Incident Report.
+     * Ticket remains open — this is a communication to the reporter, not a resolution.
+     * The notation is displayed as an extension card in the requestor dashboard,
+     * outside the progress timeline.
+     *
+     * PATCH /tickets/:id/notation
+     */
+    public function addNotation(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
+            return $this->errorResponse('This action is only valid for SSU Incident Reports.');
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot receive notations.');
+        }
+
+        $body     = $this->request->getJSON(true) ?? [];
+        $notation = trim(sanitize_string($body['notation'] ?? ''));
+
+        if (empty($notation)) {
+            return $this->errorResponse(
+                'A notation text is required.',
+                ['notation' => ['Required.']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $isUnderInvestigation = (bool) $ticket['is_under_investigation'];
+
+        $this->ticketModel->update($ticketId, [
+            'ssu_notation' => $notation,
+            'status'       => 'processing',
+            'status_label' => $isUnderInvestigation ? 'Under Investigation' : 'Notation Added',
+            'current_step' => 3,
+            'reviewed_at'  => date('Y-m-d H:i:s'),
+            'reviewed_by'  => $this->currentUserId(),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Notation Added',
+            'SSU staff added a recommendation/notation to the incident report.'
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "SSU Update on Incident #{$ticketId}",
+            'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
+        );
+
+        return $this->successResponse(
+            'Notation added successfully.',
+            ['ticket_id' => $ticketId, 'notation' => $notation]
+        );
+    }
+
+    /**
+     * Resolves and archives an SSU Incident Report.
+     * A notation MUST have been added first (business rule).
+     * Investigation is optional.
+     *
+     * PATCH /tickets/:id/resolve
+     */
+    public function resolveIncident(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
+            return $this->errorResponse('This action is only valid for SSU Incident Reports.');
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Ticket is already archived.');
+        }
+
+        if (empty($ticket['ssu_notation'])) {
+            return $this->errorResponse(
+                'A recommendation/notation must be added before this incident can be resolved.',
+                [],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $this->ticketModel->update($ticketId, [
+            'status'       => 'resolved',
+            'status_label' => 'Resolved',
+            'current_step' => 4,
+            'is_archived'  => 1,
+            'completed_at' => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Status Changed',
+            'Incident report resolved and archived by SSU staff.'
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'success',
+            "Incident #{$ticketId} Resolved",
+            'Your incident report has been resolved by SSU staff and has been archived.'
+        );
+
+        return $this->successResponse(
+            'Incident report resolved and archived.',
+            ['ticket_id' => $ticketId, 'status' => 'resolved']
+        );
+    }
+
+    /**
+     * Fetch the Under Investigation queue for a unit (SSU-only in practice).
+     *
+     * GET /tickets/investigating/:unitCode
+     */
+    public function investigatingQueue(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $tickets = $this->ticketModel->getUnderInvestigationQueue($unitId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse(
+            'Under investigation queue retrieved.',
+            ['tickets' => $tickets, 'count' => count($tickets)]
+        );
     }
 
     /**

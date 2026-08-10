@@ -51,9 +51,16 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('tickets/stats/(:segment)',          'TicketController::unitStats/$1',      ['filter' => 'role:admin,dispatcher,director']);
 
         // -- Ticket Actions (Admin Role) --
-        $routes->patch('tickets/(:segment)/approve',      'TicketController::approve/$1',        ['filter' => 'role:admin']);
-        $routes->patch('tickets/(:segment)/decline',      'TicketController::decline/$1',        ['filter' => 'role:admin']);
-        $routes->patch('tickets/(:segment)/complete',     'TicketController::complete/$1',       ['filter' => 'role:admin,dispatcher,worker,driver']);
+        $routes->patch('tickets/(:segment)/approve',        'TicketController::approve/$1',               ['filter' => 'role:admin']);
+        $routes->patch('tickets/(:segment)/decline',        'TicketController::decline/$1',               ['filter' => 'role:admin']);
+        $routes->patch('tickets/(:segment)/complete',       'TicketController::complete/$1',              ['filter' => 'role:admin,dispatcher,worker,driver']);
+
+        // -- SSU Incident Report Workflow (Admin Role) --
+        $routes->get('tickets/investigating/(:segment)',    'TicketController::investigatingQueue/$1',    ['filter' => 'role:admin,dispatcher']);
+        $routes->patch('tickets/(:segment)/investigate',   'TicketController::setUnderInvestigation/$1', ['filter' => 'role:admin']);
+        $routes->patch('tickets/(:segment)/uninvestigate', 'TicketController::unsetUnderInvestigation/$1', ['filter' => 'role:admin']);
+        $routes->patch('tickets/(:segment)/notation',      'TicketController::addNotation/$1',           ['filter' => 'role:admin']);
+        $routes->patch('tickets/(:segment)/resolve',       'TicketController::resolveIncident/$1',       ['filter' => 'role:admin']);
 
         // -- Dispatch (Dispatchers & Workers) --
         $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);

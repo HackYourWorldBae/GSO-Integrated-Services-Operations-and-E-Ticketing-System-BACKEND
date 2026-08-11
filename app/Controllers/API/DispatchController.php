@@ -226,53 +226,24 @@ class DispatchController extends BaseController
     }
 
     /**
-     * Get the current active assignment for a worker (worker dashboard).
-     */
-    public function workerDashboard(string $personnelId): ResponseInterface
-    {
-        $worker = $this->personnelModel->find($personnelId);
-        if (!$worker) {
-            return $this->notFoundResponse('Personnel');
-        }
-
-        $activeJob = $this->assignmentModel->getWorkerDashboard($personnelId);
-
-        return $this->successResponse('Worker dashboard data retrieved.', [
-            'worker'     => $worker,
-            'active_job' => $activeJob,
-        ]);
-    }
-
-    /**
-     * Get completed job history for a worker.
-     */
-    public function workerHistory(string $personnelId): ResponseInterface
-    {
-        $history = $this->assignmentModel->getWorkerHistory($personnelId);
-
-        return $this->successResponse('Worker history retrieved.', ['history' => $history]);
-    }
-
-    /**
-     * Start a job (Worker Dashboard).
-     * Updates the assignment to working, sets ticket step to 4, and changes personnel status.
+     * Start a job (Dispatcher).
+     * Updates the assignment to working, sets ticket step to 4 or 5, and changes personnel statuses.
      *
-     * Body: { ticket_id, personnel_id }
+     * Body: { ticket_id }
      */
     public function startJob(): ResponseInterface
     {
         $body = $this->request->getJSON(true) ?? [];
-        $ticketId    = sanitize_string($body['ticket_id'] ?? '');
-        $personnelId = sanitize_string($body['personnel_id'] ?? '');
+        $ticketId = sanitize_string($body['ticket_id'] ?? '');
 
-        if (!$ticketId || !$personnelId) {
-            return $this->errorResponse('ticket_id and personnel_id are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        if (!$ticketId) {
+            return $this->errorResponse('ticket_id is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket) return $this->notFoundResponse('Ticket');
 
-        $isTasu      = ((int) $ticket['unit_id']) === 4;
+        $isTasu       = ((int) $ticket['unit_id']) === 4;
         $workerStatus = $isTasu ? 'on_trip' : 'working';
         $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
 
@@ -283,23 +254,19 @@ class DispatchController extends BaseController
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 
-        // Lock personnel status to working
-        $this->personnelModel->update($personnelId, [
-            'status'     => $workerStatus,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        // Find all assignments for this ticket and update personnel
+        $assignments = $this->assignmentModel->getByTicket($ticketId);
+        foreach ($assignments as $assignment) {
+            if (!empty($assignment['personnel_id'])) {
+                $this->personnelModel->update($assignment['personnel_id'], [
+                    'status'     => $workerStatus,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
+        }
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Worker has actively started the job.");
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Dispatcher actively started the job.");
 
         return $this->successResponse('Job started successfully.');
-    }
-
-    /**
-     * Get ALL active assignments (for generic testing worker dashboard).
-     */
-    public function allActive(): ResponseInterface
-    {
-        $activeJobs = $this->assignmentModel->getAllActiveAssignments();
-        return $this->successResponse('All active assignments retrieved.', ['active_jobs' => $activeJobs]);
     }
 }

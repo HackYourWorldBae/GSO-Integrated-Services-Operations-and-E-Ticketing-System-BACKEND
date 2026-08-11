@@ -85,7 +85,6 @@ INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migr
 DROP TABLE IF EXISTS `personnel`;
 CREATE TABLE `personnel` (
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `user_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `unit_id` int(11) unsigned NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `specialty` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -93,23 +92,21 @@ CREATE TABLE `personnel` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `fk_personnel_user` (`user_id`),
   KEY `idx_personnel_unit_status` (`unit_id`,`status`),
-  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_personnel_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL
+  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `personnel`
-INSERT INTO `personnel` VALUES ('10c78c4b-3320-4344-a64d-dddffae7fd43', NULL, '1', 'Jane Smith', 'Electrician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('272b9e0f-f828-4231-8438-2a509f84511d', NULL, '2', 'Diana Rose', 'Cleaner', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('297d7cfe-0ae9-482f-ab51-0cc2ed7e1493', NULL, '1', 'John Doe', 'Technician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('3ac5f73e-9605-4641-a74a-61c4e18f9133', NULL, '2', 'Mark Wood', 'Tree Trimmer', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('5e4ea878-9fa0-40d6-86bd-0373987be86a', NULL, '2', 'William Field', 'Groundskeeper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('6378caa5-ca36-4205-bce1-3b0659f128d6', NULL, '2', 'Robert Green', 'Gardener', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('9f40edf9-9919-413f-91d5-368eb48f52ec', NULL, '1', 'Chris Wilson', 'Painter', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('c54b638d-e58d-4041-9ecf-5499d9e8bf34', NULL, '1', 'Emily Davis', 'Carpenter', 'available', '2026-07-23 13:21:51', '2026-07-24 13:31:11'),
-('d9169d1d-e2be-41d6-ab7b-c5ec81cd72ff', NULL, '1', 'Mike Johnson', 'Plumber', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('f26b17d3-8975-4dfa-89e5-626edd6c6915', NULL, '2', 'Sarah Plant', 'Landscaper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51');
+INSERT INTO `personnel` VALUES ('10c78c4b-3320-4344-a64d-dddffae7fd43', '1', 'Jane Smith', 'Electrician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('272b9e0f-f828-4231-8438-2a509f84511d', '2', 'Diana Rose', 'Cleaner', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('297d7cfe-0ae9-482f-ab51-0cc2ed7e1493', '1', 'John Doe', 'Technician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('3ac5f73e-9605-4641-a74a-61c4e18f9133', '2', 'Mark Wood', 'Tree Trimmer', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('5e4ea878-9fa0-40d6-86bd-0373987be86a', '2', 'William Field', 'Groundskeeper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('6378caa5-ca36-4205-bce1-3b0659f128d6', '2', 'Robert Green', 'Gardener', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('9f40edf9-9919-413f-91d5-368eb48f52ec', '1', 'Chris Wilson', 'Painter', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('c54b638d-e58d-4041-9ecf-5499d9e8bf34', '1', 'Emily Davis', 'Carpenter', 'available', '2026-07-23 13:21:51', '2026-07-24 13:31:11'),
+('d9169d1d-e2be-41d6-ab7b-c5ec81cd72ff', '1', 'Mike Johnson', 'Plumber', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
+('f26b17d3-8975-4dfa-89e5-626edd6c6915', '2', 'Sarah Plant', 'Landscaper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51');
 
 
 -- Table structure for table `ssu_incident_details`
@@ -407,6 +404,7 @@ CREATE TABLE `tickets` (
   KEY `idx_tickets_user` (`user_id`),
   KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   KEY `idx_tickets_archived` (`is_archived`),
+  KEY `idx_tickets_investigating` (`unit_id`,`is_under_investigation`,`is_archived`),
   KEY `idx_tickets_submitted` (`submitted_at`),
   CONSTRAINT `fk_tickets_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL,
   CONSTRAINT `fk_tickets_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -445,7 +443,7 @@ CREATE TABLE `users` (
   `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `contact_number` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `role` enum('student','employee','admin','dispatcher','director','worker','driver') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
+  `role` enum('student','employee','admin','dispatcher','director') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
   `unit_id` int(11) unsigned DEFAULT NULL,
   `student_id_number` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `id_card_image` text COLLATE utf8mb4_unicode_ci,
@@ -465,9 +463,7 @@ CREATE TABLE `users` (
 INSERT INTO `users` VALUES ('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'End User', 'Test', 'enduser@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'student', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('4ad09d8a-975f-4ad9-8481-ff8b45781998', 'FGMU', 'Dispatcher', 'fgmu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('6693d9da-0742-43a4-b434-94f56d2fd84b', 'Field', 'Worker', 'field-worker@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'worker', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('7656c76a-c4f0-4f21-92fd-66072b204463', 'TASU', 'Dispatcher', 'tasu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '4', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('b85a70e1-7109-4030-8885-8e49beee4295', 'Main', 'Driver', 'driver@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'driver', '4', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('d4a8de41-bf10-495d-93e8-e2480d5d78be', 'LEAU', 'Dispatcher', 'leau-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '3', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),

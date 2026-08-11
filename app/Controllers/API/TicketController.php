@@ -119,7 +119,7 @@ class TicketController extends BaseController
     }
 
     /**
-     * Get in-progress tickets for a unit.
+     * Get in-progress tickets for a unit (auto-starts tickets scheduled for today).
      */
     public function activeTickets(string $unitCode): ResponseInterface
     {
@@ -131,6 +131,49 @@ class TicketController extends BaseController
 
         $tickets = $this->ticketModel->getActiveTickets($unitId);
         $tickets = $this->enrichTickets($tickets);
+
+        $today = date('Y-m-d');
+        $isTasu = $unitId === 4;
+
+        $personnelModel = clone $this->ticketModel; // We don't have it directly injected, let's load it
+        $personnelModel = new \App\Models\PersonnelModel();
+        $assignmentModel = new \App\Models\TicketAssignmentModel();
+        $logModel = new \App\Models\TicketLogModel();
+
+        foreach ($tickets as &$ticket) {
+            $currentStep = (int) $ticket['current_step'];
+            $needsStart = $isTasu ? ($currentStep === 3) : ($currentStep === 4);
+            
+            if ($needsStart && !empty($ticket['assignment']['implementation_date'])) {
+                if ($ticket['assignment']['implementation_date'] <= $today) {
+                    $workerStatus = $isTasu ? 'on_trip' : 'working';
+                    $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
+                    $newStep      = $isTasu ? 4 : 5;
+
+                    $this->ticketModel->update($ticket['id'], [
+                        'status_label' => $statusLabel,
+                        'current_step' => $newStep,
+                        'updated_at'   => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $assignments = $assignmentModel->getByTicket($ticket['id']);
+                    foreach ($assignments as $assignment) {
+                        if (!empty($assignment['personnel_id'])) {
+                            $personnelModel->update($assignment['personnel_id'], [
+                                'status'     => $workerStatus,
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                        }
+                    }
+
+                    $logModel->logAction($ticket['id'], $this->currentUserId(), 'Job Started', "System automatically started the job based on implementation date.");
+                    
+                    $ticket['current_step'] = $newStep;
+                    $ticket['status_label'] = $statusLabel;
+                }
+            }
+        }
+        unset($ticket);
 
         return $this->successResponse('Active tickets retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
     }

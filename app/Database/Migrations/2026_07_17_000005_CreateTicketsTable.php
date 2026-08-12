@@ -86,6 +86,55 @@ class CreateTicketsTable extends Migration
                 'null'       => true,
                 'default'    => null,
             ],
+            'is_project' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'project_title' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 255,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'project_target_duration' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 100,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'project_target_date' => [
+                'type'       => 'DATE',
+                'null'       => true,
+                'default'    => null,
+            ],
+            'project_manpower' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 100,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'project_remarks' => [
+                'type' => 'TEXT',
+                'null' => true,
+                'default' => null,
+            ],
+            'project_actual_start' => [
+                'type' => 'DATE',
+                'null' => true,
+                'default' => null,
+            ],
+            'project_actual_completion' => [
+                'type' => 'DATE',
+                'null' => true,
+                'default' => null,
+            ],
+            'project_working_days' => [
+                'type' => 'INT',
+                'null' => true,
+                'default' => null,
+            ],
             'is_archived' => [
                 'type'       => 'TINYINT',
                 'constraint' => 1,

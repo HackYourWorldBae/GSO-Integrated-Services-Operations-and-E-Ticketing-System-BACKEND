@@ -991,6 +991,155 @@ class TicketController extends BaseController
         );
     }
 
+    // -------------------------------------------------------------------------
+    // Scheduled Projects (FGMU & LEAU Announcements)
+    // -------------------------------------------------------------------------
+
+    public function createProject(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        // Only allow admins or dispatchers to create projects
+        $user = (new \App\Models\UserModel())->find($userId);
+        if (!$user || !in_array($user['role'], ['admin', 'dispatcher'])) {
+            return $this->errorResponse('Unauthorized to create projects.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $unitCode = strtoupper(sanitize_string($body['unit'] ?? ''));
+        $unitId = self::UNIT_MAP[$unitCode] ?? null;
+
+        if (!$unitId || !in_array($unitCode, ['FGMU', 'LEAU'])) {
+            return $this->errorResponse('Projects can only be created for FGMU or LEAU.');
+        }
+
+        $title = sanitize_string($body['title'] ?? '');
+        $location = sanitize_string($body['location'] ?? '');
+        $duration = sanitize_string($body['duration'] ?? ''); // Plain number string expected
+        $targetDate = sanitize_string($body['target_date'] ?? null);
+        $manpower = sanitize_string($body['manpower'] ?? '');
+        $remarks = sanitize_string($body['remarks'] ?? '');
+
+        if (empty($title)) {
+            return $this->errorResponse('Project title is required.');
+        }
+
+        $db = Database::connect();
+        $db->transStart();
+
+        try {
+            $ticketId = $this->ticketModel->generateTicketId($unitCode, $unitId);
+
+            $this->ticketModel->insert([
+                'id'                      => $ticketId,
+                'user_id'                 => $userId, // The admin who created it
+                'unit_id'                 => $unitId,
+                'service_type'            => 'Office Project',
+                'description'             => $title,
+                'status'                  => 'approved', // Auto-approve
+                'status_label'            => 'Approved',
+                'current_step'            => 2, // Skip pending queue, go to dispatcher queue
+                'location'                => $location,
+                'is_project'              => 1,
+                'project_title'           => $title,
+                'project_target_duration' => $duration,
+                'project_target_date'     => $targetDate,
+                'project_manpower'        => $manpower,
+                'project_remarks'         => $remarks,
+                'submitted_at'            => date('Y-m-d H:i:s'),
+                'reviewed_at'             => date('Y-m-d H:i:s'),
+                'reviewed_by'             => $userId,
+                'updated_at'              => date('Y-m-d H:i:s'),
+            ]);
+
+            // Also create the corresponding detail record
+            if ($unitCode === 'FGMU') {
+                (new FgmuTicketDetailModel())->insert([
+                    'ticket_id'        => $ticketId,
+                    'college_building' => $location,
+                    'office_room'      => '',
+                ]);
+            } else if ($unitCode === 'LEAU') {
+                (new LeauTicketDetailModel())->insert([
+                    'ticket_id'        => $ticketId,
+                    'college_building' => $location,
+                    'office_room'      => '',
+                ]);
+            }
+
+            $this->logModel->logAction($ticketId, $userId, 'Project Created', "Scheduled project announcement created.");
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[TicketController::createProject] ' . $e->getMessage());
+            return $this->errorResponse('Failed to create project.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Transaction failed.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        return $this->successResponse('Project announcement created successfully.', ['ticket_id' => $ticketId], ResponseInterface::HTTP_CREATED);
+    }
+
+    public function getProjects(): ResponseInterface
+    {
+        $tickets = $this->ticketModel->where('is_project', 1)
+                                     ->where('is_archived', 0)
+                                     ->orderBy('submitted_at', 'DESC')
+                                     ->findAll();
+        
+        $tickets = $this->enrichTickets($tickets);
+        return $this->successResponse('Active projects retrieved.', ['projects' => $tickets]);
+    }
+
+    public function getProjectArchives(): ResponseInterface
+    {
+        $tickets = $this->ticketModel->where('is_project', 1)
+                                     ->where('is_archived', 1)
+                                     ->orderBy('completed_at', 'DESC')
+                                     ->findAll();
+        
+        $tickets = $this->enrichTickets($tickets);
+        return $this->successResponse('Archived projects retrieved.', ['projects' => $tickets]);
+    }
+
+    public function updateProject(string $ticketId): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        $user = (new \App\Models\UserModel())->find($userId);
+        if (!$user || !in_array($user['role'], ['admin', 'dispatcher'])) {
+            return $this->errorResponse('Unauthorized to update projects.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket || !(bool)$ticket['is_project']) {
+            return $this->notFoundResponse('Project');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        
+        $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+        if (array_key_exists('actual_start', $body)) {
+            $updateData['project_actual_start'] = sanitize_string($body['actual_start'] ?? null);
+        }
+        if (array_key_exists('actual_completion', $body)) {
+            $updateData['project_actual_completion'] = sanitize_string($body['actual_completion'] ?? null);
+        }
+        if (array_key_exists('actual_working_days', $body)) {
+            $updateData['project_working_days'] = !empty($body['actual_working_days']) ? (int) $body['actual_working_days'] : null;
+        }
+        if (array_key_exists('remarks', $body)) {
+            $updateData['project_remarks'] = sanitize_string($body['remarks'] ?? '');
+        }
+
+        $this->ticketModel->update($ticketId, $updateData);
+        $this->logModel->logAction($ticketId, $userId, 'Project Updated', "Project details were updated.");
+
+        return $this->successResponse('Project updated successfully.', ['ticket_id' => $ticketId]);
+    }
+
     /**
      * Get audit trail logs for a ticket.
      */

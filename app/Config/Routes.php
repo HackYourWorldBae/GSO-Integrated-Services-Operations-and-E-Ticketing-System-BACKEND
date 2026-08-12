@@ -20,6 +20,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     // Public vehicle availability (requestor can browse before login — rate limited to 60/min)
     $routes->get('tasu/vehicles/available', 'TasuController::available', ['filter' => 'throttle:60,60']);
 
+    // Public Scheduled Projects Announcements (FGMU & LEAU)
+    $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
+    $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
+
     // --------------------------------------------------------------------------
     // 2. PROTECTED ROUTES (Require JWT & Rate Limiting)
     // --------------------------------------------------------------------------
@@ -61,6 +65,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/uninvestigate', 'TicketController::unsetUnderInvestigation/$1', ['filter' => 'role:admin']);
         $routes->patch('tickets/(:segment)/notation',      'TicketController::addNotation/$1',           ['filter' => 'role:admin']);
         $routes->patch('tickets/(:segment)/resolve',       'TicketController::resolveIncident/$1',       ['filter' => 'role:admin']);
+
+        // -- Scheduled Projects Management (FGMU & LEAU Admins) --
+        $routes->post('projects',              'TicketController::createProject',   ['filter' => 'role:admin,dispatcher']);
+        $routes->patch('projects/(:segment)',  'TicketController::updateProject/$1',['filter' => 'role:admin,dispatcher']);
 
         // -- Dispatch (Dispatchers) --
         $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);

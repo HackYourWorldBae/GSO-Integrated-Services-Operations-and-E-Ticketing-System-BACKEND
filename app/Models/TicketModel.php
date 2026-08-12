@@ -37,6 +37,15 @@ class TicketModel extends Model
         'reviewed_by',
         'completed_at',
         'updated_at',
+        'is_project',
+        'project_title',
+        'project_target_duration',
+        'project_target_date',
+        'project_manpower',
+        'project_remarks',
+        'project_actual_start',
+        'project_actual_completion',
+        'project_working_days',
     ];
 
     // -------------------------------------------------------------------------

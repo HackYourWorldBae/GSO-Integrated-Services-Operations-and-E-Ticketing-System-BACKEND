@@ -254,7 +254,8 @@ class DispatchController extends BaseController
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 
-        // Find all assignments for this ticket and update personnel
+        // Find all assignments for this ticket, update personnel status,
+        // and stamp dispatched_at so the frontend can compute accurate job duration.
         $assignments = $this->assignmentModel->getByTicket($ticketId);
         foreach ($assignments as $assignment) {
             if (!empty($assignment['personnel_id'])) {
@@ -263,6 +264,11 @@ class DispatchController extends BaseController
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
             }
+
+            // Record the actual start time for duration tracking
+            $this->assignmentModel->update($assignment['id'], [
+                'dispatched_at' => date('Y-m-d H:i:s'),
+            ]);
         }
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Dispatcher actively started the job.");

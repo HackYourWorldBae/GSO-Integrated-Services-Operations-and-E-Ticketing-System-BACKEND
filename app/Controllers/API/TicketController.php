@@ -1159,7 +1159,11 @@ class TicketController extends BaseController
 
         $map = [];
         foreach ($rows as $row) {
-            $map[$row['ticket_id']] = $row;
+            if (isset($map[$row['ticket_id']])) {
+                $map[$row['ticket_id']]['personnel_name'] .= ', ' . $row['personnel_name'];
+            } else {
+                $map[$row['ticket_id']] = $row;
+            }
         }
 
         return $map;

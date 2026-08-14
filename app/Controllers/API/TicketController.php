@@ -1016,6 +1016,7 @@ class TicketController extends BaseController
         $location = sanitize_string($body['location'] ?? '');
         $duration = sanitize_string($body['duration'] ?? ''); // Plain number string expected
         $targetDate = sanitize_string($body['target_date'] ?? null);
+        $targetDate = empty($targetDate) ? null : $targetDate;
         $manpower = sanitize_string($body['manpower'] ?? '');
         $remarks = sanitize_string($body['remarks'] ?? '');
 
@@ -1122,10 +1123,12 @@ class TicketController extends BaseController
         
         $updateData = ['updated_at' => date('Y-m-d H:i:s')];
         if (array_key_exists('actual_start', $body)) {
-            $updateData['project_actual_start'] = sanitize_string($body['actual_start'] ?? null);
+            $val = sanitize_string($body['actual_start'] ?? null);
+            $updateData['project_actual_start'] = empty($val) ? null : $val;
         }
         if (array_key_exists('actual_completion', $body)) {
-            $updateData['project_actual_completion'] = sanitize_string($body['actual_completion'] ?? null);
+            $val = sanitize_string($body['actual_completion'] ?? null);
+            $updateData['project_actual_completion'] = empty($val) ? null : $val;
         }
         if (array_key_exists('actual_working_days', $body)) {
             $updateData['project_working_days'] = !empty($body['actual_working_days']) ? (int) $body['actual_working_days'] : null;

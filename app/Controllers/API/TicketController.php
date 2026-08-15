@@ -1013,11 +1013,11 @@ class TicketController extends BaseController
         }
 
         $title = sanitize_string($body['title'] ?? '');
+        $description = sanitize_string($body['description'] ?? '');
         $location = sanitize_string($body['location'] ?? '');
-        $duration = sanitize_string($body['duration'] ?? ''); // Plain number string expected
+        $duration = sanitize_string($body['duration'] ?? ''); // Duration e.g. "5 Working Days" or "5"
         $targetDate = sanitize_string($body['target_date'] ?? null);
         $targetDate = empty($targetDate) ? null : $targetDate;
-        $manpower = sanitize_string($body['manpower'] ?? '');
         $remarks = sanitize_string($body['remarks'] ?? '');
 
         if (empty($title)) {
@@ -1028,23 +1028,24 @@ class TicketController extends BaseController
         $db->transStart();
 
         try {
-            $ticketId = $this->ticketModel->generateTicketId($unitCode, $unitId);
+            // Generate dedicated Project ID with -PRJ- prefix (does not consume ticket -TIC- sequence)
+            $projectId = $this->ticketModel->generateProjectId($unitCode, $unitId);
 
             $this->ticketModel->insert([
-                'id'                      => $ticketId,
+                'id'                      => $projectId,
                 'user_id'                 => $userId, // The admin who created it
                 'unit_id'                 => $unitId,
                 'service_type'            => 'Office Project',
-                'description'             => $title,
+                'description'             => !empty($description) ? $description : $title,
                 'status'                  => 'approved', // Auto-approve
                 'status_label'            => 'Approved',
-                'current_step'            => 2, // Skip pending queue, go to dispatcher queue
+                'current_step'            => 2,
                 'location'                => $location,
                 'is_project'              => 1,
                 'project_title'           => $title,
                 'project_target_duration' => $duration,
                 'project_target_date'     => $targetDate,
-                'project_manpower'        => $manpower,
+                'project_manpower'        => null,
                 'project_remarks'         => $remarks,
                 'submitted_at'            => date('Y-m-d H:i:s'),
                 'reviewed_at'             => date('Y-m-d H:i:s'),
@@ -1055,19 +1056,19 @@ class TicketController extends BaseController
             // Also create the corresponding detail record
             if ($unitCode === 'FGMU') {
                 (new FgmuTicketDetailModel())->insert([
-                    'ticket_id'        => $ticketId,
+                    'ticket_id'        => $projectId,
                     'college_building' => $location,
                     'office_room'      => '',
                 ]);
             } else if ($unitCode === 'LEAU') {
                 (new LeauTicketDetailModel())->insert([
-                    'ticket_id'        => $ticketId,
+                    'ticket_id'        => $projectId,
                     'college_building' => $location,
                     'office_room'      => '',
                 ]);
             }
 
-            $this->logModel->logAction($ticketId, $userId, 'Project Created', "Scheduled project announcement created.");
+            $this->logModel->logAction($projectId, $userId, 'Project Created', "Scheduled project announcement created.");
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -1081,7 +1082,7 @@ class TicketController extends BaseController
             return $this->errorResponse('Transaction failed.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        return $this->successResponse('Project announcement created successfully.', ['ticket_id' => $ticketId], ResponseInterface::HTTP_CREATED);
+        return $this->successResponse('Project announcement created successfully.', ['ticket_id' => $projectId, 'id' => $projectId], ResponseInterface::HTTP_CREATED);
     }
 
     public function getProjects(): ResponseInterface
@@ -1228,6 +1229,7 @@ class TicketController extends BaseController
 
         foreach ($tickets as &$ticket) {
             $id = $ticket['id'];
+            $ticket['unit_id'] = (int) $ticket['unit_id'];
             
             // Critical for frontend timeline and categorizations
             $ticket['unit_code'] = array_search($ticket['unit_id'], self::UNIT_MAP) ?: null;

@@ -195,6 +195,30 @@ class TicketModel extends Model
     }
 
     /**
+     * Generate the next internal project ID for an announcement project within the current year.
+     * Format: {UNIT_CODE}-PRJ-{N}-{YEAR} e.g. FGMU-PRJ-1-2026
+     */
+    public function generateProjectId(string $unitCode, int $unitId, int $batchOffset = 0): string
+    {
+        $year   = date('Y');
+        $prefix = strtoupper($unitCode) . '-PRJ-';
+        $suffix = '-' . $year;
+        $like   = $prefix . '%' . $suffix;
+
+        $db  = \Config\Database::connect();
+        $row = $db->query(
+            "SELECT MAX(CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(id, '-PRJ-', -1), ?, 1) AS UNSIGNED)) AS max_seq
+             FROM tickets
+             WHERE unit_id = ? AND id LIKE ?",
+            [$suffix, $unitId, $like]
+        )->getRowArray();
+
+        $next = (int) ($row['max_seq'] ?? 0) + 1 + $batchOffset;
+
+        return $prefix . $next . $suffix;
+    }
+
+    /**
      * Get a summary count of tickets by status for a unit (for dashboard stats).
      */
     public function getStatsByUnit(?int $unitId = null): array

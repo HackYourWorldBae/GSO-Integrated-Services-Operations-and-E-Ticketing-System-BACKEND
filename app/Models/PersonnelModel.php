@@ -47,7 +47,7 @@ class PersonnelModel extends Model
         $personnelIds = array_column($personnel, 'id');
         
         $assignments = $db->table('ticket_assignments ta')
-            ->select('ta.*, t.service_type, t.status as ticket_status')
+            ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status')
             ->join('tickets t', 't.id = ta.ticket_id', 'left')
             ->whereIn('ta.personnel_id', $personnelIds)
             ->where('ta.completed_at IS NULL')
@@ -64,13 +64,18 @@ class PersonnelModel extends Model
             
             // To maintain backward compatibility, extract current and next
             $p['assigned_ticket_id'] = $p['assignments'][0]['ticket_id'] ?? null;
-            $p['ticket_task'] = $p['assignments'][0]['task_notes'] ?? null;
+            $p['is_project']         = (int) ($p['assignments'][0]['is_project'] ?? 0);
+            $p['project_title']      = $p['assignments'][0]['project_title'] ?? null;
+            $p['ticket_task']        = $p['assignments'][0]['task_notes'] 
+                                        ?: (!empty($p['is_project']) ? ($p['project_title'] ?: 'Office Project') : null);
             $p['implementation_date'] = $p['assignments'][0]['implementation_date'] ?? null;
-            $p['ticket_status'] = $p['assignments'][0]['ticket_status'] ?? null;
-            $p['service_type'] = $p['assignments'][0]['service_type'] ?? null;
+            $p['ticket_status']       = $p['assignments'][0]['ticket_status'] ?? null;
+            $p['service_type']        = $p['assignments'][0]['service_type'] ?? null;
             
             $p['next_assignment_id'] = $p['assignments'][1]['ticket_id'] ?? null;
-            $p['next_ticket_task'] = $p['assignments'][1]['task_notes'] ?? null;
+            $p['next_is_project']    = (int) ($p['assignments'][1]['is_project'] ?? 0);
+            $p['next_ticket_task']   = $p['assignments'][1]['task_notes'] 
+                                        ?: (!empty($p['next_is_project']) ? ($p['assignments'][1]['project_title'] ?: 'Office Project') : null);
         }
 
         return $personnel;

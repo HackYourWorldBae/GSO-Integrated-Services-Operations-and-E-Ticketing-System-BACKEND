@@ -66,7 +66,7 @@ class PersonnelModel extends Model
             $p['assigned_ticket_id'] = $p['assignments'][0]['ticket_id'] ?? null;
             $p['is_project']         = (int) ($p['assignments'][0]['is_project'] ?? 0);
             $p['project_title']      = $p['assignments'][0]['project_title'] ?? null;
-            $p['ticket_task']        = $p['assignments'][0]['task_notes'] 
+            $p['ticket_task']        = ($p['assignments'][0]['task_notes'] ?? null) 
                                         ?: (!empty($p['is_project']) ? ($p['project_title'] ?: 'Office Project') : null);
             $p['implementation_date'] = $p['assignments'][0]['implementation_date'] ?? null;
             $p['ticket_status']       = $p['assignments'][0]['ticket_status'] ?? null;
@@ -74,8 +74,8 @@ class PersonnelModel extends Model
              
             $p['next_assignment_id'] = $p['assignments'][1]['ticket_id'] ?? null;
             $p['next_is_project']    = (int) ($p['assignments'][1]['is_project'] ?? 0);
-            $p['next_ticket_task']   = $p['assignments'][1]['task_notes'] 
-                                        ?: (!empty($p['next_is_project']) ? ($p['assignments'][1]['project_title'] ?: 'Office Project') : null);
+            $p['next_ticket_task']   = ($p['assignments'][1]['task_notes'] ?? null) 
+                                        ?: (!empty($p['next_is_project']) ? (($p['assignments'][1]['project_title'] ?? null) ?: 'Office Project') : null);
         }
 
         return $personnel;

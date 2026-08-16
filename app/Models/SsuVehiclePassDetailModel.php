@@ -13,7 +13,6 @@ class SsuVehiclePassDetailModel extends Model
     protected $useTimestamps = false;
     protected $allowedFields = [
         'ticket_id',
-        'account_type',
         'applicant_name',
         'college_office',
         'contact_no',

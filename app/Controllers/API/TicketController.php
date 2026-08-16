@@ -814,7 +814,6 @@ class TicketController extends BaseController
 
                 (new SsuVehiclePassDetailModel())->insert([
                     'ticket_id'        => $ticketId,
-                    'account_type'     => sanitize_string($vp['accountType'] ?? ''),
                     'applicant_name'   => sanitize_string($vp['name'] ?? ''),
                     'college_office'   => sanitize_string($vp['collegeOffice'] ?? ''),
                     'contact_no'       => sanitize_string($vp['contactNo'] ?? ''),

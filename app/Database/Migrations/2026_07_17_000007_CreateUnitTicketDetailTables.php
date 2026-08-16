@@ -62,7 +62,6 @@ class CreateUnitTicketDetailTables extends Migration
         // -------------------------------------------------------------------
         $this->forge->addField([
             'ticket_id'          => ['type' => 'VARCHAR', 'constraint' => 60],
-            'account_type'       => ['type' => 'VARCHAR', 'constraint' => 60],
             'applicant_name'     => ['type' => 'VARCHAR', 'constraint' => 255],
             'college_office'     => ['type' => 'VARCHAR', 'constraint' => 255],
             'contact_no'         => ['type' => 'VARCHAR', 'constraint' => 30],

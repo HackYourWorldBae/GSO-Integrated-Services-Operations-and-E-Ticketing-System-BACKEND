@@ -4,15 +4,23 @@ namespace App\Database\Seeds;
 
 use CodeIgniter\Database\Seeder;
 
+/**
+ * PersonnelSeeder
+ *
+ * Previously seeded dummy FGMU/LEAU/TASU personnel records.
+ * Now intentionally empty — all personnel are created by unit admins
+ * via the Personnel Management page.
+ *
+ * Personnel categories are seeded separately in PersonnelCategorySeeder.
+ */
 class PersonnelSeeder extends Seeder
 {
     public function run(): void
     {
-        helper('sanitize');
-        $db = \Config\Database::connect();
-        
-        $personnel = [
-            // FGMU (unit_id = 1)
+        // No personnel are seeded. Admins manage the roster via the UI.
+    }
+}
+
             [
                 'id'        => generate_uuid(),
                 'user_id'   => null,

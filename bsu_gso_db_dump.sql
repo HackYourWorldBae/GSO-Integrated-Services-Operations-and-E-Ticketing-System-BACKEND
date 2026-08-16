@@ -96,17 +96,25 @@ CREATE TABLE `personnel` (
   CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Dumping data for table `personnel`
-INSERT INTO `personnel` VALUES ('10c78c4b-3320-4344-a64d-dddffae7fd43', '1', 'Jane Smith', 'Electrician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('272b9e0f-f828-4231-8438-2a509f84511d', '2', 'Diana Rose', 'Cleaner', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('297d7cfe-0ae9-482f-ab51-0cc2ed7e1493', '1', 'John Doe', 'Technician', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('3ac5f73e-9605-4641-a74a-61c4e18f9133', '2', 'Mark Wood', 'Tree Trimmer', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('5e4ea878-9fa0-40d6-86bd-0373987be86a', '2', 'William Field', 'Groundskeeper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('6378caa5-ca36-4205-bce1-3b0659f128d6', '2', 'Robert Green', 'Gardener', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('9f40edf9-9919-413f-91d5-368eb48f52ec', '1', 'Chris Wilson', 'Painter', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('c54b638d-e58d-4041-9ecf-5499d9e8bf34', '1', 'Emily Davis', 'Carpenter', 'available', '2026-07-23 13:21:51', '2026-07-24 13:31:11'),
-('d9169d1d-e2be-41d6-ab7b-c5ec81cd72ff', '1', 'Mike Johnson', 'Plumber', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51'),
-('f26b17d3-8975-4dfa-89e5-626edd6c6915', '2', 'Sarah Plant', 'Landscaper', 'available', '2026-07-23 13:21:51', '2026-07-23 13:21:51');
+-- No data seeded. Personnel are managed via the Admin UI.
+
+
+-- Table structure for table `personnel_categories`
+DROP TABLE IF EXISTS `personnel_categories`;
+CREATE TABLE `personnel_categories` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `unit_id` int(11) unsigned NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_system` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_category_unit` (`unit_id`,`name`),
+  KEY `idx_categories_unit` (`unit_id`),
+  CONSTRAINT `fk_categories_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dumping data for table `personnel_categories`
+INSERT INTO `personnel_categories` (`unit_id`, `name`, `is_system`) VALUES (4, 'Driver', 1);
 
 
 -- Table structure for table `ssu_incident_details`

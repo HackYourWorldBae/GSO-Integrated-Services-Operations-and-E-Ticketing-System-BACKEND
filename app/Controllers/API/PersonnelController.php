@@ -4,6 +4,7 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\PersonnelModel;
+use App\Models\PersonnelCategoryModel;
 use App\Models\TicketLogModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
@@ -23,6 +24,7 @@ use CodeIgniter\HTTP\ResponseInterface;
 class PersonnelController extends BaseController
 {
     private PersonnelModel $personnelModel;
+    private PersonnelCategoryModel $categoryModel;
     private TicketLogModel $logModel;
 
     // Unit code to ID map (mirrors DB seeds)
@@ -31,6 +33,7 @@ class PersonnelController extends BaseController
     public function __construct()
     {
         $this->personnelModel = new PersonnelModel();
+        $this->categoryModel  = new PersonnelCategoryModel();
         $this->logModel       = new TicketLogModel();
     }
 
@@ -192,5 +195,97 @@ class PersonnelController extends BaseController
         $this->personnelModel->delete($personnelId);
 
         return $this->successResponse('Personnel record deleted.', ['personnel_id' => $personnelId]);
+    }
+
+    // =========================================================================
+    // Category Management
+    // =========================================================================
+
+    /**
+     * List all personnel categories for a unit.
+     * GET /api/v1/personnel/categories/:unitCode
+     */
+    public function categories(string $unitCode): ResponseInterface
+    {
+        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
+        if (!$unitId) {
+            return $this->errorResponse("Unknown unit code: {$unitCode}.");
+        }
+
+        $categories = $this->categoryModel->getByUnit($unitId);
+
+        return $this->successResponse('Categories retrieved.', [
+            'unit'       => strtoupper($unitCode),
+            'categories' => $categories,
+        ]);
+    }
+
+    /**
+     * Create a new personnel category for a unit.
+     * POST /api/v1/personnel/categories
+     * Body: { unit_code: 'FGMU', name: 'Welder' }
+     */
+    public function createCategory(): ResponseInterface
+    {
+        $body     = $this->request->getJSON(true) ?? [];
+        $unitCode = strtoupper(sanitize_string($body['unit_code'] ?? ''));
+        $name     = sanitize_string($body['name'] ?? '');
+
+        $unitId = self::UNIT_MAP[$unitCode] ?? null;
+        if (!$unitId) {
+            return $this->errorResponse('Valid unit_code is required (FGMU, LEAU, SSU, TASU).');
+        }
+        if (empty($name)) {
+            return $this->errorResponse('Category name is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Check for duplicates within this unit
+        $existing = $this->categoryModel
+            ->where('unit_id', $unitId)
+            ->where('name', $name)
+            ->first();
+
+        if ($existing) {
+            return $this->errorResponse('A category with this name already exists for this unit.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $id = $this->categoryModel->insert([
+            'unit_id'   => $unitId,
+            'name'      => $name,
+            'is_system' => 0,
+        ], true);
+
+        return $this->successResponse('Category created.', [
+            'category' => ['id' => $id, 'unit_id' => $unitId, 'name' => $name, 'is_system' => 0],
+        ], ResponseInterface::HTTP_CREATED);
+    }
+
+    /**
+     * Delete a personnel category.
+     * DELETE /api/v1/personnel/categories/:id
+     * Blocked if: (a) category is a system/seeded category, (b) category is in use by personnel.
+     */
+    public function deleteCategory(string $categoryId): ResponseInterface
+    {
+        $category = $this->categoryModel->find((int) $categoryId);
+        if (!$category) {
+            return $this->notFoundResponse('Category');
+        }
+
+        if ((int) $category['is_system'] === 1) {
+            return $this->errorResponse('System-defined categories cannot be deleted.');
+        }
+
+        if ($this->categoryModel->isInUse((int) $categoryId)) {
+            return $this->errorResponse(
+                'Cannot delete a category that is currently assigned to personnel. Reassign or remove those personnel first.',
+                [],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $this->categoryModel->delete((int) $categoryId);
+
+        return $this->successResponse('Category deleted.', ['category_id' => (int) $categoryId]);
     }
 }

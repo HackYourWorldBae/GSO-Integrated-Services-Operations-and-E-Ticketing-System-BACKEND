@@ -32,7 +32,10 @@ class DatabaseSeeder extends Seeder
         // 5. Vehicles
         $this->call('VehiclesSeeder');
 
-        // 6. Personnel
+        // 6. Personnel (empty — admins manage the roster via UI)
         $this->call('PersonnelSeeder');
+
+        // 7. Seed locked system personnel categories (TASU: Driver)
+        $this->call('PersonnelCategorySeeder');
     }
 }

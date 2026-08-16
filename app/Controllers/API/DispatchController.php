@@ -87,6 +87,7 @@ class DispatchController extends BaseController
 
         $vehicleId          = !empty($body['vehicle_id']) ? (int) $body['vehicle_id'] : null;
         $implementationDate = sanitize_string($body['implementation_date'] ?? date('Y-m-d'));
+        $workingDays        = !empty($body['working_days']) ? (int) $body['working_days'] : null;
         $taskNotes          = sanitize_string($body['task_notes'] ?? '');
         $dispatcherNotes    = sanitize_string($body['dispatcher_notes'] ?? '');
 
@@ -133,7 +134,20 @@ class DispatchController extends BaseController
             $db->query("UPDATE vehicles SET status = 'in_use', updated_at = NOW() WHERE id = ?", [$vehicleId]);
         }
 
-        // --- Audit log ---
+        // --- If the ticket is a project, persist the dispatcher-set scheduling fields ---
+        if (!empty($ticket['is_project'])) {
+            $projectUpdate = ['updated_at' => date('Y-m-d H:i:s')];
+
+            if ($implementationDate) {
+                $projectUpdate['project_target_date'] = $implementationDate;
+            }
+
+            if ($workingDays !== null) {
+                $projectUpdate['project_target_duration'] = $workingDays . ' Working Days';
+            }
+
+            $this->ticketModel->update($ticketId, $projectUpdate);
+        }
         $detail = "Assigned to {$worker['name']}";
         if ($implementationDate) {
             $detail .= " — scheduled for {$implementationDate}";

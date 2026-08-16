@@ -316,7 +316,9 @@ class TicketModel extends Model
         ];
         
         foreach ($periods as $periodKey => $condition) {
-            $where = $unitId ? "WHERE unit_id = " . (int)$unitId . " AND $condition" : "WHERE $condition";
+            $where = $unitId 
+                ? "WHERE unit_id = " . (int)$unitId . " AND $condition AND (is_project = 0 OR is_project IS NULL)" 
+                : "WHERE $condition AND (is_project = 0 OR is_project IS NULL)";
             $counts = $db->query("
                 SELECT service_type, COUNT(*) as count 
                 FROM tickets 

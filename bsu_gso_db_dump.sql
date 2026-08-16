@@ -220,7 +220,7 @@ INSERT INTO `ssu_incident_types` VALUES ('7', 'Fire / Hazard Alert'),
 DROP TABLE IF EXISTS `ssu_vehicle_pass_details`;
 CREATE TABLE `ssu_vehicle_pass_details` (
   `ticket_id` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `account_type` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
+
   `applicant_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `college_office` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `contact_no` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,

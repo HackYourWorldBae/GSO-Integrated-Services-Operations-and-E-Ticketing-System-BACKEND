@@ -1087,7 +1087,7 @@ class TicketController extends BaseController
     public function getProjects(): ResponseInterface
     {
         $tickets = $this->ticketModel->where('is_project', 1)
-                                     ->where('is_archived', 0)
+                                     ->whereIn('status', ['pending', 'approved', 'processing'])
                                      ->orderBy('submitted_at', 'DESC')
                                      ->findAll();
         
@@ -1098,7 +1098,7 @@ class TicketController extends BaseController
     public function getProjectArchives(): ResponseInterface
     {
         $tickets = $this->ticketModel->where('is_project', 1)
-                                     ->where('is_archived', 1)
+                                     ->whereIn('status', ['resolved', 'closed', 'completed'])
                                      ->orderBy('completed_at', 'DESC')
                                      ->findAll();
         

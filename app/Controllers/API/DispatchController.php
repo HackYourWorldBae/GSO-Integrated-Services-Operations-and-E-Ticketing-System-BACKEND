@@ -265,6 +265,7 @@ class DispatchController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status_label' => $statusLabel,
             'current_step' => $isTasu ? 4 : 5,
+            'project_actual_start' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 

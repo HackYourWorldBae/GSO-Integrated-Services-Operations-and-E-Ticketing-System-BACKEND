@@ -1307,7 +1307,7 @@ class TicketController extends BaseController
             LEFT JOIN personnel p ON p.id = ta.personnel_id
             LEFT JOIN vehicles v  ON v.id = ta.vehicle_id
             WHERE ta.ticket_id IN ({$placeholders})
-              AND ta.completed_at IS NULL
+            ORDER BY ta.assigned_at DESC
         ", $ticketIds)->getResultArray();
 
         $map = [];

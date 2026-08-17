@@ -593,7 +593,7 @@ class TicketController extends BaseController
             'status_label'  => 'Declined',
             'decline_reason'=> $reason,
             'is_archived'   => 1,
-            'current_step'  => 1,
+            'current_step'  => 2,
             'reviewed_at'   => date('Y-m-d H:i:s'),
             'reviewed_by'   => $this->currentUserId(),
             'updated_at'    => date('Y-m-d H:i:s'),
@@ -724,15 +724,25 @@ class TicketController extends BaseController
                 $fgmuDetails = sanitize_array($body['fgmu']['details'] ?? []);
                 $fgmuModel   = new FgmuTicketDetailModel();
 
-                foreach ($body['fgmu']['services'] as $idx => $srv) {
-                    $ticketId = $this->ticketModel->generateTicketId('FGMU', self::UNIT_MAP['FGMU'], $idx);
-                    $service  = sanitize_string($srv['service'] ?? 'Facilities Maintenance');
+                $servicesList = array_map(function($srv) {
+                    return sanitize_string($srv['service'] ?? '');
+                }, $body['fgmu']['services']);
+                $servicesList = array_filter($servicesList);
+
+                if (!empty($servicesList)) {
+                    $serviceString = $this->formatServicesList($servicesList);
+                    if (empty($serviceString)) {
+                        $serviceString = 'Facilities Maintenance';
+                    }
+
+                    $ticketId = $this->ticketModel->generateTicketId('FGMU', self::UNIT_MAP['FGMU'], 0);
 
                     $this->ticketModel->insert([
                         'id'          => $ticketId,
                         'user_id'     => $userId,
                         'unit_id'     => self::UNIT_MAP['FGMU'],
-                        'service_type'=> $service,
+                        'title'       => sanitize_string($fgmuDetails['ticket_title'] ?? $serviceString),
+                        'service_type'=> $serviceString,
                         'description' => sanitize_string($fgmuDetails['job_description'] ?? 'Facilities maintenance request.'),
                         'status'      => 'pending',
                         'status_label'=> 'Pending Approval',
@@ -750,7 +760,7 @@ class TicketController extends BaseController
                         'source_of_fund'  => sanitize_string($fgmuDetails['source_of_fund'] ?? ''),
                     ]);
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "FGMU service request: {$service}");
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "FGMU service request: {$serviceString}");
                     $createdTickets[] = $ticketId;
                 }
             }
@@ -760,15 +770,25 @@ class TicketController extends BaseController
                 $leauDetails = sanitize_array($body['leau']['details'] ?? []);
                 $leauModel   = new LeauTicketDetailModel();
 
-                foreach ($body['leau']['services'] as $idx => $srv) {
-                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], $idx);
-                    $service  = sanitize_string($srv['service'] ?? 'Janitorial & Landscaping');
+                $servicesList = array_map(function($srv) {
+                    return sanitize_string($srv['service'] ?? '');
+                }, $body['leau']['services']);
+                $servicesList = array_filter($servicesList);
+
+                if (!empty($servicesList)) {
+                    $serviceString = $this->formatServicesList($servicesList);
+                    if (empty($serviceString)) {
+                        $serviceString = 'Janitorial & Landscaping';
+                    }
+
+                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], 0);
 
                     $this->ticketModel->insert([
                         'id'          => $ticketId,
                         'user_id'     => $userId,
                         'unit_id'     => self::UNIT_MAP['LEAU'],
-                        'service_type'=> $service,
+                        'title'       => sanitize_string($leauDetails['ticket_title'] ?? $serviceString),
+                        'service_type'=> $serviceString,
                         'description' => sanitize_string($leauDetails['job_description'] ?? 'Grounds maintenance request.'),
                         'status'      => 'pending',
                         'status_label'=> 'Pending Approval',
@@ -786,7 +806,7 @@ class TicketController extends BaseController
                         'source_of_fund'  => sanitize_string($leauDetails['source_of_fund'] ?? ''),
                     ]);
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU service request: {$service}");
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU service request: {$serviceString}");
                     $createdTickets[] = $ticketId;
                 }
             }
@@ -803,6 +823,7 @@ class TicketController extends BaseController
                     'id'          => $ticketId,
                     'user_id'     => $userId,
                     'unit_id'     => self::UNIT_MAP['SSU'],
+                    'title'       => 'Vehicle Pass Application',
                     'service_type'=> 'Vehicle Pass Application',
                     'description' => "Vehicle pass application for {$makeSeries} ({$plateNo})",
                     'status'      => 'pending',
@@ -848,6 +869,7 @@ class TicketController extends BaseController
                     'id'                    => $ticketId,
                     'user_id'               => $userId,
                     'unit_id'               => self::UNIT_MAP['SSU'],
+                    'title'                 => 'Incident Report',
                     'service_type'          => 'Incident Report',
                     'description'           => sanitize_string($inc['how'] ?? 'Incident reported to campus security.'),
                     'status'                => 'pending',
@@ -920,6 +942,7 @@ class TicketController extends BaseController
                     'id'          => $ticketId,
                     'user_id'     => $userId,
                     'unit_id'     => self::UNIT_MAP['TASU'],
+                    'title'       => 'Book A University Vehicle',
                     'service_type'=> 'Vehicle Request',
                     'description' => sanitize_string($ts['purposeOfTravel'] ?? 'University vehicle booking request.'),
                     'status'      => 'pending',
@@ -1458,5 +1481,24 @@ class TicketController extends BaseController
         }
 
         return $this->response->download($fullPath, null)->setFileName($attachment['file_name']);
+    }
+    private function formatServicesList(array $services): string
+    {
+        if (empty($services)) {
+            return '';
+        }
+
+        $formatted = [];
+        $count = count($services);
+        
+        foreach (array_values($services) as $i => $service) {
+            $service = trim($service);
+            if ($i < $count - 1) {
+                $service = preg_replace('/(?:\s+Works?|\s+works?)$/i', '', $service);
+            }
+            $formatted[] = $service;
+        }
+        
+        return implode(', ', $formatted);
     }
 }

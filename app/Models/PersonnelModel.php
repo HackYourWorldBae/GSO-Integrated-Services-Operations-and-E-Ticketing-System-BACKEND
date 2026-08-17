@@ -75,6 +75,7 @@ class PersonnelModel extends Model
             $p['next_is_project']    = (int) ($p['assignments'][1]['is_project'] ?? 0);
             $p['next_ticket_task']   = ($p['assignments'][1]['task_notes'] ?? null) 
                                         ?: (!empty($p['next_is_project']) ? (($p['assignments'][1]['project_title'] ?? null) ?: 'Office Project') : null);
+            $p['next_implementation_date'] = $p['assignments'][1]['implementation_date'] ?? null;
         }
 
         return $personnel;

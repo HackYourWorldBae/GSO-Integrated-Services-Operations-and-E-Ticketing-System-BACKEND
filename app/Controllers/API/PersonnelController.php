@@ -137,7 +137,6 @@ class PersonnelController extends BaseController
 
         $this->personnelModel->insert([
             'id'        => $personnelId,
-            'user_id'   => sanitize_string($body['user_id'] ?? '') ?: null,
             'unit_id'   => $unitId,
             'name'      => $name,
             'specialty' => $specialty,

@@ -21,7 +21,6 @@ class PersonnelModel extends Model
     protected $updatedField  = 'updated_at';
     protected $allowedFields = [
         'id',
-        'user_id',
         'unit_id',
         'name',
         'specialty',

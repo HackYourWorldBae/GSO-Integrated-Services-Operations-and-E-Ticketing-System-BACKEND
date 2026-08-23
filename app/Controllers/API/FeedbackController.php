@@ -81,7 +81,7 @@ class FeedbackController extends BaseController
         }
 
         // --- Validate Ratings ---
-        $ratingFields     = ['courtesy_rating', 'quality_rating', 'efficiency_rating', 'timeliness_rating', 'cleanliness_rating'];
+        $ratingFields     = ['quality_rating', 'efficiency_rating', 'timeliness_rating'];
         $completionStatus = sanitize_string($body['completion_status'] ?? 'on-time');
 
         $validCompletionStatuses = ['on-time', 'beyond-time', 'not-completed'];

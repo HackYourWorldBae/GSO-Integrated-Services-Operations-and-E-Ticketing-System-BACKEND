@@ -258,7 +258,56 @@ class PersonnelController extends BaseController
             'category' => ['id' => $id, 'unit_id' => $unitId, 'name' => $name, 'is_system' => 0],
         ], ResponseInterface::HTTP_CREATED);
     }
+    /**
+     * Update a personnel category name and cascade to personnel.
+     * PATCH /api/v1/personnel/categories/:id
+     * Body: { name: 'New Name' }
+     */
+    public function updateCategory(string $categoryId): ResponseInterface
+    {
+        $category = $this->categoryModel->find((int) $categoryId);
+        if (!$category) {
+            return $this->notFoundResponse('Category');
+        }
 
+        if ((int) $category['is_system'] === 1) {
+            return $this->errorResponse('System-defined categories cannot be renamed.');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $newName = sanitize_string($body['name'] ?? '');
+
+        if (empty($newName)) {
+            return $this->errorResponse('Category name is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Check for duplicates
+        $existing = $this->categoryModel
+            ->where('unit_id', $category['unit_id'])
+            ->where('name', $newName)
+            ->where('id !=', $categoryId)
+            ->first();
+
+        if ($existing) {
+            return $this->errorResponse('A category with this name already exists for this unit.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $oldName = $category['name'];
+
+        $this->categoryModel->update((int) $categoryId, ['name' => $newName]);
+
+        // Cascade update to personnel
+        $db = \Config\Database::connect();
+        $db->table('personnel')
+            ->where('unit_id', $category['unit_id'])
+            ->where('specialty', $oldName)
+            ->update(['specialty' => $newName]);
+
+        return $this->successResponse('Category updated.', [
+            'category_id' => (int) $categoryId,
+            'new_name'    => $newName
+        ]);
+    }
     /**
      * Delete a personnel category.
      * DELETE /api/v1/personnel/categories/:id

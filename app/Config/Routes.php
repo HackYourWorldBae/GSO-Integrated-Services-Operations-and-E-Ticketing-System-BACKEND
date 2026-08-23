@@ -80,6 +80,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
         $routes->get('personnel/categories/(:segment)',    'PersonnelController::categories/$1',      ['filter' => 'role:admin,dispatcher,director']);
         $routes->post('personnel/categories',             'PersonnelController::createCategory',     ['filter' => 'role:admin']);
+        $routes->patch('personnel/categories/(:num)',     'PersonnelController::updateCategory/$1',  ['filter' => 'role:admin']);
         $routes->delete('personnel/categories/(:num)',    'PersonnelController::deleteCategory/$1',  ['filter' => 'role:admin']);
 
         // -- Personnel (Admin & Dispatcher) --

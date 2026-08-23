@@ -270,10 +270,6 @@ class PersonnelController extends BaseController
             return $this->notFoundResponse('Category');
         }
 
-        if ((int) $category['is_system'] === 1) {
-            return $this->errorResponse('System-defined categories cannot be renamed.');
-        }
-
         $body = $this->request->getJSON(true) ?? [];
         $newName = sanitize_string($body['name'] ?? '');
 
@@ -318,10 +314,6 @@ class PersonnelController extends BaseController
         $category = $this->categoryModel->find((int) $categoryId);
         if (!$category) {
             return $this->notFoundResponse('Category');
-        }
-
-        if ((int) $category['is_system'] === 1) {
-            return $this->errorResponse('System-defined categories cannot be deleted.');
         }
 
         if ($this->categoryModel->isInUse((int) $categoryId)) {

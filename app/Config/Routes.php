@@ -94,7 +94,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- TASU Fleet Management (Admin) --
         $routes->get('tasu/vehicles',              'TasuController::fleet',            ['filter' => 'role:admin,dispatcher,director']);
         $routes->post('tasu/vehicles',             'TasuController::create',           ['filter' => 'role:admin']);
-        $routes->put('tasu/vehicles/(:num)',        'TasuController::update/$1',        ['filter' => 'role:admin']);
+        $routes->post('tasu/vehicles/(:num)',        'TasuController::update/$1',        ['filter' => 'role:admin']);
         $routes->delete('tasu/vehicles/(:num)',     'TasuController::delete/$1',        ['filter' => 'role:admin']);
         $routes->patch('tasu/vehicles/(:num)/status', 'TasuController::updateStatus/$1', ['filter' => 'role:admin,dispatcher']);
         $routes->get('tasu/dispatch',              'TasuController::dispatchBoard',    ['filter' => 'role:admin,dispatcher,director']);

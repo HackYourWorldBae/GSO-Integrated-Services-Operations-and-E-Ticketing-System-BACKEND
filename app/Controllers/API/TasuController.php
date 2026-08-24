@@ -65,7 +65,7 @@ class TasuController extends BaseController
      */
     public function create(): ResponseInterface
     {
-        $body = $this->request->getJSON(true) ?? [];
+        $body = $this->request->getJSON(true) ?? $this->request->getPost();
 
         $required = ['plate_no', 'model_name', 'category'];
         foreach ($required as $field) {
@@ -74,29 +74,40 @@ class TasuController extends BaseController
             }
         }
 
-        $validCategories = ['Van', 'Pickup', 'Bus', 'SUV', 'Logistics', 'Sedan', 'Other'];
         $category = sanitize_string($body['category'] ?? '');
-
+        $validCategories = ['Van', 'Pickup', 'Bus', 'SUV', 'Logistics', 'Sedan', 'Other'];
+        
         if (!in_array($category, $validCategories, true)) {
             return $this->errorResponse('Invalid vehicle category.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         // Check for duplicate plate_no
-        $existing = $this->vehicleModel->where('plate_no', sanitize_string($body['plate_no']))->first();
+        $existing = $this->vehicleModel->where('plate_no', sanitize_string($body['plate_no'] ?? ''))->first();
         if ($existing) {
             return $this->errorResponse('A vehicle with this plate number already exists.');
         }
 
+        $imageUrl = sanitize_string($body['image_url'] ?? '');
+
+        // Handle File Upload
+        $file = $this->request->getFile('image');
+        if ($file && $file->isValid() && !$file->hasMoved()) {
+            $newName = $file->getRandomName();
+            if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                $imageUrl = base_url('uploads/vehicles/' . $newName);
+            }
+        }
+
         $vehicleId = $this->vehicleModel->insert([
             'unit_id'          => self::TASU_UNIT_ID,
-            'plate_no'         => sanitize_string($body['plate_no']),
-            'model_name'       => sanitize_string($body['model_name']),
+            'plate_no'         => sanitize_string($body['plate_no'] ?? ''),
+            'model_name'       => sanitize_string($body['model_name'] ?? ''),
             'model_year'       => sanitize_string($body['model_year'] ?? ''),
             'fuel_type'        => sanitize_string($body['fuel_type'] ?? ''),
             'engine_specs'     => sanitize_string($body['engine_specs'] ?? ''),
             'category'         => $category,
             'status'           => 'available',
-            'image_url'        => sanitize_string($body['image_url'] ?? ''),
+            'image_url'        => $imageUrl,
             'registered_owner' => sanitize_string($body['registered_owner'] ?? 'Benguet State University'),
         ], true);
 
@@ -113,7 +124,7 @@ class TasuController extends BaseController
             return $this->notFoundResponse('Vehicle');
         }
 
-        $body       = $this->request->getJSON(true) ?? [];
+        $body       = $this->request->getJSON(true) ?? $this->request->getPost();
         $updateData = [];
 
         $stringFields = ['plate_no', 'model_name', 'model_year', 'fuel_type', 'engine_specs', 'image_url', 'registered_owner'];
@@ -129,6 +140,15 @@ class TasuController extends BaseController
                 return $this->errorResponse('Invalid vehicle category.');
             }
             $updateData['category'] = $body['category'];
+        }
+
+        // Handle File Upload
+        $file = $this->request->getFile('image');
+        if ($file && $file->isValid() && !$file->hasMoved()) {
+            $newName = $file->getRandomName();
+            if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                $updateData['image_url'] = base_url('uploads/vehicles/' . $newName);
+            }
         }
 
         if (!empty($updateData)) {

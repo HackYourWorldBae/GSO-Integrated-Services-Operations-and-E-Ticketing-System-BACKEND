@@ -29,8 +29,6 @@ class DatabaseSeeder extends Seeder
         // 4. Mock Users for testing
         $this->call('UsersSeeder');
 
-        // 5. Vehicles
-        $this->call('VehiclesSeeder');
 
         // 6. Personnel (empty — admins manage the roster via UI)
         $this->call('PersonnelSeeder');

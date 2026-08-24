@@ -954,12 +954,12 @@ class TicketController extends BaseController
                 ]);
 
                 (new TasuBookingDetailModel())->insert([
-                    'ticket_id'                => $ticketId,
-                    'request_time'             => sanitize_string($ts['time'] ?? ''),
+                    'ticket_id'                 => $ticketId,
+                    'request_time'              => sanitize_string($ts['time'] ?? ''),
                     'requesting_personnel'      => sanitize_string($ts['requestingPersonnel'] ?? ''),
                     'office_college_department' => sanitize_string($ts['officeCollegeDepartment'] ?? ''),
                     'agency_address'            => sanitize_string($ts['agencyAddress'] ?? ''),
-                    'num_passengers'            => max(1, (int) ($ts['numberOfPassengers'] ?? 1)),
+                    'num_passengers'            => (int) ($ts['numberOfPassengers'] ?? 0),
                     'date_of_travel'            => $ts['dateOfTravel'] ?? null,
                     'destination'               => sanitize_string($ts['destination'] ?? ''),
                     'purpose_of_travel'         => sanitize_string($ts['purposeOfTravel'] ?? ''),

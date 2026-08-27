@@ -92,9 +92,14 @@ class TasuController extends BaseController
         // Handle File Upload
         $file = $this->request->getFile('image');
         if ($file && $file->isValid() && !$file->hasMoved()) {
-            $newName = $file->getRandomName();
-            if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
-                $imageUrl = base_url('uploads/vehicles/' . $newName);
+            try {
+                $newName = $file->getRandomName();
+                if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                    $imageUrl = base_url('uploads/vehicles/' . $newName);
+                }
+            } catch (\Exception $e) {
+                log_message('error', 'Vehicle image upload failed: ' . $e->getMessage());
+                return $this->errorResponse('Failed to upload image. Please check server folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 
@@ -145,9 +150,14 @@ class TasuController extends BaseController
         // Handle File Upload
         $file = $this->request->getFile('image');
         if ($file && $file->isValid() && !$file->hasMoved()) {
-            $newName = $file->getRandomName();
-            if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
-                $updateData['image_url'] = base_url('uploads/vehicles/' . $newName);
+            try {
+                $newName = $file->getRandomName();
+                if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                    $updateData['image_url'] = base_url('uploads/vehicles/' . $newName);
+                }
+            } catch (\Exception $e) {
+                log_message('error', 'Vehicle image upload failed: ' . $e->getMessage());
+                return $this->errorResponse('Failed to upload image. Please check server folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 

@@ -24,7 +24,12 @@ class PersonnelModel extends Model
         'unit_id',
         'name',
         'specialty',
+        'contact_number',
         'status',
+    ];
+
+    protected $validationRules = [
+        'contact_number' => 'permit_empty|regex_match[/^[0-9]{11}$/]',
     ];
 
     /**

@@ -1325,7 +1325,7 @@ class TicketController extends BaseController
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
 
         $rows = $db->query("
-            SELECT ta.*, p.name AS personnel_name, v.model_name AS vehicle_name, v.plate_no AS vehicle_plate
+            SELECT ta.*, p.name AS personnel_name, p.contact_number AS personnel_contact, v.model_name AS vehicle_name, v.plate_no AS vehicle_plate
             FROM ticket_assignments ta
             LEFT JOIN personnel p ON p.id = ta.personnel_id
             LEFT JOIN vehicles v  ON v.id = ta.vehicle_id

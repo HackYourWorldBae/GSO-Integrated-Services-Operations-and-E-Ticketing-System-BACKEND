@@ -128,19 +128,25 @@ class PersonnelController extends BaseController
         $name      = sanitize_string($body['name'] ?? '');
         $specialty = sanitize_string($body['specialty'] ?? '');
         $unitId    = (int) ($body['unit_id'] ?? 0);
+        $contact   = sanitize_string($body['contact_number'] ?? '');
 
         if (empty($name) || empty($specialty) || !$unitId) {
             return $this->errorResponse('name, specialty, and unit_id are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        if (!empty($contact) && !preg_match('/^[0-9]{11}$/', $contact)) {
+            return $this->errorResponse('contact_number must be exactly 11 digits.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         $personnelId = generate_uuid();
 
         $this->personnelModel->insert([
-            'id'        => $personnelId,
-            'unit_id'   => $unitId,
-            'name'      => $name,
-            'specialty' => $specialty,
-            'status'    => 'available',
+            'id'             => $personnelId,
+            'unit_id'        => $unitId,
+            'name'           => $name,
+            'specialty'      => $specialty,
+            'contact_number' => $contact !== '' ? $contact : null,
+            'status'         => 'available',
         ]);
 
         return $this->successResponse('Personnel created successfully.', [
@@ -166,6 +172,13 @@ class PersonnelController extends BaseController
         }
         if (isset($body['specialty'])) {
             $updateData['specialty'] = sanitize_string($body['specialty']);
+        }
+        if (isset($body['contact_number'])) {
+            $contact = sanitize_string($body['contact_number']);
+            if ($contact !== '' && !preg_match('/^[0-9]{11}$/', $contact)) {
+                return $this->errorResponse('contact_number must be exactly 11 digits.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $updateData['contact_number'] = $contact !== '' ? $contact : null;
         }
 
         if (!empty($updateData)) {

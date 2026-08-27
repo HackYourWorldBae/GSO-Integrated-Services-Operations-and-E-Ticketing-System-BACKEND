@@ -88,6 +88,7 @@ CREATE TABLE `personnel` (
   `unit_id` int(11) unsigned NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `specialty` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `contact_number` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `status` enum('available','working','on_leave','on_trip') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'available',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

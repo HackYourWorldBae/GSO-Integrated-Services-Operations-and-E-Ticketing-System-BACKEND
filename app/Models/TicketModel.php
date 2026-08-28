@@ -54,10 +54,34 @@ class TicketModel extends Model
     // -------------------------------------------------------------------------
 
     /**
+     * Self-heal any TASU tickets that are marked Trip Completed or resolved,
+     * updating current_step to 5, status to closed, and is_archived to 1.
+     */
+    public function syncStaleTasuTickets(): void
+    {
+        $db = \Config\Database::connect();
+        $db->query("
+            UPDATE tickets
+            SET current_step = 5,
+                status = 'closed',
+                is_archived = 1,
+                updated_at = NOW()
+            WHERE unit_id = 4
+              AND (
+                status_label = 'Trip Completed'
+                OR status IN ('resolved', 'closed', 'completed')
+              )
+              AND current_step < 5
+        ");
+    }
+
+    /**
      * Get all active (not archived) tickets for a specific user/requestor.
      */
     public function getActiveByUser(string $userId): array
     {
+        $this->syncStaleTasuTickets();
+
         // Active tickets are:
         // 1. is_archived = 0 (Unrated tickets stay here forever)
         // 2. is_archived = 1 but rated/declined within the last 24 hours (Stays for 1 day)
@@ -129,6 +153,10 @@ class TicketModel extends Model
      */
     public function getActiveTickets(int $unitId): array
     {
+        if ($unitId === 4) {
+            $this->syncStaleTasuTickets();
+        }
+
         return $this->where('unit_id', $unitId)
                     ->whereIn('status', ['processing'])
                     ->where('is_archived', 0)

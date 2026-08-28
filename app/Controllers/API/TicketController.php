@@ -636,18 +636,22 @@ class TicketController extends BaseController
             default => 'Completed',
         };
 
-        $newStatus = ($unitCode === 'SSU') ? 'closed' : 'resolved';
-        $logMessage = ($unitCode === 'SSU') ? 'Sticker pass issued. Ticket marked as closed.' : 'Ticket marked as completed. Awaiting user feedback.';
+        $newStatus = ($unitCode === 'SSU' || $unitCode === 'TASU') ? 'closed' : 'resolved';
+        $logMessage = match($unitCode) {
+            'SSU'   => 'Sticker pass issued. Ticket marked as closed.',
+            'TASU'  => 'Trip completed and accomplished. Ticket marked as closed.',
+            default => 'Ticket marked as completed. Awaiting user feedback.',
+        };
 
         $updateData = [
             'status'       => $newStatus,
             'status_label' => $statusLabel,
-            'current_step' => ($unitCode === 'TASU') ? 4 : (($unitCode === 'SSU') ? 5 : 6),
+            'current_step' => ($unitCode === 'TASU') ? 5 : (($unitCode === 'SSU') ? 5 : 6),
             'completed_at' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
         
-        if ($unitCode === 'SSU') {
+        if ($unitCode === 'SSU' || $unitCode === 'TASU') {
             $updateData['is_archived'] = 1;
         }
 

@@ -1398,41 +1398,77 @@ class TicketController extends BaseController
         $year = date('Y', strtotime($ticket['created_at'] ?? date('Y-m-d')));
         $uploadPath = WRITEPATH . "uploads/tickets/{$year}/{$ticketId}/";
 
+        // Ensure upload directory exists
+        if (!is_dir($uploadPath)) {
+            @mkdir($uploadPath, 0775, true);
+        }
+
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx'];
+        $allowedMimes = [
+            'image/jpeg', 'image/png', 'image/jpg',
+            'application/pdf', 
+            'application/msword', 
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/zip',
+            'application/x-zip',
+            'application/x-zip-compressed',
+            'application/octet-stream',
+            'application/x-download',
+            'binary/octet-stream'
+        ];
+
         foreach ($attachments as $file) {
+            $clientName = $file->getClientName();
+            $ext = strtolower($file->getClientExtension());
+
             if ($file->isValid() && !$file->hasMoved()) {
                 // Validate size (5MB max)
                 $sizeMb = $file->getSizeByUnit('mb');
                 if ($sizeMb > 5) {
-                    $errors[] = $file->getName() . ' exceeds the 5MB size limit.';
+                    $errors[] = $clientName . ' exceeds the 5MB size limit.';
                     continue;
                 }
 
-                // Validate mime type
+                // Validate mime type & extension
                 $mime = $file->getMimeType();
-                $allowedMimes = [
-                    'image/jpeg', 'image/png', 'image/jpg',
-                    'application/pdf', 
-                    'application/msword', 
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'application/vnd.ms-excel',
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                ];
+                $clientMime = $file->getClientMimeType();
 
-                if (!in_array($mime, $allowedMimes)) {
-                    $errors[] = $file->getName() . ' has an invalid file type.';
+                if (!in_array($ext, $allowedExtensions)) {
+                    $errors[] = $clientName . ' has an unsupported file extension (.' . $ext . ').';
                     continue;
+                }
+
+                if (!in_array($mime, $allowedMimes) && !in_array($clientMime, $allowedMimes)) {
+                    $errors[] = $clientName . ' has an invalid file type (' . $mime . ').';
+                    continue;
+                }
+
+                // Normalize stored MIME type based on verified extension
+                if ($ext === 'docx') {
+                    $storedMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                } elseif ($ext === 'doc') {
+                    $storedMime = 'application/msword';
+                } elseif ($ext === 'pdf') {
+                    $storedMime = 'application/pdf';
+                } elseif ($ext === 'xlsx') {
+                    $storedMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                } elseif ($ext === 'xls') {
+                    $storedMime = 'application/vnd.ms-excel';
+                } else {
+                    $storedMime = $mime;
                 }
 
                 $newName = $file->getRandomName();
-                $originalName = $file->getClientName();
                 $fileSize = $file->getSize();
 
                 if ($file->move($uploadPath, $newName)) {
                     $record = [
                         'ticket_id'       => $ticketId,
-                        'file_name'       => $originalName,
+                        'file_name'       => $clientName,
                         'file_path'       => "tickets/{$year}/{$ticketId}/{$newName}",
-                        'file_type'       => $mime,
+                        'file_type'       => $storedMime,
                         'file_size_bytes' => $fileSize,
                         'uploaded_at'     => date('Y-m-d H:i:s'),
                     ];
@@ -1441,11 +1477,11 @@ class TicketController extends BaseController
                     $record['id'] = $attachmentModel->getInsertID();
                     $uploadedData[] = $record;
                 } else {
-                    $errors[] = "Failed to move " . $file->getName();
+                    $errors[] = "Failed to save " . $clientName;
                 }
             } else {
                 if ($file->getError() !== UPLOAD_ERR_NO_FILE) {
-                    $errors[] = "Error uploading " . $file->getName() . " - " . $file->getErrorString();
+                    $errors[] = "Error uploading " . $clientName . " - " . $file->getErrorString();
                 }
             }
         }

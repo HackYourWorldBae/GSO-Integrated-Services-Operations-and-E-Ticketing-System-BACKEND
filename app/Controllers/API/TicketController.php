@@ -653,21 +653,31 @@ class TicketController extends BaseController
 
         $this->ticketModel->update($ticketId, $updateData);
 
-        // Mark the active assignment as completed and set worker to available
+        // Mark the active assignment as completed and set worker & vehicle to available
         $db = Database::connect();
         
-        // Find personnel assigned to this ticket before we close it
+        // Find personnel and vehicle assigned to this ticket before we close it
         $assignments = $db->query(
-            "SELECT personnel_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
+            "SELECT personnel_id, vehicle_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
             [$ticketId]
         )->getResultArray();
 
         $personnelModel = new \App\Models\PersonnelModel();
+        $vehicleModel   = new \App\Models\VehicleModel();
+
         foreach ($assignments as $a) {
-            $personnelModel->update($a['personnel_id'], [
-                'status' => 'available',
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
+            if (!empty($a['personnel_id'])) {
+                $personnelModel->update($a['personnel_id'], [
+                    'status' => 'available',
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+            if (!empty($a['vehicle_id'])) {
+                $vehicleModel->update($a['vehicle_id'], [
+                    'status' => 'available',
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
         }
 
         $db->query(

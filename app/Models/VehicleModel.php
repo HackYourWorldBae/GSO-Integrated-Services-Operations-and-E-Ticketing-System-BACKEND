@@ -37,10 +37,35 @@ class VehicleModel extends Model
     ];
 
     /**
+     * Synchronize any vehicle currently marked 'in_use' that does not have an active,
+     * uncompleted ticket assignment (e.g. ticket was already completed, archived, or resolved).
+     */
+    public function syncStaleVehicleStatuses(): void
+    {
+        $db = \Config\Database::connect();
+        $db->query("
+            UPDATE vehicles v
+            SET v.status = 'available', v.updated_at = NOW()
+            WHERE v.status = 'in_use'
+              AND v.id NOT IN (
+                  SELECT DISTINCT ta.vehicle_id
+                  FROM ticket_assignments ta
+                  JOIN tickets t ON t.id = ta.ticket_id
+                  WHERE ta.vehicle_id IS NOT NULL
+                    AND ta.completed_at IS NULL
+                    AND t.status IN ('processing', 'approved', 'pending')
+                    AND t.is_archived = 0
+              )
+        ");
+    }
+
+    /**
      * Get all available vehicles (for requestors browsing vehicle availability).
      */
     public function getAvailable(): array
     {
+        $this->syncStaleVehicleStatuses();
+
         return $this->where('status', 'available')
                     ->orderBy('category', 'ASC')
                     ->findAll();
@@ -51,6 +76,8 @@ class VehicleModel extends Model
      */
     public function getTasuFleet(int $tasuUnitId): array
     {
+        $this->syncStaleVehicleStatuses();
+
         return $this->where('unit_id', $tasuUnitId)
                     ->orderBy('category', 'ASC')
                     ->findAll();

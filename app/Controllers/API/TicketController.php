@@ -1367,17 +1367,27 @@ class TicketController extends BaseController
             return $this->forbiddenResponse('You do not have permission to upload files to this ticket.');
         }
 
-        $files = $this->request->getFiles();
+        $rawAttachments = $this->request->getFileMultiple('attachments');
+        if (empty($rawAttachments)) {
+            $files = $this->request->getFiles();
+            $rawAttachments = $files['attachments'] ?? null;
+        }
 
-        $attachments = $this->request->getFileMultiple('attachments') ?? ($files['attachments'] ?? null);
+        if (empty($rawAttachments)) {
+            $single = $this->request->getFile('attachment') ?? $this->request->getFile('attachments');
+            if ($single) {
+                $rawAttachments = [$single];
+            }
+        }
+
+        if (!is_array($rawAttachments)) {
+            $rawAttachments = $rawAttachments ? [$rawAttachments] : [];
+        }
+
+        $attachments = array_values(array_filter($rawAttachments, fn($f) => ($f instanceof \CodeIgniter\HTTP\Files\UploadedFile) && $f->getError() !== UPLOAD_ERR_NO_FILE));
 
         if (empty($attachments)) {
             return $this->errorResponse('No files uploaded. Use "attachments[]" key in your form-data.');
-        }
-
-        $attachments = $files['attachments'];
-        if (!is_array($attachments)) {
-            $attachments = [$attachments];
         }
 
         $attachmentModel = new TicketAttachmentModel();

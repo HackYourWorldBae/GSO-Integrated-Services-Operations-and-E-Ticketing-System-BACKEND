@@ -105,12 +105,14 @@ class VehicleModel extends Model
                 ta.dispatcher_notes,
                 t.status                     AS booking_status,
                 t.status_label,
+                t.submitted_at,
                 tbd.destination,
                 tbd.date_of_travel,
                 tbd.request_time,
                 tbd.return_time,
                 tbd.requesting_personnel,
                 tbd.office_college_department,
+                tbd.agency_address,
                 tbd.num_passengers,
                 tbd.purpose_of_travel,
                 p.name                       AS assigned_driver,
@@ -118,14 +120,17 @@ class VehicleModel extends Model
             FROM vehicles v
             LEFT JOIN ticket_assignments ta
                 ON ta.vehicle_id = v.id
+                AND ta.completed_at IS NULL
             LEFT JOIN tickets t
-                ON t.id = ta.ticket_id AND t.status != 'declined'
+                ON t.id = ta.ticket_id
+                AND t.status IN ('approved', 'processing')
+                AND t.is_archived = 0
             LEFT JOIN tasu_booking_details tbd
                 ON tbd.ticket_id = ta.ticket_id
             LEFT JOIN personnel p
                 ON p.id = ta.personnel_id
             WHERE v.unit_id = ?
-            ORDER BY v.category ASC, v.model_name ASC
+            ORDER BY tbd.date_of_travel ASC, v.model_name ASC
         ", [$tasuUnitId])->getResultArray();
     }
 }

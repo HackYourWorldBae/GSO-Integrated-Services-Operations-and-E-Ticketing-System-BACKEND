@@ -65,7 +65,14 @@ class TasuController extends BaseController
      */
     public function create(): ResponseInterface
     {
-        $body = $this->request->getJSON(true) ?? $this->request->getPost();
+        $body = $this->request->getPost();
+        if (empty($body)) {
+            try {
+                $body = $this->request->getJSON(true) ?? [];
+            } catch (\Throwable $e) {
+                $body = [];
+            }
+        }
 
         $required = ['plate_no', 'model_name', 'category'];
         foreach ($required as $field) {
@@ -92,15 +99,29 @@ class TasuController extends BaseController
         // Handle File Upload
         $file = $this->request->getFile('image');
         if ($file && $file->isValid() && !$file->hasMoved()) {
+            $allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+            $mime = $file->getMimeType();
+            $clientMime = $file->getClientMimeType();
+
+            if (!in_array($mime, $allowedMimes, true) && !in_array($clientMime, $allowedMimes, true)) {
+                return $this->errorResponse('Invalid image type. Please upload a JPG, PNG, WEBP, or GIF image.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
             try {
+                $uploadDir = FCPATH . 'uploads/vehicles/';
+                if (!is_dir($uploadDir)) {
+                    @mkdir($uploadDir, 0775, true);
+                }
                 $newName = $file->getRandomName();
-                if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                if ($file->move($uploadDir, $newName)) {
                     $imageUrl = base_url('uploads/vehicles/' . $newName);
                 }
             } catch (\Exception $e) {
                 log_message('error', 'Vehicle image upload failed: ' . $e->getMessage());
                 return $this->errorResponse('Failed to upload image. Please check server folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
             }
+        } elseif ($file && !$file->isValid() && $file->getError() !== UPLOAD_ERR_NO_FILE) {
+            return $this->errorResponse('Image upload error: ' . $file->getErrorString(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $vehicleId = $this->vehicleModel->insert([
@@ -116,6 +137,12 @@ class TasuController extends BaseController
             'registered_owner' => sanitize_string($body['registered_owner'] ?? 'Benguet State University'),
         ], true);
 
+        if (!$vehicleId) {
+            $errors = $this->vehicleModel->errors();
+            $errorMessage = !empty($errors) ? implode(', ', $errors) : 'Failed to register vehicle.';
+            return $this->errorResponse($errorMessage, $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         return $this->successResponse('Vehicle added to fleet.', ['vehicle_id' => $vehicleId], ResponseInterface::HTTP_CREATED);
     }
 
@@ -129,13 +156,30 @@ class TasuController extends BaseController
             return $this->notFoundResponse('Vehicle');
         }
 
-        $body       = $this->request->getJSON(true) ?? $this->request->getPost();
+        $body = $this->request->getPost();
+        if (empty($body)) {
+            try {
+                $body = $this->request->getJSON(true) ?? [];
+            } catch (\Throwable $e) {
+                $body = [];
+            }
+        }
+
         $updateData = [];
 
         $stringFields = ['plate_no', 'model_name', 'model_year', 'fuel_type', 'engine_specs', 'image_url', 'registered_owner'];
         foreach ($stringFields as $field) {
             if (isset($body[$field])) {
                 $updateData[$field] = sanitize_string($body[$field]);
+            }
+        }
+
+        if (isset($body['plate_no'])) {
+            $existing = $this->vehicleModel->where('plate_no', sanitize_string($body['plate_no']))
+                                           ->where('id !=', $vehicleId)
+                                           ->first();
+            if ($existing) {
+                return $this->errorResponse('A vehicle with this plate number already exists.');
             }
         }
 
@@ -150,20 +194,39 @@ class TasuController extends BaseController
         // Handle File Upload
         $file = $this->request->getFile('image');
         if ($file && $file->isValid() && !$file->hasMoved()) {
+            $allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+            $mime = $file->getMimeType();
+            $clientMime = $file->getClientMimeType();
+
+            if (!in_array($mime, $allowedMimes, true) && !in_array($clientMime, $allowedMimes, true)) {
+                return $this->errorResponse('Invalid image type. Please upload a JPG, PNG, WEBP, or GIF image.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
             try {
+                $uploadDir = FCPATH . 'uploads/vehicles/';
+                if (!is_dir($uploadDir)) {
+                    @mkdir($uploadDir, 0775, true);
+                }
                 $newName = $file->getRandomName();
-                if ($file->move(FCPATH . 'uploads/vehicles/', $newName)) {
+                if ($file->move($uploadDir, $newName)) {
                     $updateData['image_url'] = base_url('uploads/vehicles/' . $newName);
                 }
             } catch (\Exception $e) {
                 log_message('error', 'Vehicle image upload failed: ' . $e->getMessage());
                 return $this->errorResponse('Failed to upload image. Please check server folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
             }
+        } elseif ($file && !$file->isValid() && $file->getError() !== UPLOAD_ERR_NO_FILE) {
+            return $this->errorResponse('Image upload error: ' . $file->getErrorString(), [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         if (!empty($updateData)) {
             $updateData['updated_at'] = date('Y-m-d H:i:s');
-            $this->vehicleModel->update($vehicleId, $updateData);
+            $updated = $this->vehicleModel->update($vehicleId, $updateData);
+            if ($updated === false) {
+                $errors = $this->vehicleModel->errors();
+                $errorMessage = !empty($errors) ? implode(', ', $errors) : 'Failed to update vehicle.';
+                return $this->errorResponse($errorMessage, $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
         }
 
         return $this->successResponse('Vehicle updated.', ['vehicle_id' => $vehicleId]);

@@ -376,6 +376,23 @@ class TicketModel extends Model
             ")->getResultArray();
         }
 
+        // TASU specific analytics
+        if ($unitId === 4) {
+            $stats['fleet_activity'] = $db->query("
+                SELECT 
+                    v.id,
+                    v.model_name,
+                    v.plate_no,
+                    v.category,
+                    COUNT(ta.id) AS trip_count
+                FROM vehicles v
+                LEFT JOIN ticket_assignments ta ON ta.vehicle_id = v.id
+                WHERE v.unit_id = 4
+                GROUP BY v.id, v.model_name, v.plate_no, v.category
+                ORDER BY trip_count DESC, v.model_name ASC
+            ")->getResultArray();
+        }
+
         return $stats;
     }
 }

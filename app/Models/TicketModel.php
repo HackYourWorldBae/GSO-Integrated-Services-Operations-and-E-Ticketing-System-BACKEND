@@ -260,8 +260,8 @@ class TicketModel extends Model
                 SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending,
                 SUM(CASE WHEN status = 'approved'   THEN 1 ELSE 0 END) AS approved,
                 SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
-                SUM(CASE WHEN status = 'processing' AND status_label IN ('Dispatched', 'Dispatched (Scheduled)', 'Dispatched / Scheduled') THEN 1 ELSE 0 END) AS scheduled,
-                SUM(CASE WHEN status = 'processing' AND status_label IN ('On Route / In Progress', 'Job Started') THEN 1 ELSE 0 END) AS active_working,
+                SUM(CASE WHEN status = 'processing' AND (status_label LIKE '%Dispatch%' OR status_label LIKE '%Schedul%' OR status_label LIKE '%Waiting%') THEN 1 ELSE 0 END) AS scheduled,
+                SUM(CASE WHEN status = 'processing' AND (status_label LIKE '%Route%' OR status_label LIKE '%Started%' OR status_label LIKE '%Working%' OR status_label LIKE '%In Progress%') THEN 1 ELSE 0 END) AS active_working,
                 SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS resolved,
                 SUM(CASE WHEN status = 'declined'   THEN 1 ELSE 0 END) AS declined,
                 SUM(CASE WHEN is_archived = 1       THEN 1 ELSE 0 END) AS archived

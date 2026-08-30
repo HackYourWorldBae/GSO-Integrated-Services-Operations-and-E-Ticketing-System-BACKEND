@@ -80,7 +80,7 @@ class TasuController extends BaseController
                 return $this->errorResponse("{$field} is required.", [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
         }
-
+        
         $category = sanitize_string($body['category'] ?? '');
         $validCategories = ['Van', 'Pickup', 'Bus', 'SUV', 'Logistics', 'Sedan', 'Other'];
         

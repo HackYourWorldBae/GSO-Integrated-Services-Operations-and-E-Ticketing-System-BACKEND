@@ -92,13 +92,25 @@ class VehicleModel extends Model
 
         return $db->query("
             SELECT
-                v.*,
-                ta.ticket_id                 AS current_ticket_id,
+                v.id                         AS vehicle_id,
+                v.plate_no,
+                v.model_name,
+                v.category,
+                v.status                     AS vehicle_status,
+                v.image_url,
+                ta.id                        AS assignment_id,
+                ta.ticket_id,
+                ta.implementation_date,
+                ta.task_notes,
+                ta.dispatcher_notes,
                 t.status                     AS booking_status,
+                t.status_label,
                 tbd.destination,
                 tbd.date_of_travel,
                 tbd.request_time,
                 tbd.return_time,
+                tbd.requesting_personnel,
+                tbd.office_college_department,
                 tbd.num_passengers,
                 tbd.purpose_of_travel,
                 p.name                       AS assigned_driver,
@@ -106,9 +118,8 @@ class VehicleModel extends Model
             FROM vehicles v
             LEFT JOIN ticket_assignments ta
                 ON ta.vehicle_id = v.id
-                AND ta.completed_at IS NULL
             LEFT JOIN tickets t
-                ON t.id = ta.ticket_id
+                ON t.id = ta.ticket_id AND t.status != 'declined'
             LEFT JOIN tasu_booking_details tbd
                 ON tbd.ticket_id = ta.ticket_id
             LEFT JOIN personnel p

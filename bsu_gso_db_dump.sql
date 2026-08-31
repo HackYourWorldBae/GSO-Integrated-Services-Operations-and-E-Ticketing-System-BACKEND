@@ -281,6 +281,7 @@ CREATE TABLE `ticket_assignments` (
   `personnel_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `vehicle_id` int(11) unsigned DEFAULT NULL,
   `implementation_date` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `working_days` int(11) DEFAULT NULL,
   `dispatcher_notes` text COLLATE utf8mb4_unicode_ci,
   `task_notes` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -107,6 +107,7 @@ class DispatchController extends BaseController
             'personnel_id'       => $personnelId,
             'vehicle_id'         => $vehicleId,
             'implementation_date'=> $implementationDate,
+            'working_days'       => $workingDays,
             'task_notes'         => $taskNotes,
             'dispatcher_notes'   => $dispatcherNotes,
             'assigned_at'        => date('Y-m-d H:i:s'),
@@ -116,10 +117,11 @@ class DispatchController extends BaseController
         // Setting it to 'processing' moves it out of the dispatcher's pending queue,
         // but 'status_label' ensures everyone knows it's only dispatched, not started.
         $this->ticketModel->update($ticketId, [
-            'status'       => 'processing',
-            'status_label' => $statusLabel,
-            'current_step' => $isTasu ? 3 : 4, // 4 = Dispatch & Schedule for FGMU/LEAU
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'status'               => 'processing',
+            'status_label'         => $statusLabel,
+            'current_step'         => $isTasu ? 3 : 4, // 4 = Dispatch & Schedule for FGMU/LEAU
+            'project_working_days' => $workingDays,
+            'updated_at'           => date('Y-m-d H:i:s'),
         ]);
 
         // --- Update worker status (remain available until they start the job) ---

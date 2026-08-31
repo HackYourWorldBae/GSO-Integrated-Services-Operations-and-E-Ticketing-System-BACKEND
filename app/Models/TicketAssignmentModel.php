@@ -15,6 +15,7 @@ class TicketAssignmentModel extends Model
         'personnel_id',
         'vehicle_id',
         'implementation_date',
+        'working_days',
         'dispatcher_notes',
         'task_notes',
         'assigned_at',

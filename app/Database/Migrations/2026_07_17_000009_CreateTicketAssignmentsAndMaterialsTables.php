@@ -55,6 +55,12 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'null'       => true,
                 'default'    => null,
             ],
+            'working_days' => [
+                'type'       => 'INT',
+                'constraint' => 11,
+                'null'       => true,
+                'default'    => null,
+            ],
             'dispatcher_notes' => [
                 'type' => 'TEXT',
                 'null' => true,

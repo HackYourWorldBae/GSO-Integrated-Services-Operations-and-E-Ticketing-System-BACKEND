@@ -1369,6 +1369,9 @@ class TicketController extends BaseController
             $ticket['materials']           = $materialsMap[$id] ?? [];
             $ticket['total_material_cost'] = array_sum(array_column($ticket['materials'], 'total_price'));
             $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']);
+            $ticket['working_days']        = !empty($ticket['project_working_days']) 
+                ? (int) $ticket['project_working_days'] 
+                : (!empty($ticket['assignment']['working_days']) ? (int) $ticket['assignment']['working_days'] : null);
         }
         unset($ticket);
 

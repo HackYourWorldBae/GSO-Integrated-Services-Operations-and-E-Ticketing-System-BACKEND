@@ -31,6 +31,7 @@ class TicketModel extends Model
         'location',
         'office_room',
         'is_archived',
+        'materials_logged',
         'is_under_investigation',
         'ssu_notation',
         'submitted_at',
@@ -76,21 +77,19 @@ class TicketModel extends Model
     }
 
     /**
-     * Get all active (not archived) tickets for a specific user/requestor.
+     * Get all active (not archived / pending action) tickets for a specific user/requestor.
      */
     public function getActiveByUser(string $userId): array
     {
         $this->syncStaleTasuTickets();
+        $db = \Config\Database::connect();
 
-        // Active tickets are:
-        // 1. is_archived = 0 (Unrated tickets stay here forever)
-        // 2. is_archived = 1 but rated/declined within the last 24 hours (Stays for 1 day)
         return $this->where('user_id', $userId)
                     ->groupStart()
                         ->where('is_archived', 0)
                         ->orGroupStart()
-                            ->where('is_archived', 1)
                             ->where('updated_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)')
+                            ->where('status !=', 'closed')
                         ->groupEnd()
                     ->groupEnd()
                     ->orderBy('submitted_at', 'DESC')
@@ -99,14 +98,18 @@ class TicketModel extends Model
 
     /**
      * Get all archived/completed tickets for a specific user.
+     * Includes any ticket that is fully closed/archived, or has feedback submitted by the user.
      */
     public function getArchivedByUser(string $userId): array
     {
-        // Archived/Completed tickets are:
-        // is_archived = 1 AND it has been more than 1 day since it was archived
+        $db = \Config\Database::connect();
+
         return $this->where('user_id', $userId)
-                    ->where('is_archived', 1)
-                    ->where('updated_at < DATE_SUB(NOW(), INTERVAL 1 DAY)')
+                    ->groupStart()
+                        ->where('is_archived', 1)
+                        ->orWhereIn('status', ['closed', 'completed'])
+                        ->orWhere("id IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
+                    ->groupEnd()
                     ->orderBy('submitted_at', 'DESC')
                     ->findAll();
     }

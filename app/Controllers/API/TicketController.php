@@ -612,8 +612,15 @@ class TicketController extends BaseController
     }
 
     /**
-     * Mark a ticket as completed/resolved (processing -> resolved, step 3 -> 4).
-     * Triggers archival and awaits user feedback.
+     * Mark a ticket as completed/resolved (processing -> resolved/closed).
+     *
+     * Body (Optional for FGMU/LEAU):
+     * {
+     *   materials?: [
+     *     { material_name: string, quantity: number, unit_measurement: string, unit_price: number, total_price?: number }
+     *   ],
+     *   dispatcher_notes?: string
+     * }
      */
     public function complete(string $ticketId): ResponseInterface
     {
@@ -623,44 +630,101 @@ class TicketController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
-        if (!in_array($ticket['status'], ['processing', 'approved'])) {
+        if (!in_array($ticket['status'], ['processing', 'approved', 'resolved'])) {
             return $this->errorResponse("Only processing or approved tickets can be marked as completed.");
         }
 
+        $body = $this->request->getJSON(true) ?? [];
         $unitId   = (int) $ticket['unit_id'];
         $unitCode = array_search($unitId, self::UNIT_MAP);
 
-        $statusLabel = match($unitCode) {
-            'TASU'  => 'Trip Completed',
-            'SSU'   => 'Sticker Issued',
-            default => 'Completed',
-        };
+        $db = Database::connect();
+        $db->transStart();
 
-        $newStatus = ($unitCode === 'SSU' || $unitCode === 'TASU') ? 'closed' : 'resolved';
-        $logMessage = match($unitCode) {
-            'SSU'   => 'Sticker pass issued. Ticket marked as closed.',
-            'TASU'  => 'Trip completed and accomplished. Ticket marked as closed.',
-            default => 'Ticket marked as completed. Awaiting user feedback.',
-        };
+        // 1. Process Materials if provided (or if empty array sent to explicitly confirm liquidation)
+        $materialsLogged = !empty($ticket['materials_logged']) ? 1 : 0;
+        $activeAssignment = $db->query(
+            "SELECT id FROM ticket_assignments WHERE ticket_id = ? ORDER BY assigned_at DESC LIMIT 1",
+            [$ticketId]
+        )->getRowArray();
+        $assignmentId = $activeAssignment['id'] ?? null;
+
+        if (isset($body['materials']) && is_array($body['materials'])) {
+            $materialModel = new \App\Models\TicketMaterialModel();
+            
+            // Delete existing materials for this ticket to avoid duplicate submission on update
+            $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+            if ($assignmentId) {
+                $db->query("DELETE FROM ticket_materials WHERE assignment_id = ?", [$assignmentId]);
+            }
+
+            foreach ($body['materials'] as $mat) {
+                $name = sanitize_string($mat['material_name'] ?? $mat['name'] ?? '');
+                if (empty($name)) {
+                    continue;
+                }
+
+                $qty   = max(0.01, (float) ($mat['quantity'] ?? 1));
+                $unit  = sanitize_string($mat['unit_measurement'] ?? $mat['unit'] ?? 'pcs');
+                $price = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
+                $total = isset($mat['total_price']) ? (float) $mat['total_price'] : ($qty * $price);
+
+                $materialModel->insert([
+                    'ticket_id'        => $ticketId,
+                    'assignment_id'    => $assignmentId,
+                    'material_name'    => $name,
+                    'quantity'         => $qty,
+                    'unit_measurement' => $unit,
+                    'unit_price'       => $price,
+                    'total_price'      => $total,
+                    'created_at'       => date('Y-m-d H:i:s'),
+                ]);
+            }
+
+            $materialsLogged = 1;
+        }
+
+        // Check if user feedback already exists
+        $feedbackModel = new \App\Models\TicketFeedbackModel();
+        $hasFeedback   = !empty($feedbackModel->getByTicket($ticketId));
+
+        // Determine status and archival state
+        // For FGMU & LEAU: Both user feedback AND material liquidation are needed to move to final archives
+        $isArchived = 0;
+        if ($unitCode === 'SSU' || $unitCode === 'TASU') {
+            $isArchived  = 1;
+            $newStatus   = 'closed';
+            $statusLabel = ($unitCode === 'TASU') ? 'Trip Completed' : 'Sticker Issued';
+        } else {
+            // FGMU / LEAU
+            if ($hasFeedback && $materialsLogged) {
+                $isArchived  = 1;
+                $newStatus   = 'closed';
+                $statusLabel = 'Closed';
+            } elseif ($materialsLogged) {
+                $isArchived  = 0;
+                $newStatus   = 'resolved';
+                $statusLabel = 'Awaiting User Feedback';
+            } else {
+                $isArchived  = 0;
+                $newStatus   = 'resolved';
+                $statusLabel = 'Awaiting Material Liquidation';
+            }
+        }
 
         $updateData = [
-            'status'       => $newStatus,
-            'status_label' => $statusLabel,
-            'current_step' => ($unitCode === 'TASU') ? 5 : (($unitCode === 'SSU') ? 5 : 6),
-            'completed_at' => date('Y-m-d H:i:s'),
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'status'           => $newStatus,
+            'status_label'     => $statusLabel,
+            'current_step'     => ($unitCode === 'TASU') ? 5 : (($unitCode === 'SSU') ? 5 : 6),
+            'materials_logged' => $materialsLogged,
+            'is_archived'      => $isArchived,
+            'completed_at'     => $ticket['completed_at'] ?? date('Y-m-d H:i:s'),
+            'updated_at'       => date('Y-m-d H:i:s'),
         ];
-        
-        if ($unitCode === 'SSU' || $unitCode === 'TASU') {
-            $updateData['is_archived'] = 1;
-        }
 
         $this->ticketModel->update($ticketId, $updateData);
 
-        // Mark the active assignment as completed and set worker & vehicle to available
-        $db = Database::connect();
-        
-        // Find personnel and vehicle assigned to this ticket before we close it
+        // Mark active assignment as completed and set worker & vehicle to available
         $assignments = $db->query(
             "SELECT personnel_id, vehicle_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
             [$ticketId]
@@ -672,22 +736,36 @@ class TicketController extends BaseController
         foreach ($assignments as $a) {
             if (!empty($a['personnel_id'])) {
                 $personnelModel->update($a['personnel_id'], [
-                    'status' => 'available',
-                    'updated_at' => date('Y-m-d H:i:s')
+                    'status'     => 'available',
+                    'updated_at' => date('Y-m-d H:i:s'),
                 ]);
             }
             if (!empty($a['vehicle_id'])) {
                 $vehicleModel->update($a['vehicle_id'], [
-                    'status' => 'available',
-                    'updated_at' => date('Y-m-d H:i:s')
+                    'status'     => 'available',
+                    'updated_at' => date('Y-m-d H:i:s'),
                 ]);
             }
         }
 
-        $db->query(
-            "UPDATE ticket_assignments SET completed_at = NOW() WHERE ticket_id = ? AND completed_at IS NULL",
-            [$ticketId]
-        );
+        $assignmentUpdate = ['completed_at' => date('Y-m-d H:i:s')];
+        if (!empty($body['dispatcher_notes'])) {
+            $assignmentUpdate['dispatcher_notes'] = sanitize_string($body['dispatcher_notes']);
+        }
+        $db->table('ticket_assignments')
+           ->where('ticket_id', $ticketId)
+           ->where('completed_at IS NULL')
+           ->update($assignmentUpdate);
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Failed to complete ticket.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $logMessage = ($materialsLogged && !empty($body['materials']))
+            ? "Job Completed & Materials Logged (" . count($body['materials']) . " items listed)."
+            : "Ticket marked as completed.";
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
@@ -698,7 +776,13 @@ class TicketController extends BaseController
             "Your request for {$ticket['service_type']} has been marked as completed."
         );
 
-        return $this->successResponse('Ticket completed and archived.', ['ticket_id' => $ticketId, 'status' => $newStatus]);
+        return $this->successResponse('Ticket completed successfully.', [
+            'ticket_id'        => $ticketId, 
+            'status'           => $newStatus,
+            'status_label'     => $statusLabel,
+            'materials_logged' => $materialsLogged,
+            'is_archived'      => $isArchived,
+        ]);
     }
 
     // -------------------------------------------------------------------------
@@ -1221,6 +1305,7 @@ class TicketController extends BaseController
         $tasuDetails  = $this->buildDetailMap($db, 'tasu_booking_details',     'ticket_id', $ticketIds);
         $assignments  = $this->buildAssignmentMap($db, $ticketIds);
         $feedbacks    = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
+        $materialsMap = $this->buildMaterialsMap($db, $ticketIds);
 
         // Enrich SSU Incident Reports with 3NF bridge table arrays (incidents, information, roles)
         if (!empty($ssuIrDetails)) {
@@ -1278,13 +1363,46 @@ class TicketController extends BaseController
                 default => null,
             };
 
-            $ticket['assignment']  = $assignments[$id] ?? null;
-            $ticket['attachments'] = $attachmentsMap[$id] ?? [];
-            $ticket['feedback']    = $feedbacks[$id] ?? null;
+            $ticket['assignment']          = $assignments[$id] ?? null;
+            $ticket['attachments']         = $attachmentsMap[$id] ?? [];
+            $ticket['feedback']            = $feedbacks[$id] ?? null;
+            $ticket['materials']           = $materialsMap[$id] ?? [];
+            $ticket['total_material_cost'] = array_sum(array_column($ticket['materials'], 'total_price'));
+            $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']);
         }
         unset($ticket);
 
         return $tickets;
+    }
+
+    /**
+     * Query ticket_materials and return a map keyed by ticket_id.
+     */
+    private function buildMaterialsMap(\CodeIgniter\Database\ConnectionInterface $db, array $ticketIds): array
+    {
+        if (empty($ticketIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+        $rows = $db->query("
+            SELECT tm.*, COALESCE(tm.ticket_id, ta.ticket_id) AS matched_ticket_id
+            FROM ticket_materials tm
+            LEFT JOIN ticket_assignments ta ON ta.id = tm.assignment_id
+            WHERE tm.ticket_id IN ({$placeholders}) OR ta.ticket_id IN ({$placeholders})
+            ORDER BY tm.id ASC
+        ", array_merge($ticketIds, $ticketIds))->getResultArray();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $tId = $row['matched_ticket_id'];
+            $row['quantity']    = (float) ($row['quantity'] ?? 1);
+            $row['unit_price']  = (float) ($row['unit_price'] ?? 0);
+            $row['total_price'] = (float) ($row['total_price'] ?? ($row['quantity'] * $row['unit_price']));
+            $map[$tId][] = $row;
+        }
+
+        return $map;
     }
 
     /**

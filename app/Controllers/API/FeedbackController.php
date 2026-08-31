@@ -130,12 +130,37 @@ class FeedbackController extends BaseController
             }
         }
 
-        // --- Mark ticket fully archived if not already ---
+        // --- Archival state determination ---
+        $unitId = (int) $ticket['unit_id'];
+        $materialsLogged = !empty($ticket['materials_logged']);
+        
+        $isArchived  = 0;
+        $status      = 'resolved';
+        $statusLabel = 'Awaiting Material Liquidation';
+
+        if ($unitId === 3 || $unitId === 4) {
+            // SSU & TASU do not require material liquidation
+            $isArchived  = 1;
+            $status      = 'closed';
+            $statusLabel = 'Closed';
+        } else {
+            // FGMU & LEAU require both user rating AND material liquidation
+            if ($materialsLogged) {
+                $isArchived  = 1;
+                $status      = 'closed';
+                $statusLabel = 'Closed';
+            } else {
+                $isArchived  = 0;
+                $status      = 'resolved';
+                $statusLabel = 'Awaiting Material Liquidation';
+            }
+        }
+
         $this->ticketModel->update($ticketId, [
-            'is_archived' => 1,
-            'status'      => 'closed',
-            'status_label'=> 'Closed',
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'is_archived'  => $isArchived,
+            'status'       => $status,
+            'status_label' => $statusLabel,
+            'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 
         $db->transComplete();

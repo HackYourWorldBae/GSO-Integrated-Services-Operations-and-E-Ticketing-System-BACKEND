@@ -376,12 +376,18 @@ CREATE TABLE `ticket_logs` (
 DROP TABLE IF EXISTS `ticket_materials`;
 CREATE TABLE `ticket_materials` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-  `assignment_id` int(11) unsigned NOT NULL,
+  `ticket_id` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `assignment_id` int(11) unsigned DEFAULT NULL,
   `material_name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `quantity` int(11) NOT NULL DEFAULT '1',
+  `quantity` decimal(10,2) NOT NULL DEFAULT '1.00',
   `unit_measurement` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `unit_price` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `total_price` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  KEY `idx_materials_ticket` (`ticket_id`),
   KEY `idx_materials_assignment` (`assignment_id`),
+  CONSTRAINT `fk_materials_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_materials_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `ticket_assignments` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -402,6 +408,7 @@ CREATE TABLE `tickets` (
   `location` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `office_room` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `is_archived` tinyint(1) NOT NULL DEFAULT '0',
+  `materials_logged` tinyint(1) NOT NULL DEFAULT '0',
   `is_under_investigation` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'SSU only: 1 when flagged for active investigation',
   `ssu_notation` text COLLATE utf8mb4_unicode_ci COMMENT 'SSU only: staff recommendation/notation communicated to reporter',
   `submitted_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

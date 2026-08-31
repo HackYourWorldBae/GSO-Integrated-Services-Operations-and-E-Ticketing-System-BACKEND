@@ -204,7 +204,7 @@ class DispatchController extends BaseController
     /**
      * Add materials list to an assignment.
      *
-     * Body: { materials: [{ name: string, quantity: int, unit: string }] }
+     * Body: { materials: [{ name: string, quantity: number, unit: string, unit_price?: number, total_price?: number }] }
      */
     public function addMaterials(int $assignmentId): ResponseInterface
     {
@@ -220,23 +220,43 @@ class DispatchController extends BaseController
             return $this->errorResponse('materials array is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $totalCost = 0.0;
         foreach ($materials as $mat) {
-            $name = sanitize_string($mat['name'] ?? '');
+            $name = sanitize_string($mat['name'] ?? $mat['material_name'] ?? '');
             if (empty($name)) {
                 continue;
             }
 
+            $qty   = max(0.01, (float) ($mat['quantity'] ?? 1));
+            $unit  = sanitize_string($mat['unit'] ?? $mat['unit_measurement'] ?? 'pcs');
+            $price = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
+            $lineTotal = isset($mat['total_price']) ? (float) $mat['total_price'] : ($qty * $price);
+            $totalCost += $lineTotal;
+
             $this->materialModel->insert([
+                'ticket_id'        => $assignment['ticket_id'],
                 'assignment_id'    => $assignmentId,
                 'material_name'    => $name,
-                'quantity'         => max(1, (int) ($mat['quantity'] ?? 1)),
-                'unit_measurement' => sanitize_string($mat['unit'] ?? ''),
+                'quantity'         => $qty,
+                'unit_measurement' => $unit,
+                'unit_price'       => $price,
+                'total_price'      => $lineTotal,
+                'created_at'       => date('Y-m-d H:i:s'),
             ]);
         }
 
-        $this->logModel->logAction($assignment['ticket_id'], $this->currentUserId(), 'Materials Added', count($materials) . ' material(s) listed.');
+        $this->ticketModel->update($assignment['ticket_id'], [
+            'materials_logged' => 1,
+            'updated_at'       => date('Y-m-d H:i:s'),
+        ]);
 
-        return $this->successResponse('Materials added.', ['assignment_id' => $assignmentId], ResponseInterface::HTTP_CREATED);
+        $this->logModel->logAction($assignment['ticket_id'], $this->currentUserId(), 'Materials Added', count($materials) . ' material(s) listed. Total: ₱' . number_format($totalCost, 2));
+
+        return $this->successResponse('Materials added.', [
+            'assignment_id' => $assignmentId,
+            'ticket_id'     => $assignment['ticket_id'],
+            'total_cost'    => $totalCost
+        ], ResponseInterface::HTTP_CREATED);
     }
 
     /**

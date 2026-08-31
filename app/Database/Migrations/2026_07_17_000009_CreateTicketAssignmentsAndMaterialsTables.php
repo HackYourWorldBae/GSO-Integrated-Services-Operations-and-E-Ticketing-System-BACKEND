@@ -106,11 +106,16 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'unsigned'       => true,
                 'auto_increment' => true,
             ],
+            'ticket_id' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 60,
+                'null'       => true,
+            ],
             'assignment_id' => [
                 'type'       => 'INT',
                 'constraint' => 11,
                 'unsigned'   => true,
-                'null'       => false,
+                'null'       => true,
             ],
             'material_name' => [
                 'type'       => 'VARCHAR',
@@ -118,24 +123,43 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'null'       => false,
             ],
             'quantity' => [
-                'type'       => 'INT',
-                'constraint' => 11,
-                'default'    => 1,
+                'type'       => 'DECIMAL',
+                'constraint' => '10,2',
+                'default'    => '1.00',
                 'null'       => false,
             ],
             'unit_measurement' => [
-                // e.g., pcs, meters, liters, kg
+                // e.g., pcs, meters, liters, kg, rolls, sets, cans, bags
                 'type'       => 'VARCHAR',
                 'constraint' => 50,
                 'null'       => true,
                 'default'    => null,
             ],
+            'unit_price' => [
+                'type'       => 'DECIMAL',
+                'constraint' => '10,2',
+                'default'    => '0.00',
+                'null'       => false,
+            ],
+            'total_price' => [
+                'type'       => 'DECIMAL',
+                'constraint' => '10,2',
+                'default'    => '0.00',
+                'null'       => false,
+            ],
+            'created_at' => [
+                'type'    => 'TIMESTAMP',
+                'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
+                'null'    => false,
+            ],
         ]);
 
         $this->forge->addPrimaryKey('id');
+        $this->forge->addKey('ticket_id',     false, false, 'idx_materials_ticket');
         $this->forge->addKey('assignment_id', false, false, 'idx_materials_assignment');
 
-        $this->forge->addForeignKey('assignment_id', 'ticket_assignments', 'id', 'CASCADE', 'CASCADE', 'fk_materials_assignment');
+        $this->forge->addForeignKey('ticket_id',     'tickets',            'id', 'CASCADE',  'CASCADE', 'fk_materials_ticket');
+        $this->forge->addForeignKey('assignment_id', 'ticket_assignments', 'id', 'SET NULL', 'CASCADE', 'fk_materials_assignment');
 
         $this->forge->createTable('ticket_materials', true, [
             'ENGINE'         => 'InnoDB',

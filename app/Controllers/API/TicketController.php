@@ -135,7 +135,6 @@ class TicketController extends BaseController
         $today = date('Y-m-d');
         $isTasu = $unitId === 4;
 
-        $personnelModel = clone $this->ticketModel; // We don't have it directly injected, let's load it
         $personnelModel = new \App\Models\PersonnelModel();
         $assignmentModel = new \App\Models\TicketAssignmentModel();
         $logModel = new \App\Models\TicketLogModel();
@@ -235,6 +234,13 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        // Authorization check: only ticket owner or staff roles can view ticket details
+        $userId = $this->currentUserId();
+        $role   = $this->currentUserRole();
+        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+            return $this->forbiddenResponse('You do not have permission to view this ticket.');
         }
 
         // Enrich with unit-specific details
@@ -1273,6 +1279,13 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        // Authorization check: only ticket owner or staff roles can view ticket audit logs
+        $userId = $this->currentUserId();
+        $role   = $this->currentUserRole();
+        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+            return $this->forbiddenResponse('You do not have permission to view logs for this ticket.');
         }
 
         $logs = $this->logModel->getByTicket($ticketId);

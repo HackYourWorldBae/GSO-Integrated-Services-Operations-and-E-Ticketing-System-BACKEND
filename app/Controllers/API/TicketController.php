@@ -1316,9 +1316,11 @@ class TicketController extends BaseController
         $ssuVpDetails = $this->buildDetailMap($db, 'ssu_vehicle_pass_details', 'ticket_id', $ticketIds);
         $ssuIrDetails = $this->buildDetailMap($db, 'ssu_incident_details',     'ticket_id', $ticketIds);
         $tasuDetails  = $this->buildDetailMap($db, 'tasu_booking_details',     'ticket_id', $ticketIds);
-        $assignments  = $this->buildAssignmentMap($db, $ticketIds);
-        $feedbacks    = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
-        $materialsMap = $this->buildMaterialsMap($db, $ticketIds);
+        $assignmentsData = $this->buildAssignmentMap($db, $ticketIds);
+        $assignments     = $assignmentsData['single'] ?? [];
+        $assignmentsList = $assignmentsData['all'] ?? [];
+        $feedbacks       = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
+        $materialsMap    = $this->buildMaterialsMap($db, $ticketIds);
 
         // Enrich SSU Incident Reports with 3NF bridge table arrays (incidents, information, roles)
         if (!empty($ssuIrDetails)) {
@@ -1377,6 +1379,7 @@ class TicketController extends BaseController
             };
 
             $ticket['assignment']          = $assignments[$id] ?? null;
+            $ticket['assignments']         = $assignmentsList[$id] ?? [];
             $ticket['attachments']         = $attachmentsMap[$id] ?? [];
             $ticket['feedback']            = $feedbacks[$id] ?? null;
             $ticket['materials']           = $materialsMap[$id] ?? [];
@@ -1462,12 +1465,12 @@ class TicketController extends BaseController
     }
 
     /**
-     * Query ticket_assignments and return a map keyed by ticket_id.
+     * Query ticket_assignments and return a map keyed by ticket_id with single & full list formats.
      */
     private function buildAssignmentMap(\CodeIgniter\Database\ConnectionInterface $db, array $ticketIds): array
     {
         if (empty($ticketIds)) {
-            return [];
+            return ['single' => [], 'all' => []];
         }
 
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
@@ -1478,19 +1481,30 @@ class TicketController extends BaseController
             LEFT JOIN personnel p ON p.id = ta.personnel_id
             LEFT JOIN vehicles v  ON v.id = ta.vehicle_id
             WHERE ta.ticket_id IN ({$placeholders})
-            ORDER BY ta.assigned_at DESC
+            ORDER BY ta.assigned_at ASC
         ", $ticketIds)->getResultArray();
 
         $map = [];
+        $listMap = [];
         foreach ($rows as $row) {
-            if (isset($map[$row['ticket_id']])) {
-                $map[$row['ticket_id']]['personnel_name'] .= ', ' . $row['personnel_name'];
+            $tId = $row['ticket_id'];
+            $listMap[$tId][] = $row;
+            $pName = trim((string)($row['personnel_name'] ?? ''));
+
+            if (isset($map[$tId])) {
+                if ($pName !== '') {
+                    $existingNames = array_map('trim', explode(',', $map[$tId]['personnel_name']));
+                    if (!in_array($pName, $existingNames, true)) {
+                        $map[$tId]['personnel_name'] .= ', ' . $pName;
+                    }
+                }
             } else {
-                $map[$row['ticket_id']] = $row;
+                $map[$tId] = $row;
+                $map[$tId]['personnel_name'] = $pName;
             }
         }
 
-        return $map;
+        return ['single' => $map, 'all' => $listMap];
     }
 
     // -------------------------------------------------------------------------

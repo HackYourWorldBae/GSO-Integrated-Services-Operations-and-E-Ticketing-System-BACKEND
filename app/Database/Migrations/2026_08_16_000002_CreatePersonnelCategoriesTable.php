@@ -8,8 +8,7 @@ use CodeIgniter\Database\Migration;
  * Migration: Create Personnel Categories Table
  *
  * Stores admin-managed specialty/profession categories per unit.
- * FGMU and LEAU admins can create/delete their own categories.
- * TASU has a seeded "Driver" category that cannot be removed via the UI.
+ * Unit admins can create/delete their own categories.
  *
  * Depends on: units (001)
  */
@@ -36,7 +35,7 @@ class CreatePersonnelCategoriesTable extends Migration
                 'null'       => false,
             ],
             'is_system' => [
-                // 1 = seeded/locked category (TASU Driver); 0 = admin-created
+                // 1 = seeded/locked category; 0 = admin-created
                 'type'       => 'TINYINT',
                 'constraint' => 1,
                 'default'    => 0,

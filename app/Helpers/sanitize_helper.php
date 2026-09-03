@@ -66,7 +66,7 @@ if (!function_exists('generate_ticket_id')) {
      * Format: {UNIT}-TIC-{sequence}-{year}
      * Example: FGMU-TIC-42-2026
      *
-     * @param string $unitCode e.g., 'FGMU', 'LEAU', 'SSU', 'TASU'
+     * @param string $unitCode e.g., 'FGMU', 'LEAU', 'SSU'
      * @param int    $sequence The next sequential number for this unit+year.
      */
     function generate_ticket_id(string $unitCode, int $sequence): string

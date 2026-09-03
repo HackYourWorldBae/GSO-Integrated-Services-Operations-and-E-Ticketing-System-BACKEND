@@ -17,7 +17,7 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Core sub-units (FGMU, LEAU, SSU, TASU) — required first
+        // 1. Core sub-units (FGMU, LEAU, SSU) — required first
         $this->call('UnitsSeeder');
 
         // 2. SSU incident lookup options (types, issues, roles)
@@ -33,7 +33,7 @@ class DatabaseSeeder extends Seeder
         // 6. Personnel (empty — admins manage the roster via UI)
         $this->call('PersonnelSeeder');
 
-        // 7. Seed locked system personnel categories (TASU: Driver)
+        // 7. Seed system personnel categories
         $this->call('PersonnelCategorySeeder');
     }
 }

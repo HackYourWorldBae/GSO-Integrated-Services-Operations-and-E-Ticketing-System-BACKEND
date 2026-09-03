@@ -8,7 +8,7 @@ use CodeIgniter\Model;
  * UserModel
  *
  * Handles all authentication and profile queries for the unified `users` table.
- * Covers students, employees, admins, dispatchers, directors, workers, and drivers.
+ * Covers students, employees, admins, dispatchers, directors, and workers.
  */
 class UserModel extends Model
 {
@@ -43,7 +43,7 @@ class UserModel extends Model
         'last_name'         => 'required|max_length[100]',
         'email'             => 'required|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
         'password_hash'     => 'required|min_length[8]',
-        'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker,driver]',
+        'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker]',
     ];
 
     protected $validationMessages = [

@@ -7,8 +7,8 @@ use CodeIgniter\Database\Seeder;
 /**
  * UnitsSeeder
  *
- * Seeds the four operational sub-units of the BSU GSO system.
- * These are static reference data — the IDs (1-4) are used as constants
+ * Seeds the three operational sub-units of the BSU GSO system.
+ * These are static reference data — the IDs (1-3) are used as constants
  * throughout the application (controllers, models, and the frontend).
  *
  * Run via: php spark db:seed UnitsSeeder
@@ -34,13 +34,7 @@ class UnitsSeeder extends Seeder
                 'id'          => 3,
                 'code'        => 'SSU',
                 'name'        => 'Security Service Unit',
-                'description' => 'Handles university security, vehicle pass sticker applications, and campus incident reporting.',
-            ],
-            [
-                'id'          => 4,
-                'code'        => 'TASU',
-                'name'        => 'Transportation and Automotive Service Unit',
-                'description' => 'Manages the university fleet of vehicles, driver dispatching, and official travel bookings.',
+                'description' => 'Handles university security, campus safety coordination, and campus incident reporting.',
             ],
         ];
 

@@ -55,33 +55,10 @@ class TicketModel extends Model
     // -------------------------------------------------------------------------
 
     /**
-     * Self-heal any TASU tickets that are marked Trip Completed or resolved,
-     * updating current_step to 5, status to closed, and is_archived to 1.
-     */
-    public function syncStaleTasuTickets(): void
-    {
-        $db = \Config\Database::connect();
-        $db->query("
-            UPDATE tickets
-            SET current_step = 5,
-                status = 'closed',
-                is_archived = 1,
-                updated_at = NOW()
-            WHERE unit_id = 4
-              AND (
-                status_label = 'Trip Completed'
-                OR status IN ('resolved', 'closed', 'completed')
-              )
-              AND current_step < 5
-        ");
-    }
-
-    /**
      * Get all active (not archived / pending action) tickets for a specific user/requestor.
      */
     public function getActiveByUser(string $userId): array
     {
-        $this->syncStaleTasuTickets();
         $db = \Config\Database::connect();
 
         return $this->where('user_id', $userId)
@@ -156,10 +133,6 @@ class TicketModel extends Model
      */
     public function getActiveTickets(int $unitId): array
     {
-        if ($unitId === 4) {
-            $this->syncStaleTasuTickets();
-        }
-
         return $this->where('unit_id', $unitId)
                     ->whereIn('status', ['processing'])
                     ->where('is_archived', 0)
@@ -199,7 +172,7 @@ class TicketModel extends Model
      * Generate the next sequential ticket ID for a given unit within the current year.
      * Format: {UNIT_CODE}-TIC-{N}-{YEAR}  e.g. FGMU-TIC-43-2026
      *
-     * @param string $unitCode   Sub-unit code (FGMU, LEAU, SSU, TASU)
+     * @param string $unitCode   Sub-unit code (FGMU, LEAU, SSU)
      * @param int    $unitId     Corresponding unit_id FK
      * @param int    $batchOffset Extra offset to add when generating multiple tickets
      *                           for the same unit in a single request (0-indexed within batch)
@@ -369,30 +342,6 @@ class TicketModel extends Model
                 FROM ssu_incident_type_items iti
                 JOIN ssu_incident_types it ON it.id = iti.incident_type_id
                 GROUP BY it.type_name
-            ")->getResultArray();
-
-            $stats['pass_pipeline'] = $db->query("
-                SELECT status, COUNT(*) as count
-                FROM tickets
-                WHERE unit_id = 3 AND service_type = 'Vehicle Pass Application'
-                GROUP BY status
-            ")->getResultArray();
-        }
-
-        // TASU specific analytics
-        if ($unitId === 4) {
-            $stats['fleet_activity'] = $db->query("
-                SELECT 
-                    v.id,
-                    v.model_name,
-                    v.plate_no,
-                    v.category,
-                    COUNT(ta.id) AS trip_count
-                FROM vehicles v
-                LEFT JOIN ticket_assignments ta ON ta.vehicle_id = v.id
-                WHERE v.unit_id = 4
-                GROUP BY v.id, v.model_name, v.plate_no, v.category
-                ORDER BY trip_count DESC, v.model_name ASC
             ")->getResultArray();
         }
 

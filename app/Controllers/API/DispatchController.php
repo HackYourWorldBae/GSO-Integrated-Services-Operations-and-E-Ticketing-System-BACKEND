@@ -14,11 +14,11 @@ use CodeIgniter\HTTP\ResponseInterface;
 /**
  * DispatchController
  *
- * Handles dispatcher operations: assigning personnel/vehicles to approved tickets,
- * updating schedules, managing materials, and marking jobs complete.
+ * Handles dispatcher operations: assigning personnel to approved tickets,
+ * updating assignment schedules and notes, logging materials, and tracking workers.
  *
  * Endpoints:
- *  POST  /api/v1/dispatch/assign             - Assign worker/driver (and vehicle) to a ticket
+ *  POST  /api/v1/dispatch/assign             - Assign worker to a ticket
  *  PATCH /api/v1/dispatch/assignments/:id    - Update assignment notes / schedule date
  *  POST  /api/v1/dispatch/assignments/:id/materials - Add materials to an assignment
  *  GET   /api/v1/dispatch/worker/:personnelId - Worker's current assignment (worker dashboard)
@@ -44,12 +44,12 @@ class DispatchController extends BaseController
     }
 
     /**
-     * Assign a personnel member (and optionally a vehicle) to an approved ticket.
+     * Assign a personnel member to an approved ticket.
      *
-     * Body: {
+     * Request body:
+     * {
      *   ticket_id: string,
-     *   personnel_id: string,
-     *   vehicle_id?: int,
+     *   personnel_id: int,
      *   implementation_date?: string,
      *   task_notes?: string,
      *   dispatcher_notes?: string
@@ -85,27 +85,22 @@ class DispatchController extends BaseController
             return $this->notFoundResponse('Personnel');
         }
 
-        $vehicleId          = !empty($body['vehicle_id']) ? (int) $body['vehicle_id'] : null;
         $implementationDate = sanitize_string($body['implementation_date'] ?? date('Y-m-d'));
         $workingDays        = !empty($body['working_days']) ? (int) $body['working_days'] : null;
         $taskNotes          = sanitize_string($body['task_notes'] ?? '');
         $dispatcherNotes    = sanitize_string($body['dispatcher_notes'] ?? '');
 
-        // Determine TASU-specific labels
-        $isTasu      = ((int) $ticket['unit_id']) === 4;
-        
         // When just dispatching, the worker is not working yet!
         // We leave the status as 'available'. The database handles the assignment via the `ticket_assignments` table.
         $workerStatus = 'available';
         
         // Update ticket to indicate it's been dispatched but NOT started
-        $statusLabel  = $isTasu ? 'Dispatched - Waiting for Departure' : 'Dispatched / Scheduled';
+        $statusLabel  = 'Dispatched / Scheduled';
 
         // --- Insert assignment record ---
         $assignmentId = $this->assignmentModel->insert([
             'ticket_id'          => $ticketId,
             'personnel_id'       => $personnelId,
-            'vehicle_id'         => $vehicleId,
             'implementation_date'=> $implementationDate,
             'working_days'       => $workingDays,
             'task_notes'         => $taskNotes,
@@ -119,7 +114,7 @@ class DispatchController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status'               => 'processing',
             'status_label'         => $statusLabel,
-            'current_step'         => $isTasu ? 3 : 4, // 4 = Dispatch & Schedule for FGMU/LEAU
+            'current_step'         => 4, // 4 = Dispatch & Schedule for FGMU/LEAU
             'project_working_days' => $workingDays,
             'updated_at'           => date('Y-m-d H:i:s'),
         ]);
@@ -129,12 +124,6 @@ class DispatchController extends BaseController
             'status'     => $workerStatus,
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
-
-        // --- Update vehicle status if provided ---
-        if ($vehicleId) {
-            $db = \Config\Database::connect();
-            $db->query("UPDATE vehicles SET status = 'in_use', updated_at = NOW() WHERE id = ?", [$vehicleId]);
-        }
 
         // --- If the ticket is a project, persist the dispatcher-set scheduling fields ---
         if (!empty($ticket['is_project'])) {
@@ -167,7 +156,6 @@ class DispatchController extends BaseController
             'assignment_id' => $assignmentId,
             'ticket_id'     => $ticketId,
             'personnel_id'  => $personnelId,
-            'vehicle_id'    => $vehicleId,
             'status'        => 'processing',
         ], ResponseInterface::HTTP_CREATED);
     }
@@ -279,14 +267,13 @@ class DispatchController extends BaseController
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket) return $this->notFoundResponse('Ticket');
 
-        $isTasu       = ((int) $ticket['unit_id']) === 4;
-        $workerStatus = $isTasu ? 'on_trip' : 'working';
-        $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
+        $workerStatus = 'working';
+        $statusLabel  = 'Job Started';
 
         // Set ticket step to 5 (Job Started)
         $this->ticketModel->update($ticketId, [
             'status_label' => $statusLabel,
-            'current_step' => $isTasu ? 4 : 5,
+            'current_step' => 5,
             'project_actual_start' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);

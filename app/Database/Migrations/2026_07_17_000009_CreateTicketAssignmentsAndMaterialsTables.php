@@ -7,14 +7,14 @@ use CodeIgniter\Database\Migration;
 /**
  * Migration: Create Ticket Assignments & Materials Tables
  *
- * ticket_assignments: Links an approved ticket to a personnel member
- *   (and optionally a vehicle for TASU trips). Created by the dispatcher.
+ * ticket_assignments: Links an approved ticket to a personnel member.
+ *   Created by the dispatcher.
  *
  * ticket_materials: Lists the replacement parts or materials consumed
  *   during the job, stored atomically per assignment (1NF compliance —
  *   replaces a prior JSON array of materials).
  *
- * Depends on: tickets (005), personnel (003), vehicles (004)
+ * Depends on: tickets (005), personnel (003)
  */
 class CreateTicketAssignmentsAndMaterialsTables extends Migration
 {
@@ -40,16 +40,8 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'constraint' => 36,
                 'null'       => false,
             ],
-            'vehicle_id' => [
-                // Only populated for TASU vehicle trip assignments
-                'type'       => 'INT',
-                'constraint' => 11,
-                'unsigned'   => true,
-                'null'       => true,
-                'default'    => null,
-            ],
             'implementation_date' => [
-                // Scheduled date of work / trip departure date
+                // Scheduled date of work
                 'type'       => 'VARCHAR',
                 'constraint' => 100,
                 'null'       => true,
@@ -90,11 +82,9 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
         $this->forge->addPrimaryKey('id');
         $this->forge->addKey('ticket_id',    false, false, 'idx_assignments_ticket');
         $this->forge->addKey('personnel_id', false, false, 'idx_assignments_personnel');
-        $this->forge->addKey('vehicle_id',   false, false, 'idx_assignments_vehicle');
 
-        $this->forge->addForeignKey('ticket_id',    'tickets',   'id', 'CASCADE',  'CASCADE',  'fk_assignment_ticket');
-        $this->forge->addForeignKey('personnel_id', 'personnel', 'id', 'CASCADE',  'CASCADE',  'fk_assignment_personnel');
-        $this->forge->addForeignKey('vehicle_id',   'vehicles',  'id', 'SET NULL', 'CASCADE',  'fk_assignment_vehicle');
+        $this->forge->addForeignKey('ticket_id',    'tickets',   'id', 'CASCADE', 'CASCADE', 'fk_assignment_ticket');
+        $this->forge->addForeignKey('personnel_id', 'personnel', 'id', 'CASCADE', 'CASCADE', 'fk_assignment_personnel');
 
         $this->forge->createTable('ticket_assignments', true, [
             'ENGINE'         => 'InnoDB',

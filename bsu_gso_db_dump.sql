@@ -67,7 +67,6 @@ CREATE TABLE `migrations` (
 INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
 ('13', '2026_07_17_000002', 'App\\Database\\Migrations\\CreateUsersTable', 'default', 'App', '1784812909', '1'),
 ('14', '2026_07_17_000003', 'App\\Database\\Migrations\\CreatePersonnelTable', 'default', 'App', '1784812909', '1'),
-('15', '2026_07_17_000004', 'App\\Database\\Migrations\\CreateVehiclesTable', 'default', 'App', '1784812909', '1'),
 ('16', '2026_07_17_000005', 'App\\Database\\Migrations\\CreateTicketsTable', 'default', 'App', '1784812909', '1'),
 ('17', '2026_07_17_000006', 'App\\Database\\Migrations\\CreateTicketAttachmentsTable', 'default', 'App', '1784812909', '1'),
 ('18', '2026_07_17_000007', 'App\\Database\\Migrations\\CreateUnitTicketDetailTables', 'default', 'App', '1784812909', '1'),
@@ -114,8 +113,7 @@ CREATE TABLE `personnel_categories` (
   CONSTRAINT `fk_categories_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Dumping data for table `personnel_categories`
-INSERT INTO `personnel_categories` (`unit_id`, `name`, `is_system`) VALUES (4, 'Driver', 1);
+
 
 
 -- Table structure for table `ssu_incident_details`
@@ -225,52 +223,7 @@ INSERT INTO `ssu_incident_types` VALUES ('7', 'Fire / Hazard Alert'),
 ('2', 'Vandalism / Property Damage');
 
 
--- Table structure for table `ssu_vehicle_pass_details`
-DROP TABLE IF EXISTS `ssu_vehicle_pass_details`;
-CREATE TABLE `ssu_vehicle_pass_details` (
-  `ticket_id` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
 
-  `applicant_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `college_office` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `contact_no` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `driver_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `driver_contact` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `house_street` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `barangay` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `city_municipality` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `province` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `registered_owner` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `plate_no` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `make_series` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `type_color` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `id_type_no` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `valid_until` date DEFAULT NULL,
-  `privacy_agreed` tinyint(1) NOT NULL DEFAULT '1',
-  `disclosure_agreed` tinyint(1) NOT NULL DEFAULT '1',
-  `applicant_signature` longtext COLLATE utf8mb4_unicode_ci,
-  PRIMARY KEY (`ticket_id`),
-  KEY `idx_ssu_pass_plate` (`plate_no`),
-  CONSTRAINT `fk_ssu_pass_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
--- Table structure for table `tasu_booking_details`
-DROP TABLE IF EXISTS `tasu_booking_details`;
-CREATE TABLE `tasu_booking_details` (
-  `ticket_id` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `request_time` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `return_time` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `requesting_personnel` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `office_college_department` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `agency_address` text COLLATE utf8mb4_unicode_ci,
-  `num_passengers` int(11) NOT NULL DEFAULT '1',
-  `date_of_travel` date NOT NULL,
-  `destination` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `purpose_of_travel` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `travel_order_no` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`ticket_id`),
-  CONSTRAINT `fk_tasu_booking_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- Table structure for table `ticket_assignments`
@@ -279,7 +232,6 @@ CREATE TABLE `ticket_assignments` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
   `personnel_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `vehicle_id` int(11) unsigned DEFAULT NULL,
   `implementation_date` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `working_days` int(11) DEFAULT NULL,
   `dispatcher_notes` text COLLATE utf8mb4_unicode_ci,
@@ -290,10 +242,8 @@ CREATE TABLE `ticket_assignments` (
   PRIMARY KEY (`id`),
   KEY `idx_assignments_ticket` (`ticket_id`),
   KEY `idx_assignments_personnel` (`personnel_id`),
-  KEY `idx_assignments_vehicle` (`vehicle_id`),
   CONSTRAINT `fk_assignment_personnel` FOREIGN KEY (`personnel_id`) REFERENCES `personnel` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_assignment_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_assignment_vehicle` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`id`) ON DELETE CASCADE ON UPDATE SET NULL
+  CONSTRAINT `fk_assignment_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `ticket_assignments`
@@ -452,13 +402,12 @@ CREATE TABLE `units` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `code` (`code`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `units`
 INSERT INTO `units` VALUES ('1', 'FGMU', 'Facilities and Grounds Management Unit', 'Manages structure, finishes, utilities, mechanical, and carpentry repairs across BSU campus.', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('2', 'LEAU', 'Landscape and Environment Aesthetics Unit', 'Responsible for campus landscaping, janitorial services, lawn mowing, and disinfection operations.', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('3', 'SSU', 'Security Service Unit', 'Handles university security, vehicle pass sticker applications, and campus incident reporting.', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('4', 'TASU', 'Transportation and Automotive Service Unit', 'Manages the university fleet of vehicles, driver dispatching, and official travel bookings.', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
+('3', 'SSU', 'Security Service Unit', 'Handles university security, campus safety coordination, and campus incident reporting.', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
 
 
 -- Table structure for table `users`
@@ -490,39 +439,13 @@ CREATE TABLE `users` (
 INSERT INTO `users` VALUES ('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'End User', 'Test', 'enduser@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'student', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('4ad09d8a-975f-4ad9-8481-ff8b45781998', 'FGMU', 'Dispatcher', 'fgmu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('7656c76a-c4f0-4f21-92fd-66072b204463', 'TASU', 'Dispatcher', 'tasu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '4', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('d4a8de41-bf10-495d-93e8-e2480d5d78be', 'LEAU', 'Dispatcher', 'leau-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '3', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('eae80ba7-fc95-4647-9f19-15ab7e765f6b', 'TASU', 'Admin', 'tasu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '4', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
 
 
--- Table structure for table `vehicles`
-DROP TABLE IF EXISTS `vehicles`;
-CREATE TABLE `vehicles` (
-  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-  `unit_id` int(11) unsigned NOT NULL,
-  `plate_no` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `model_name` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `model_year` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `fuel_type` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `engine_specs` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `category` enum('Van','Pickup','Bus','SUV','Logistics','Sedan','Other') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Van',
-  `status` enum('available','in_use','maintenance','reserved') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'available',
-  `image_url` text COLLATE utf8mb4_unicode_ci,
-  `registered_owner` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Benguet State University',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `plate_no` (`plate_no`),
-  KEY `fk_vehicles_unit` (`unit_id`),
-  KEY `idx_vehicles_status` (`status`),
-  KEY `idx_vehicles_category` (`category`),
-  CONSTRAINT `fk_vehicles_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Dumping data for table `vehicles`
 
 -- Table structure for table `notifications`
 DROP TABLE IF EXISTS `notifications`;

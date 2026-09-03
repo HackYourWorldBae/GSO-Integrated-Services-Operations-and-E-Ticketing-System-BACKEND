@@ -13,7 +13,6 @@ class TicketAssignmentModel extends Model
     protected $allowedFields = [
         'ticket_id',
         'personnel_id',
-        'vehicle_id',
         'implementation_date',
         'working_days',
         'dispatcher_notes',
@@ -34,7 +33,7 @@ class TicketAssignmentModel extends Model
     }
 
     /**
-     * Get all active assignments for a specific worker/driver.
+     * Get all active assignments for a specific worker.
      */
     public function getByPersonnel(string $personnelId): array
     {

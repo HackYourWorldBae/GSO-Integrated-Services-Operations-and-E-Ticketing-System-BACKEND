@@ -22,7 +22,7 @@ class DirectorController extends BaseController
     private TicketModel $ticketModel;
     private TicketFeedbackModel $feedbackModel;
 
-    private const UNIT_MAP = ['FGMU' => 1, 'LEAU' => 2, 'SSU' => 3, 'TASU' => 4];
+    private const UNIT_MAP = ['FGMU' => 1, 'LEAU' => 2, 'SSU' => 3];
 
     public function __construct()
     {

@@ -17,9 +17,6 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     // Authentication (Rate limited: max 10 login attempts per minute per IP to prevent brute force)
     $routes->post('auth/login',  'AuthController::login', ['filter' => 'throttle:10,60']);
 
-    // Public vehicle availability (requestor can browse before login — rate limited to 60/min)
-    $routes->get('tasu/vehicles/available', 'TasuController::available', ['filter' => 'throttle:60,60']);
-
     // Public Scheduled Projects Announcements (FGMU & LEAU)
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
@@ -90,14 +87,6 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('personnel',                       'PersonnelController::create',         ['filter' => 'role:admin']);
         $routes->put('personnel/(:segment)',             'PersonnelController::update/$1',      ['filter' => 'role:admin']);
         $routes->delete('personnel/(:segment)',          'PersonnelController::delete/$1',      ['filter' => 'role:admin']);
-
-        // -- TASU Fleet Management (Admin) --
-        $routes->get('tasu/vehicles',              'TasuController::fleet',            ['filter' => 'role:admin,dispatcher,director']);
-        $routes->post('tasu/vehicles',             'TasuController::create',           ['filter' => 'role:admin']);
-        $routes->post('tasu/vehicles/(:num)',        'TasuController::update/$1',        ['filter' => 'role:admin']);
-        $routes->delete('tasu/vehicles/(:num)',     'TasuController::delete/$1',        ['filter' => 'role:admin']);
-        $routes->patch('tasu/vehicles/(:num)/status', 'TasuController::updateStatus/$1', ['filter' => 'role:admin,dispatcher']);
-        $routes->get('tasu/dispatch',              'TasuController::dispatchBoard',    ['filter' => 'role:admin,dispatcher,director']);
 
         // -- Feedback (Requestors: student / employee) --
         $routes->post('feedback',              'FeedbackController::submit',      ['filter' => 'role:student,employee']);

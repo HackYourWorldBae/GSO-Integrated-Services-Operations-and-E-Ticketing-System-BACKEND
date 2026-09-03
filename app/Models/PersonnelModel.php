@@ -8,7 +8,7 @@ use CodeIgniter\Model;
  * PersonnelModel
  *
  * Represents field workers (FGMU: plumbers, electricians, etc.),
- * LEAU groundskeepers/gardeners, and TASU professional drivers.
+ * and LEAU groundskeepers/gardeners.
  */
 class PersonnelModel extends Model
 {

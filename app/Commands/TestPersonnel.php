@@ -20,9 +20,9 @@ class TestPersonnel extends BaseCommand
             $res = $model->insert([
                 'id'        => $id,
                 'user_id'   => null,
-                'unit_id'   => 4,
+                'unit_id'   => 1,
                 'name'      => 'Test User',
-                'specialty' => 'Driver',
+                'specialty' => 'Electrician',
                 'status'    => 'available',
             ]);
             CLI::write("Insert Result: " . json_encode($res));

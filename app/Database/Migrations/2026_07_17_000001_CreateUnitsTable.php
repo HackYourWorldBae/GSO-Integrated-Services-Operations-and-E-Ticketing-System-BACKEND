@@ -8,10 +8,10 @@ use CodeIgniter\Database\Migration;
  * Migration: Create Units Table
  *
  * The `units` table is the root reference entity. All other tables that
- * belong to a unit (users, personnel, vehicles, tickets) have a FK here.
+ * belong to a unit (users, personnel, tickets) have a FK here.
  * Must be run FIRST so foreign keys in subsequent migrations are valid.
  *
- * Units seeded: FGMU (1), LEAU (2), SSU (3), TASU (4)
+ * Units seeded: FGMU (1), LEAU (2), SSU (3)
  */
 class CreateUnitsTable extends Migration
 {

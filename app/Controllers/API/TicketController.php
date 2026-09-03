@@ -6,9 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\TicketModel;
 use App\Models\FgmuTicketDetailModel;
 use App\Models\LeauTicketDetailModel;
-use App\Models\SsuVehiclePassDetailModel;
 use App\Models\SsuIncidentDetailModel;
-use App\Models\TasuBookingDetailModel;
 use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
@@ -42,7 +40,6 @@ class TicketController extends BaseController
         'FGMU' => 1,
         'LEAU' => 2,
         'SSU'  => 3,
-        'TASU' => 4,
     ];
 
     public function __construct()
@@ -133,7 +130,6 @@ class TicketController extends BaseController
         $tickets = $this->enrichTickets($tickets);
 
         $today = date('Y-m-d');
-        $isTasu = $unitId === 4;
 
         $personnelModel = new \App\Models\PersonnelModel();
         $assignmentModel = new \App\Models\TicketAssignmentModel();
@@ -141,13 +137,13 @@ class TicketController extends BaseController
 
         foreach ($tickets as &$ticket) {
             $currentStep = (int) $ticket['current_step'];
-            $needsStart = $isTasu ? ($currentStep === 3) : ($currentStep === 4);
+            $needsStart = ($currentStep === 4);
             
             if ($needsStart && !empty($ticket['assignment']['implementation_date'])) {
                 if ($ticket['assignment']['implementation_date'] <= $today) {
-                    $workerStatus = $isTasu ? 'on_trip' : 'working';
-                    $statusLabel  = $isTasu ? 'On Route / In Progress' : 'Job Started';
-                    $newStep      = $isTasu ? 4 : 5;
+                    $workerStatus = 'working';
+                    $statusLabel  = 'Job Started';
+                    $newStep      = 5;
 
                     $this->ticketModel->update($ticket['id'], [
                         'status_label' => $statusLabel,
@@ -239,7 +235,7 @@ class TicketController extends BaseController
         // Authorization check: only ticket owner or staff roles can view ticket details
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
             return $this->forbiddenResponse('You do not have permission to view this ticket.');
         }
 
@@ -277,31 +273,15 @@ class TicketController extends BaseController
         }
 
         $unitId = (int) $ticket['unit_id'];
-        $isTasu = $unitId === 4;
-
         $currentStep = 3;
-        if ($isTasu) {
-            $currentStep = 2;
-        } elseif ($unitId === 3 && $ticket['service_type'] === 'Vehicle Pass Application') {
-            $currentStep = 4;
-        }
-
         $newStatus   = 'approved';
         $statusLabel = 'Queued for Dispatch';
         $logMessage  = 'Ticket approved — queued for dispatch.';
-
-        if ($isTasu) {
-            $statusLabel = 'Trip Scheduled';
-        } elseif ($unitId === 3 && $ticket['service_type'] === 'Vehicle Pass Application') {
-            $statusLabel = 'Ready for Pickup';
-            $logMessage  = 'Ticket approved — vehicle pass sticker is ready for pickup.';
-        }
         // SSU Incident Reports are handled by /investigate, /notation, and /resolve endpoints.
 
         $updateData = [
             'status'       => $newStatus,
             'status_label' => $statusLabel,
-            // FGMU/LEAU: step 3 | TASU: step 2 | SSU Vehicle Pass: step 4
             'current_step' => $currentStep,
             'reviewed_at'  => date('Y-m-d H:i:s'),
             'reviewed_by'  => $this->currentUserId(),
@@ -695,33 +675,26 @@ class TicketController extends BaseController
         $hasFeedback   = !empty($feedbackModel->getByTicket($ticketId));
 
         // Determine status and archival state
-        // For FGMU & LEAU: Both user feedback AND material liquidation are needed to move to final archives
         $isArchived = 0;
-        if ($unitCode === 'SSU' || $unitCode === 'TASU') {
+        // FGMU / LEAU
+        if ($hasFeedback && $materialsLogged) {
             $isArchived  = 1;
             $newStatus   = 'closed';
-            $statusLabel = ($unitCode === 'TASU') ? 'Trip Completed' : 'Sticker Issued';
+            $statusLabel = 'Closed';
+        } elseif ($materialsLogged) {
+            $isArchived  = 0;
+            $newStatus   = 'resolved';
+            $statusLabel = 'Awaiting User Feedback';
         } else {
-            // FGMU / LEAU
-            if ($hasFeedback && $materialsLogged) {
-                $isArchived  = 1;
-                $newStatus   = 'closed';
-                $statusLabel = 'Closed';
-            } elseif ($materialsLogged) {
-                $isArchived  = 0;
-                $newStatus   = 'resolved';
-                $statusLabel = 'Awaiting User Feedback';
-            } else {
-                $isArchived  = 0;
-                $newStatus   = 'resolved';
-                $statusLabel = 'Awaiting Material Liquidation';
-            }
+            $isArchived  = 0;
+            $newStatus   = 'resolved';
+            $statusLabel = 'Awaiting Material Liquidation';
         }
 
         $updateData = [
             'status'           => $newStatus,
             'status_label'     => $statusLabel,
-            'current_step'     => ($unitCode === 'TASU') ? 5 : (($unitCode === 'SSU') ? 5 : 6),
+            'current_step'     => 6,
             'materials_logged' => $materialsLogged,
             'is_archived'      => $isArchived,
             'completed_at'     => $ticket['completed_at'] ?? date('Y-m-d H:i:s'),
@@ -730,24 +703,17 @@ class TicketController extends BaseController
 
         $this->ticketModel->update($ticketId, $updateData);
 
-        // Mark active assignment as completed and set worker & vehicle to available
+        // Mark active assignment as completed and set worker to available
         $assignments = $db->query(
-            "SELECT personnel_id, vehicle_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
+            "SELECT personnel_id FROM ticket_assignments WHERE ticket_id = ? AND completed_at IS NULL",
             [$ticketId]
         )->getResultArray();
 
         $personnelModel = new \App\Models\PersonnelModel();
-        $vehicleModel   = new \App\Models\VehicleModel();
 
         foreach ($assignments as $a) {
             if (!empty($a['personnel_id'])) {
                 $personnelModel->update($a['personnel_id'], [
-                    'status'     => 'available',
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-            }
-            if (!empty($a['vehicle_id'])) {
-                $vehicleModel->update($a['vehicle_id'], [
                     'status'     => 'available',
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
@@ -802,8 +768,8 @@ class TicketController extends BaseController
      * {
      *   fgmu: { services: [...], details: {...} },
      *   leau: { services: [...], details: {...} },
-     *   ssu:  { vehiclePass: {...}, incidentReport: {...} },
-     *   tasu: { ... }
+     *   ssu:  { incidentReport: {...} },
+     *   others: { description: "..." }
      * }
      *
      * All inserts are wrapped in a single DB transaction.
@@ -915,55 +881,7 @@ class TicketController extends BaseController
                 }
             }
 
-            // --- 3. SSU Vehicle Pass ---
-            if (!empty($body['ssu']['vehiclePass'])) {
-                $vp        = sanitize_array($body['ssu']['vehiclePass']);
-                $vd        = $vp['vehicleDetails'] ?? [];
-                $ticketId  = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
-                $makeSeries= sanitize_string($vd['makeSeries'] ?? 'Vehicle');
-                $plateNo   = sanitize_string($vd['plateNo'] ?? 'N/A');
-
-                $this->ticketModel->insert([
-                    'id'          => $ticketId,
-                    'user_id'     => $userId,
-                    'unit_id'     => self::UNIT_MAP['SSU'],
-                    'title'       => 'Vehicle Pass Application',
-                    'service_type'=> 'Vehicle Pass Application',
-                    'description' => "Vehicle pass application for {$makeSeries} ({$plateNo})",
-                    'status'      => 'pending',
-                    'status_label'=> 'Pending Verification',
-                    'current_step'=> 1,
-                    'submitted_at'=> date('Y-m-d H:i:s'),
-                    'updated_at'  => date('Y-m-d H:i:s'),
-                ]);
-
-                (new SsuVehiclePassDetailModel())->insert([
-                    'ticket_id'        => $ticketId,
-                    'applicant_name'   => sanitize_string($vp['name'] ?? ''),
-                    'college_office'   => sanitize_string($vp['collegeOffice'] ?? ''),
-                    'contact_no'       => sanitize_string($vp['contactNo'] ?? ''),
-                    'driver_name'      => sanitize_string($vp['driverName'] ?? ''),
-                    'driver_contact'   => sanitize_string($vp['driverContact'] ?? ''),
-                    'house_street'     => sanitize_string($vp['houseStreet'] ?? ''),
-                    'barangay'         => sanitize_string($vp['barangay'] ?? ''),
-                    'city_municipality'=> sanitize_string($vp['cityMunicipality'] ?? ''),
-                    'province'         => sanitize_string($vp['province'] ?? ''),
-                    'registered_owner' => sanitize_string($vd['registeredOwner'] ?? ''),
-                    'plate_no'         => $plateNo,
-                    'make_series'      => $makeSeries,
-                    'type_color'       => sanitize_string($vd['typeColor'] ?? ''),
-                    'id_type_no'       => sanitize_string($vp['idTypeNo'] ?? ''),
-                    'valid_until'      => !empty($vp['validUntil']) ? $vp['validUntil'] : null,
-                    'privacy_agreed'   => (bool) ($vp['privacyAgreed'] ?? false),
-                    'disclosure_agreed'=> (bool) ($vp['disclosureAgreed'] ?? false),
-                    'applicant_signature'=> $vp['signature'] ?? null,
-                ]);
-
-                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "SSU Vehicle Pass for {$plateNo}");
-                $createdTickets[] = $ticketId;
-            }
-
-            // --- 4. SSU Incident Report ---
+            // --- 3. SSU Incident Report ---
             if (!empty($body['ssu']['incidentReport'])) {
                 $inc      = sanitize_array($body['ssu']['incidentReport']);
                 $ticketId = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
@@ -1037,41 +955,7 @@ class TicketController extends BaseController
                 $createdTickets[] = $ticketId;
             }
 
-            // --- 5. TASU Vehicle Booking ---
-            if (!empty($body['tasu'])) {
-                $ts       = sanitize_array($body['tasu']);
-                $ticketId = $this->ticketModel->generateTicketId('TASU', self::UNIT_MAP['TASU']);
 
-                $this->ticketModel->insert([
-                    'id'          => $ticketId,
-                    'user_id'     => $userId,
-                    'unit_id'     => self::UNIT_MAP['TASU'],
-                    'title'       => 'Book A University Vehicle',
-                    'service_type'=> 'Vehicle Request',
-                    'description' => sanitize_string($ts['purposeOfTravel'] ?? 'University vehicle booking request.'),
-                    'status'      => 'pending',
-                    'status_label'=> 'Pending Approval',
-                    'current_step'=> 1,
-                    'location'    => sanitize_string($ts['destination'] ?? ''),
-                    'submitted_at'=> date('Y-m-d H:i:s'),
-                    'updated_at'  => date('Y-m-d H:i:s'),
-                ]);
-
-                (new TasuBookingDetailModel())->insert([
-                    'ticket_id'                 => $ticketId,
-                    'request_time'              => sanitize_string($ts['time'] ?? ''),
-                    'requesting_personnel'      => sanitize_string($ts['requestingPersonnel'] ?? ''),
-                    'office_college_department' => sanitize_string($ts['officeCollegeDepartment'] ?? ''),
-                    'agency_address'            => sanitize_string($ts['agencyAddress'] ?? ''),
-                    'num_passengers'            => (int) ($ts['numberOfPassengers'] ?? 0),
-                    'date_of_travel'            => $ts['dateOfTravel'] ?? null,
-                    'destination'               => sanitize_string($ts['destination'] ?? ''),
-                    'purpose_of_travel'         => sanitize_string($ts['purposeOfTravel'] ?? ''),
-                ]);
-
-                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "TASU Vehicle Request to: " . ($ts['destination'] ?? 'N/A'));
-                $createdTickets[] = $ticketId;
-            }
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -1284,7 +1168,7 @@ class TicketController extends BaseController
         // Authorization check: only ticket owner or staff roles can view ticket audit logs
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
             return $this->forbiddenResponse('You do not have permission to view logs for this ticket.');
         }
 
@@ -1313,9 +1197,7 @@ class TicketController extends BaseController
         // Load all relevant detail records in bulk
         $fgmuDetails  = $this->buildDetailMap($db, 'fgmu_ticket_details',      'ticket_id', $ticketIds);
         $leauDetails  = $this->buildDetailMap($db, 'leau_ticket_details',      'ticket_id', $ticketIds);
-        $ssuVpDetails = $this->buildDetailMap($db, 'ssu_vehicle_pass_details', 'ticket_id', $ticketIds);
         $ssuIrDetails = $this->buildDetailMap($db, 'ssu_incident_details',     'ticket_id', $ticketIds);
-        $tasuDetails  = $this->buildDetailMap($db, 'tasu_booking_details',     'ticket_id', $ticketIds);
         $assignmentsData = $this->buildAssignmentMap($db, $ticketIds);
         $assignments     = $assignmentsData['single'] ?? [];
         $assignmentsList = $assignmentsData['all'] ?? [];
@@ -1373,8 +1255,7 @@ class TicketController extends BaseController
             $ticket['details'] = match((int) $ticket['unit_id']) {
                 1       => $fgmuDetails[$id]  ?? null,
                 2       => $leauDetails[$id]  ?? null,
-                3       => $ssuVpDetails[$id] ?? $ssuIrDetails[$id] ?? null,
-                4       => $tasuDetails[$id]  ?? null,
+                3       => $ssuIrDetails[$id] ?? null,
                 default => null,
             };
 
@@ -1476,10 +1357,9 @@ class TicketController extends BaseController
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
 
         $rows = $db->query("
-            SELECT ta.*, p.name AS personnel_name, p.contact_number AS personnel_contact, v.model_name AS vehicle_name, v.plate_no AS vehicle_plate
+            SELECT ta.*, p.name AS personnel_name, p.contact_number AS personnel_contact
             FROM ticket_assignments ta
             LEFT JOIN personnel p ON p.id = ta.personnel_id
-            LEFT JOIN vehicles v  ON v.id = ta.vehicle_id
             WHERE ta.ticket_id IN ({$placeholders})
             ORDER BY ta.assigned_at ASC
         ", $ticketIds)->getResultArray();
@@ -1678,7 +1558,7 @@ class TicketController extends BaseController
         // Security check
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'driver'])) {
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
             return $this->response->setStatusCode(403)->setBody('Forbidden.');
         }
 

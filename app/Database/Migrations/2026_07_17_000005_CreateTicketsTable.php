@@ -8,7 +8,7 @@ use CodeIgniter\Database\Migration;
  * Migration: Create Tickets Table (Core Ticket Base Entity)
  *
  * The central entity of the system. All unit-specific detail tables
- * (fgmu_ticket_details, leau_ticket_details, ssu_*, tasu_*) reference
+ * (fgmu_ticket_details, leau_ticket_details, ssu_incident_details) reference
  * this table via ticket_id as a 1-to-1 subtype (table inheritance pattern).
  *
  * Ticket ID format: {UNIT}-TIC-{sequence}-{year}

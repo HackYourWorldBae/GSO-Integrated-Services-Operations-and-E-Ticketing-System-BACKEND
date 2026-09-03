@@ -10,11 +10,10 @@ use CodeIgniter\Database\Migration;
  * Represents field staff dispatched by each sub-unit:
  *   FGMU: Plumbers, Electricians, Carpenters
  *   LEAU: Gardeners, Janitors, Disinfection staff
- *   TASU: Professional Drivers
  *
  * - `id`        : UUID (VARCHAR 36)
  * - `unit_id`   : FK to units — mandatory; determines which sub-unit they belong to
- * - `specialty` : Free-text role descriptor (e.g., "Plumber", "Professional Driver")
+ * - `specialty` : Free-text role descriptor (e.g., "Plumber", "Electrician")
  * - `status`    : availability for dispatcher assignments
  *
  * Depends on: units (001)
@@ -52,7 +51,7 @@ class CreatePersonnelTable extends Migration
             ],
             'status' => [
                 'type'       => 'ENUM',
-                'constraint' => ['available', 'working', 'on_leave', 'on_trip'],
+                'constraint' => ['available', 'working', 'on_leave'],
                 'default'    => 'available',
                 'null'       => false,
             ],

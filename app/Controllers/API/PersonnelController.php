@@ -11,7 +11,7 @@ use CodeIgniter\HTTP\ResponseInterface;
 /**
  * PersonnelController
  *
- * Manages unit field staff (workers, gardeners, drivers, etc.).
+ * Manages unit field staff (workers, technicians, etc.).
  *
  * Endpoints:
  *  GET   /api/v1/personnel/:unitCode              - Full roster for a unit (admin/dispatcher view)
@@ -28,7 +28,7 @@ class PersonnelController extends BaseController
     private TicketLogModel $logModel;
 
     // Unit code to ID map (mirrors DB seeds)
-    private const UNIT_MAP = ['FGMU' => 1, 'LEAU' => 2, 'SSU' => 3, 'TASU' => 4];
+    private const UNIT_MAP = ['FGMU' => 1, 'LEAU' => 2, 'SSU' => 3];
 
     public function __construct()
     {
@@ -245,7 +245,7 @@ class PersonnelController extends BaseController
 
         $unitId = self::UNIT_MAP[$unitCode] ?? null;
         if (!$unitId) {
-            return $this->errorResponse('Valid unit_code is required (FGMU, LEAU, SSU, TASU).');
+            return $this->errorResponse('Valid unit_code is required (FGMU, LEAU, SSU).');
         }
         if (empty($name)) {
             return $this->errorResponse('Category name is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);

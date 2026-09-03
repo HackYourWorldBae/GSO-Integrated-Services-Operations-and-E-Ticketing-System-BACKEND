@@ -21,7 +21,6 @@ class UsersSeeder extends Seeder
             'FGMU' => 1,
             'LEAU' => 2,
             'SSU' => 3,
-            'TASU' => 4,
         ];
 
         $users = [
@@ -29,13 +28,9 @@ class UsersSeeder extends Seeder
             [ 'email' => 'fgmu-admin@email.com', 'role' => 'admin', 'first_name' => 'FGMU', 'last_name' => 'Admin', 'unit' => 'FGMU' ],
             [ 'email' => 'ssu-admin@email.com', 'role' => 'admin', 'first_name' => 'SSU', 'last_name' => 'Admin', 'unit' => 'SSU' ],
             [ 'email' => 'leau-admin@email.com', 'role' => 'admin', 'first_name' => 'LEAU', 'last_name' => 'Admin', 'unit' => 'LEAU' ],
-            [ 'email' => 'tasu-admin@email.com', 'role' => 'admin', 'first_name' => 'TASU', 'last_name' => 'Admin', 'unit' => 'TASU' ],
             [ 'email' => 'fgmu-dispatcher@email.com', 'role' => 'dispatcher', 'first_name' => 'FGMU', 'last_name' => 'Dispatcher', 'unit' => 'FGMU' ],
-
             [ 'email' => 'leau-dispatcher@email.com', 'role' => 'dispatcher', 'first_name' => 'LEAU', 'last_name' => 'Dispatcher', 'unit' => 'LEAU' ],
-            [ 'email' => 'tasu-dispatcher@email.com', 'role' => 'dispatcher', 'first_name' => 'TASU', 'last_name' => 'Dispatcher', 'unit' => 'TASU' ],
             [ 'email' => 'field-worker@email.com', 'role' => 'worker', 'first_name' => 'Field', 'last_name' => 'Worker', 'unit' => 'FGMU' ],
-            [ 'email' => 'driver@email.com', 'role' => 'driver', 'first_name' => 'Main', 'last_name' => 'Driver', 'unit' => 'TASU' ],
             [ 'email' => 'director@email.com', 'role' => 'director', 'first_name' => 'GSO', 'last_name' => 'Director', 'unit' => null ],
         ];
 

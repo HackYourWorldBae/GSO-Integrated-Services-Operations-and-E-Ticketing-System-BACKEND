@@ -138,8 +138,8 @@ class FeedbackController extends BaseController
         $status      = 'resolved';
         $statusLabel = 'Awaiting Material Liquidation';
 
-        if ($unitId === 3 || $unitId === 4) {
-            // SSU & TASU do not require material liquidation
+        if ($unitId === 3) {
+            // SSU does not require material liquidation
             $isArchived  = 1;
             $status      = 'closed';
             $statusLabel = 'Closed';

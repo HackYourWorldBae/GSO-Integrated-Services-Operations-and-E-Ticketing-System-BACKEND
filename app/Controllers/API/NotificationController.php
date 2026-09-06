@@ -42,14 +42,41 @@ class NotificationController extends BaseController
 
         $ticketModel = new \App\Models\TicketModel();
         $ticketIds = [];
+        $bogusWords = [
+            'submitted', 'created', 'approved', 'declined', 'cancelled', 
+            'completed', 'resolved', 'dispatched', 'updated', 'review', 
+            'details', 'new', 'under', 'investigation', 'notation', 
+            'request', 'ticket', 'incident', 'report'
+        ];
+
         foreach ($notifications as &$n) {
             $ticketId = null;
             $text = ($n['title'] ?? '') . ' ' . ($n['message'] ?? '');
-            if (preg_match('/(?:Ticket|Incident|Request)\s*#?([A-Za-z0-9\-_]+)/i', $text, $matches)) {
-                $ticketId = $matches[1];
-            } elseif (preg_match('/#([A-Za-z0-9\-_]+)/', $text, $matches)) {
+
+            // 1. Try unit ticket/project code pattern (e.g. FGMU-TIC-4-2026, LEAU-TIC-1-2026, SSU-TIC-2-2026, FGMU-PRJ-1-2026)
+            if (preg_match('/\b((?:FGMU|LEAU|SSU)-(?:TIC|PRJ|INC)-[A-Za-z0-9\-_]+)\b/i', $text, $matches)) {
                 $ticketId = $matches[1];
             }
+            // 2. Try explicit labeled hash (e.g. Ticket #12345, Incident #45, Request #67)
+            elseif (preg_match('/(?:Ticket|Incident|Request|Report)\s*#\s*([A-Za-z0-9\-_]+)/i', $text, $matches)) {
+                $candidate = $matches[1];
+                if (!in_array(strtolower($candidate), $bogusWords, true)) {
+                    $ticketId = $candidate;
+                }
+            }
+            // 3. Try general hash (e.g. #FGMU-2026-001 or #1234)
+            elseif (preg_match('/#([A-Za-z0-9\-_]+)/', $text, $matches)) {
+                $candidate = $matches[1];
+                if (!in_array(strtolower($candidate), $bogusWords, true)) {
+                    $ticketId = $candidate;
+                }
+            }
+
+            // Sanitize against common status words
+            if ($ticketId && in_array(strtolower($ticketId), $bogusWords, true)) {
+                $ticketId = null;
+            }
+
             $n['ticket_id'] = $ticketId;
             if ($ticketId) {
                 $ticketIds[] = $ticketId;

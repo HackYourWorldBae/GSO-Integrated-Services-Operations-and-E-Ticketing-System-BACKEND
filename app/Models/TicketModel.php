@@ -96,10 +96,12 @@ class TicketModel extends Model
      */
     public function getPendingQueue(int $unitId): array
     {
-        return $this->where('unit_id', $unitId)
-                    ->where('status', 'pending')
-                    ->where('is_archived', 0)
-                    ->orderBy('submitted_at', 'ASC')
+        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+                    ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->where('tickets.unit_id', $unitId)
+                    ->where('tickets.status', 'pending')
+                    ->where('tickets.is_archived', 0)
+                    ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
 

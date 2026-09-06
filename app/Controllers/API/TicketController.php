@@ -281,11 +281,18 @@ class TicketController extends BaseController
      */
     public function unitStats(string $unitCode): ResponseInterface
     {
+        $filters = [
+            'period'  => $this->request->getGet('period') ?? 'all',
+            'year'    => $this->request->getGet('year'),
+            'quarter' => $this->request->getGet('quarter'),
+            'month'   => $this->request->getGet('month'),
+        ];
+
         if (strtoupper($unitCode) === 'ALL') {
             if ($this->currentUserRole() !== 'director') {
                 return $this->forbiddenResponse('Only the director role can access global statistics.');
             }
-            $stats = $this->ticketModel->getAdvancedStatsByUnit(null);
+            $stats = $this->ticketModel->getAdvancedStatsByUnit(null, $filters);
             return $this->successResponse('Global statistics retrieved.', ['stats' => $stats]);
         }
 
@@ -299,7 +306,7 @@ class TicketController extends BaseController
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
         }
 
-        $stats = $this->ticketModel->getAdvancedStatsByUnit($unitId);
+        $stats = $this->ticketModel->getAdvancedStatsByUnit($unitId, $filters);
         return $this->successResponse('Unit statistics retrieved.', ['stats' => $stats]);
     }
 

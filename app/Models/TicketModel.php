@@ -226,38 +226,124 @@ class TicketModel extends Model
     }
 
     /**
-     * Get a summary count of tickets by status for a unit (for dashboard stats).
+     * Get a summary count of tickets by status for a unit (for dashboard stats),
+     * with optional period filtering (all, year, quarter, month).
      */
-    public function getStatsByUnit(?int $unitId = null): array
+    public function getStatsByUnit(?int $unitId = null, array $filters = []): array
     {
         $db = \Config\Database::connect();
 
-        $sql = "
+        $allTimeSql = "
             SELECT
-                COUNT(*) AS total,
+                COUNT(*) AS all_time_total,
                 SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending,
                 SUM(CASE WHEN status = 'approved'   THEN 1 ELSE 0 END) AS approved,
                 SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
                 SUM(CASE WHEN status = 'processing' AND (status_label LIKE '%Dispatch%' OR status_label LIKE '%Schedul%' OR status_label LIKE '%Waiting%') THEN 1 ELSE 0 END) AS scheduled,
                 SUM(CASE WHEN status = 'processing' AND (status_label LIKE '%Route%' OR status_label LIKE '%Started%' OR status_label LIKE '%Working%' OR status_label LIKE '%In Progress%') THEN 1 ELSE 0 END) AS active_working,
-                SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS resolved,
-                SUM(CASE WHEN status = 'declined'   THEN 1 ELSE 0 END) AS declined,
+                SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS all_time_resolved,
+                SUM(CASE WHEN status = 'declined'   THEN 1 ELSE 0 END) AS all_time_declined,
                 SUM(CASE WHEN is_archived = 1       THEN 1 ELSE 0 END) AS archived
             FROM tickets
         ";
 
         if ($unitId !== null) {
-            $sql .= " WHERE unit_id = ?";
-            return $db->query($sql, [$unitId])->getRowArray() ?? [];
+            $allTimeSql .= " WHERE unit_id = ?";
+            $allTimeRow = $db->query($allTimeSql, [$unitId])->getRowArray() ?? [];
+        } else {
+            $allTimeRow = $db->query($allTimeSql)->getRowArray() ?? [];
         }
 
-        return $db->query($sql)->getRowArray() ?? [];
+        // Available historical years from tickets table
+        $yearsResult = $db->query("SELECT DISTINCT YEAR(submitted_at) AS yr FROM tickets WHERE submitted_at IS NOT NULL ORDER BY yr DESC")->getResultArray();
+        $availableYears = array_values(array_filter(array_map(fn($r) => (int)$r['yr'], $yearsResult)));
+        $currentYear = (int)date('Y');
+        if (!in_array($currentYear, $availableYears)) {
+            array_unshift($availableYears, $currentYear);
+        }
+
+        // Period filter resolution
+        $period = strtolower((string)($filters['period'] ?? 'all'));
+        if (!in_array($period, ['all', 'year', 'quarter', 'month'])) {
+            $period = 'all';
+        }
+
+        $yearRaw = $filters['year'] ?? null;
+        $year = ($yearRaw !== null && is_numeric($yearRaw)) ? (int)$yearRaw : $currentYear;
+
+        $quarterRaw = $filters['quarter'] ?? null;
+        $quarter = ($quarterRaw !== null && is_numeric($quarterRaw)) ? (int)$quarterRaw : (int)ceil(date('n') / 3);
+
+        $monthRaw = $filters['month'] ?? null;
+        $month = ($monthRaw !== null && is_numeric($monthRaw)) ? (int)$monthRaw : (int)date('n');
+
+        $filteredTotal = (int)($allTimeRow['all_time_total'] ?? 0);
+        $filteredResolved = (int)($allTimeRow['all_time_resolved'] ?? 0);
+        $filteredDeclined = (int)($allTimeRow['all_time_declined'] ?? 0);
+        $filterLabel = 'All Time';
+
+        if ($period !== 'all') {
+            $whereUnit = $unitId !== null ? "unit_id = " . (int)$unitId . " AND " : "";
+
+            if ($period === 'year') {
+                $subCond = "YEAR(submitted_at) = {$year}";
+                $resCond = "status IN ('resolved', 'closed') AND YEAR(COALESCE(completed_at, submitted_at)) = {$year}";
+                $decCond = "status = 'declined' AND YEAR(COALESCE(reviewed_at, updated_at, submitted_at)) = {$year}";
+                $filterLabel = "Year {$year}";
+            } elseif ($period === 'quarter') {
+                $subCond = "YEAR(submitted_at) = {$year} AND QUARTER(submitted_at) = {$quarter}";
+                $resCond = "status IN ('resolved', 'closed') AND YEAR(COALESCE(completed_at, submitted_at)) = {$year} AND QUARTER(COALESCE(completed_at, submitted_at)) = {$quarter}";
+                $decCond = "status = 'declined' AND YEAR(COALESCE(reviewed_at, updated_at, submitted_at)) = {$year} AND QUARTER(COALESCE(reviewed_at, updated_at, submitted_at)) = {$quarter}";
+                $qLabels = [1 => 'Q1 (Jan - Mar)', 2 => 'Q2 (Apr - Jun)', 3 => 'Q3 (Jul - Sep)', 4 => 'Q4 (Oct - Dec)'];
+                $filterLabel = ($qLabels[$quarter] ?? "Q{$quarter}") . " {$year}";
+            } elseif ($period === 'month') {
+                $subCond = "YEAR(submitted_at) = {$year} AND MONTH(submitted_at) = {$month}";
+                $resCond = "status IN ('resolved', 'closed') AND YEAR(COALESCE(completed_at, submitted_at)) = {$year} AND MONTH(COALESCE(completed_at, submitted_at)) = {$month}";
+                $decCond = "status = 'declined' AND YEAR(COALESCE(reviewed_at, updated_at, submitted_at)) = {$year} AND MONTH(COALESCE(reviewed_at, updated_at, submitted_at)) = {$month}";
+                $mName = date('F', mktime(0, 0, 0, $month, 10));
+                $filterLabel = "{$mName} {$year}";
+            }
+
+            $filterSql = "
+                SELECT
+                    (SELECT COUNT(*) FROM tickets WHERE {$whereUnit} {$subCond}) AS f_total,
+                    (SELECT COUNT(*) FROM tickets WHERE {$whereUnit} {$resCond}) AS f_resolved,
+                    (SELECT COUNT(*) FROM tickets WHERE {$whereUnit} {$decCond}) AS f_declined
+            ";
+            $fRow = $db->query($filterSql)->getRowArray() ?? [];
+            $filteredTotal = (int)($fRow['f_total'] ?? 0);
+            $filteredResolved = (int)($fRow['f_resolved'] ?? 0);
+            $filteredDeclined = (int)($fRow['f_declined'] ?? 0);
+        }
+
+        return [
+            'total'             => $filteredTotal,
+            'resolved'          => $filteredResolved,
+            'declined'          => $filteredDeclined,
+            'all_time_total'    => (int)($allTimeRow['all_time_total'] ?? 0),
+            'all_time_resolved' => (int)($allTimeRow['all_time_resolved'] ?? 0),
+            'all_time_declined' => (int)($allTimeRow['all_time_declined'] ?? 0),
+            'pending'           => (int)($allTimeRow['pending'] ?? 0),
+            'approved'          => (int)($allTimeRow['approved'] ?? 0),
+            'processing'        => (int)($allTimeRow['processing'] ?? 0),
+            'scheduled'         => (int)($allTimeRow['scheduled'] ?? 0),
+            'active_working'    => (int)($allTimeRow['active_working'] ?? 0),
+            'archived'          => (int)($allTimeRow['archived'] ?? 0),
+            'filter'            => [
+                'period'  => $period,
+                'year'    => $year,
+                'quarter' => $quarter,
+                'month'   => $month,
+                'label'   => $filterLabel,
+            ],
+            'available_years'   => $availableYears,
+        ];
     }
 
-    public function getAdvancedStatsByUnit(?int $unitId = null): array
+    public function getAdvancedStatsByUnit(?int $unitId = null, array $filters = []): array
     {
         $db = \Config\Database::connect();
-        $stats = $this->getStatsByUnit($unitId);
+        $stats = $this->getStatsByUnit($unitId, $filters);
         
         $whereUnit = $unitId ? "WHERE t.unit_id = " . (int)$unitId : "";
         $whereUnitTickets = $unitId ? "WHERE unit_id = " . (int)$unitId : "";

@@ -46,9 +46,10 @@ class SuperadminController extends BaseController
         $totalTickets     = $db->table('tickets')->countAllResults();
         $pendingTickets   = $db->table('tickets')->where('status', 'pending')->countAllResults();
         $approvedTickets  = $db->table('tickets')->where('status', 'approved')->countAllResults();
-        $ongoingTickets   = $db->table('tickets')->where('status', 'ongoing')->countAllResults();
-        $completedTickets = $db->table('tickets')->where('status', 'closed')->countAllResults();
+        $ongoingTickets   = $db->table('tickets')->whereIn('status', ['ongoing', 'processing'])->countAllResults();
+        $completedTickets = $db->table('tickets')->whereIn('status', ['closed', 'resolved', 'completed'])->countAllResults();
         $cancelledTickets = $db->table('tickets')->where('status', 'cancelled')->countAllResults();
+        $declinedTickets  = $db->table('tickets')->where('status', 'declined')->countAllResults();
 
         // Unit-level distribution
         $unitMap = ['FGMU' => 1, 'LEAU' => 2, 'SSU' => 3];
@@ -56,8 +57,9 @@ class SuperadminController extends BaseController
         foreach ($unitMap as $code => $id) {
             $unitBreakdown[$code] = [
                 'total'     => $db->table('tickets')->where('unit_id', $id)->countAllResults(),
-                'active'    => $db->table('tickets')->where('unit_id', $id)->whereIn('status', ['pending', 'approved', 'ongoing'])->countAllResults(),
-                'completed' => $db->table('tickets')->where('unit_id', $id)->where('status', 'closed')->countAllResults(),
+                'active'    => $db->table('tickets')->where('unit_id', $id)->whereIn('status', ['pending', 'approved', 'ongoing', 'processing'])->countAllResults(),
+                'completed' => $db->table('tickets')->where('unit_id', $id)->whereIn('status', ['closed', 'resolved', 'completed'])->countAllResults(),
+                'declined'  => $db->table('tickets')->where('unit_id', $id)->where('status', 'declined')->countAllResults(),
             ];
         }
 
@@ -70,6 +72,7 @@ class SuperadminController extends BaseController
                 'ongoing'   => $ongoingTickets,
                 'completed' => $completedTickets,
                 'cancelled' => $cancelledTickets,
+                'declined'  => $declinedTickets,
                 'by_unit'   => $unitBreakdown,
             ]
         ]);

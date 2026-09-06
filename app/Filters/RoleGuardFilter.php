@@ -40,6 +40,11 @@ class RoleGuardFilter implements FilterInterface
                 ]);
         }
 
+        // Super Admin has campus-wide authority across all operational roles
+        if ($currentRole === 'superadmin') {
+            return null;
+        }
+
         if (!in_array($currentRole, $arguments, true)) {
             return Services::response()
                 ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)

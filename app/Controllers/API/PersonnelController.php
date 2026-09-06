@@ -43,6 +43,10 @@ class PersonnelController extends BaseController
      */
     public function byUnit(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
         if (!$unitId) {
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
@@ -68,6 +72,10 @@ class PersonnelController extends BaseController
      */
     public function available(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
         if (!$unitId) {
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
@@ -89,6 +97,10 @@ class PersonnelController extends BaseController
         $worker = $this->personnelModel->find($personnelId);
         if (!$worker) {
             return $this->notFoundResponse('Personnel');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $worker['unit_id'])) {
+            return $forbidden;
         }
 
         $body   = $this->request->getJSON(true) ?? [];
@@ -134,6 +146,10 @@ class PersonnelController extends BaseController
             return $this->errorResponse('name, specialty, and unit_id are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
+        }
+
         if (!empty($contact) && !preg_match('/^[0-9]{11}$/', $contact)) {
             return $this->errorResponse('contact_number must be exactly 11 digits.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -162,6 +178,10 @@ class PersonnelController extends BaseController
         $worker = $this->personnelModel->find($personnelId);
         if (!$worker) {
             return $this->notFoundResponse('Personnel');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $worker['unit_id'])) {
+            return $forbidden;
         }
 
         $body       = $this->request->getJSON(true) ?? [];
@@ -200,6 +220,10 @@ class PersonnelController extends BaseController
             return $this->notFoundResponse('Personnel');
         }
 
+        if ($forbidden = $this->assertUnitAccess((int) $worker['unit_id'])) {
+            return $forbidden;
+        }
+
         if (in_array($worker['status'], ['working', 'on_trip'], true)) {
             return $this->errorResponse('Cannot delete a worker who is currently active on a job.');
         }
@@ -219,6 +243,10 @@ class PersonnelController extends BaseController
      */
     public function categories(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
         if (!$unitId) {
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
@@ -247,6 +275,11 @@ class PersonnelController extends BaseController
         if (!$unitId) {
             return $this->errorResponse('Valid unit_code is required (FGMU, LEAU, SSU).');
         }
+
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
+        }
+
         if (empty($name)) {
             return $this->errorResponse('Category name is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -281,6 +314,10 @@ class PersonnelController extends BaseController
         $category = $this->categoryModel->find((int) $categoryId);
         if (!$category) {
             return $this->notFoundResponse('Category');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $category['unit_id'])) {
+            return $forbidden;
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -327,6 +364,10 @@ class PersonnelController extends BaseController
         $category = $this->categoryModel->find((int) $categoryId);
         if (!$category) {
             return $this->notFoundResponse('Category');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $category['unit_id'])) {
+            return $forbidden;
         }
 
         if ($this->categoryModel->isInUse((int) $categoryId)) {

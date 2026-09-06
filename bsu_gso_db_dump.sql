@@ -419,7 +419,7 @@ CREATE TABLE `users` (
   `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `contact_number` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `role` enum('student','employee','admin','dispatcher','director') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
+  `role` enum('student','employee','admin','dispatcher','director','worker','superadmin') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
   `unit_id` int(11) unsigned DEFAULT NULL,
   `student_id_number` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `id_card_image` text COLLATE utf8mb4_unicode_ci,
@@ -442,7 +442,8 @@ INSERT INTO `users` VALUES ('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'End User', 
 ('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('d4a8de41-bf10-495d-93e8-e2480d5d78be', 'LEAU', 'Dispatcher', 'leau-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
 ('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '3', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
+('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d', 'Super', 'Administrator', 'superadmin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', '09123456789', 'superadmin', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
 
 
 

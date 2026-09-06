@@ -57,6 +57,11 @@ class DispatchController extends BaseController
      */
     public function assign(): ResponseInterface
     {
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['dispatcher', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only dispatchers may assign personnel.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
         $body = $this->request->getJSON(true) ?? [];
 
         // --- Validation ---
@@ -76,13 +81,39 @@ class DispatchController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
         if (!in_array($ticket['status'], ['approved', 'pending', 'processing'], true)) {
             return $this->errorResponse("Ticket must be approved, pending, or processing before assigning. Current status: {$ticket['status']}.");
+        }
+
+        // Enforce required scheduling for project announcements
+        if (!empty($ticket['is_project'])) {
+            if (empty($body['implementation_date'])) {
+                return $this->errorResponse(
+                    'An implementation date must be specified when dispatching workers to a scheduled project.',
+                    ['implementation_date' => ['Required for project dispatches.']],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+            if (empty($body['working_days']) || (int) $body['working_days'] < 1) {
+                return $this->errorResponse(
+                    'Target working days must be specified when dispatching workers to a scheduled project.',
+                    ['working_days' => ['Required for project dispatches.']],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
         }
 
         $worker = $this->personnelModel->find($personnelId);
         if (!$worker) {
             return $this->notFoundResponse('Personnel');
+        }
+
+        if ((int) $worker['unit_id'] !== (int) $ticket['unit_id']) {
+            return $this->errorResponse("Assigned worker does not belong to the ticket's unit.");
         }
 
         $implementationDate = sanitize_string($body['implementation_date'] ?? date('Y-m-d'));
@@ -170,6 +201,11 @@ class DispatchController extends BaseController
             return $this->notFoundResponse('Assignment');
         }
 
+        $ticket = $this->ticketModel->find($assignment['ticket_id']);
+        if ($ticket && ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id']))) {
+            return $forbidden;
+        }
+
         $body = $this->request->getJSON(true) ?? [];
 
         $updateData = [];
@@ -201,6 +237,11 @@ class DispatchController extends BaseController
         $assignment = $this->assignmentModel->find($assignmentId);
         if (!$assignment) {
             return $this->notFoundResponse('Assignment');
+        }
+
+        $ticket = $this->ticketModel->find($assignment['ticket_id']);
+        if ($ticket && ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id']))) {
+            return $forbidden;
         }
 
         $body      = $this->request->getJSON(true) ?? [];
@@ -257,6 +298,11 @@ class DispatchController extends BaseController
      */
     public function startJob(): ResponseInterface
     {
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['dispatcher', 'worker', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only dispatchers or field workers may start a job.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
         $body = $this->request->getJSON(true) ?? [];
         $ticketId = sanitize_string($body['ticket_id'] ?? '');
 
@@ -266,6 +312,10 @@ class DispatchController extends BaseController
 
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket) return $this->notFoundResponse('Ticket');
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
 
         $workerStatus = 'working';
         $statusLabel  = 'Job Started';

@@ -116,4 +116,72 @@ abstract class BaseController extends Controller
         $unitId = $this->currentUser()['unit_id'] ?? null;
         return $unitId !== null ? (int) $unitId : null;
     }
+
+    /**
+     * Check whether the current user is a staff/operational role.
+     */
+    protected function isStaffRole(): bool
+    {
+        return in_array($this->currentUserRole(), ['admin', 'dispatcher', 'director', 'worker'], true);
+    }
+
+    /**
+     * Map of unit code strings to internal numeric IDs.
+     */
+    protected const GLOBAL_UNIT_MAP = [
+        'FGMU' => 1,
+        'LEAU' => 2,
+        'SSU'  => 3,
+    ];
+
+    /**
+     * Resolve a unit code or integer to a validated unit ID.
+     */
+    protected function resolveUnitId(int|string $unit): ?int
+    {
+        if (is_numeric($unit)) {
+            return (int) $unit;
+        }
+        return self::GLOBAL_UNIT_MAP[strtoupper(trim((string) $unit))] ?? null;
+    }
+
+    /**
+     * Enforces tenant/unit scoping.
+     * Directors have university-wide jurisdiction.
+     * Admins and dispatchers are scoped strictly to their assigned unit_id.
+     *
+     * @param int|string $targetUnit Unit ID or Unit Code (e.g. 'FGMU', 1)
+     * @param string $customMessage Optional custom error message
+     * @return ResponseInterface|null Returns a 403 response if forbidden, or null if allowed.
+     */
+    protected function assertUnitAccess(int|string $targetUnit, string $customMessage = ''): ?ResponseInterface
+    {
+        $targetUnitId = $this->resolveUnitId($targetUnit);
+        if ($targetUnitId === null) {
+            return $this->errorResponse("Invalid unit specification: {$targetUnit}.", [], ResponseInterface::HTTP_BAD_REQUEST);
+        }
+
+        $userRole   = $this->currentUserRole();
+        $userUnitId = $this->currentUserUnitId();
+
+        // Directors have campus-wide oversight
+        if (in_array($userRole, ['director', 'superadmin'], true)) {
+            return null;
+        }
+
+        // Admins and Dispatchers must match their assigned unit_id
+        if (in_array($userRole, ['admin', 'dispatcher'], true)) {
+            if ($userUnitId === null || $userUnitId !== $targetUnitId) {
+                $msg = !empty($customMessage) 
+                    ? $customMessage 
+                    : "Jurisdiction error: Your account is scoped to unit #{$userUnitId}, cannot manage unit #{$targetUnitId}.";
+                return $this->forbiddenResponse($msg);
+            }
+            return null;
+        }
+
+        // Other roles (e.g. student, employee) do not have unit management access
+        return $this->forbiddenResponse('You do not have permission to manage this unit.');
+    }
 }
+

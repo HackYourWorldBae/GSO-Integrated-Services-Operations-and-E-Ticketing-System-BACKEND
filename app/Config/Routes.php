@@ -37,6 +37,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('tickets/intake',           'TicketController::submitIntake');
         $routes->get('tickets/my-requests',       'TicketController::myRequests');
         $routes->get('tickets/completed',         'TicketController::completedRequests');
+        $routes->patch('tickets/(:segment)/cancel','TicketController::cancel/$1');
         $routes->get('tickets/(:segment)',        'TicketController::show/$1');
         $routes->get('tickets/(:segment)/logs',   'TicketController::logs/$1');
         
@@ -64,14 +65,14 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/resolve',       'TicketController::resolveIncident/$1',       ['filter' => 'role:admin']);
 
         // -- Scheduled Projects Management (FGMU & LEAU Admins) --
-        $routes->post('projects',              'TicketController::createProject',   ['filter' => 'role:admin,dispatcher']);
-        $routes->patch('projects/(:segment)',  'TicketController::updateProject/$1',['filter' => 'role:admin,dispatcher']);
+        $routes->post('projects',              'TicketController::createProject',   ['filter' => 'role:admin']);
+        $routes->patch('projects/(:segment)',  'TicketController::updateProject/$1',['filter' => 'role:admin']);
 
         // -- Dispatch (Dispatchers) --
-        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);
-        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:admin,dispatcher']);
-        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin,dispatcher']);
-        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin,dispatcher']);
+        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:dispatcher']);
+        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:dispatcher,worker']);
+        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:dispatcher']);
+        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:dispatcher']);
 
         // -- Personnel Categories (Admin) --
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
@@ -95,6 +96,15 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- Director Analytics --
         $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director']);
         $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director']);
+
+        // -- Superadmin (Master Administration & User Lifecycle) --
+        $routes->get('superadmin/stats',                  'SuperadminController::stats',          ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/users',                  'SuperadminController::users',          ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/users',                 'SuperadminController::createUser',     ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/users/(:segment)',       'SuperadminController::showUser/$1',    ['filter' => 'role:superadmin']);
+        $routes->put('superadmin/users/(:segment)',       'SuperadminController::updateUser/$1',  ['filter' => 'role:superadmin']);
+        $routes->delete('superadmin/users/(:segment)',    'SuperadminController::deleteUser/$1',  ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
 
         // -- Notifications --
         $routes->get('notifications',             'NotificationController::index');

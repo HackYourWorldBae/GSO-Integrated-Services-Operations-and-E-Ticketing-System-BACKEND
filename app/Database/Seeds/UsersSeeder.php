@@ -32,6 +32,7 @@ class UsersSeeder extends Seeder
             [ 'email' => 'leau-dispatcher@email.com', 'role' => 'dispatcher', 'first_name' => 'LEAU', 'last_name' => 'Dispatcher', 'unit' => 'LEAU' ],
             [ 'email' => 'field-worker@email.com', 'role' => 'worker', 'first_name' => 'Field', 'last_name' => 'Worker', 'unit' => 'FGMU' ],
             [ 'email' => 'director@email.com', 'role' => 'director', 'first_name' => 'GSO', 'last_name' => 'Director', 'unit' => null ],
+            [ 'email' => 'superadmin@email.com', 'role' => 'superadmin', 'first_name' => 'Super', 'last_name' => 'Admin', 'unit' => null ],
         ];
 
         $data = [];

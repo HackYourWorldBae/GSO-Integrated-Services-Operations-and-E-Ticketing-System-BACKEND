@@ -66,7 +66,7 @@ class TicketModel extends Model
                         ->where('is_archived', 0)
                         ->orGroupStart()
                             ->where('updated_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)')
-                            ->where('status !=', 'closed')
+                            ->whereNotIn('status', ['closed', 'cancelled'])
                         ->groupEnd()
                     ->groupEnd()
                     ->orderBy('submitted_at', 'DESC')

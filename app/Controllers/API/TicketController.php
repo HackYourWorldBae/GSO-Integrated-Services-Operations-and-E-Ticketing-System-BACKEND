@@ -77,6 +77,69 @@ class TicketController extends BaseController
         return $this->successResponse('Completed tickets retrieved.', ['tickets' => $tickets]);
     }
 
+    /**
+     * Requestor self-service cancellation of their own pending ticket.
+     * Only tickets in 'pending' status can be cancelled.
+     *
+     * PATCH /api/v1/tickets/:id/cancel
+     */
+    public function cancel(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $userId = $this->currentUserId();
+        $role   = $this->currentUserRole();
+
+        // Must be the owner of the ticket or an elevated administrator
+        if ((string) $ticket['user_id'] !== (string) $userId && !in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to cancel this ticket.');
+        }
+
+        // Only pending tickets can be cancelled by the requester
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse(
+                "Ticket cannot be cancelled because its current status is '{$ticket['status']}'. Only pending requests can be cancelled.",
+                [],
+                ResponseInterface::HTTP_BAD_REQUEST
+            );
+        }
+
+        $body   = $this->request->getJSON(true) ?? [];
+        $reason = sanitize_string($body['reason'] ?? $body['cancellation_reason'] ?? 'Cancelled by requestor');
+
+        $this->ticketModel->update($ticketId, [
+            'status'         => 'cancelled',
+            'status_label'   => 'Cancelled by Requestor',
+            'decline_reason' => $reason,
+            'is_archived'    => 1,
+            'completed_at'   => date('Y-m-d H:i:s'),
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Cancelled',
+            "Ticket cancelled by requestor. Reason: {$reason}"
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Ticket #{$ticketId} Cancelled",
+            "Your service request #{$ticketId} has been successfully cancelled."
+        );
+
+        return $this->successResponse('Ticket cancelled successfully.', [
+            'ticket_id' => $ticketId,
+            'status'    => 'cancelled'
+        ]);
+    }
+
     // -------------------------------------------------------------------------
     // Admin & Dispatcher Queues
     // -------------------------------------------------------------------------
@@ -86,6 +149,10 @@ class TicketController extends BaseController
      */
     public function pendingQueue(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
@@ -103,6 +170,10 @@ class TicketController extends BaseController
      */
     public function dispatchQueue(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
@@ -120,6 +191,10 @@ class TicketController extends BaseController
      */
     public function activeTickets(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
@@ -178,6 +253,10 @@ class TicketController extends BaseController
      */
     public function archives(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
@@ -203,8 +282,15 @@ class TicketController extends BaseController
     public function unitStats(string $unitCode): ResponseInterface
     {
         if (strtoupper($unitCode) === 'ALL') {
+            if ($this->currentUserRole() !== 'director') {
+                return $this->forbiddenResponse('Only the director role can access global statistics.');
+            }
             $stats = $this->ticketModel->getAdvancedStatsByUnit(null);
             return $this->successResponse('Global statistics retrieved.', ['stats' => $stats]);
+        }
+
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
         }
 
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
@@ -235,8 +321,15 @@ class TicketController extends BaseController
         // Authorization check: only ticket owner or staff roles can view ticket details
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
+        if ((string) $ticket['user_id'] !== (string) $userId && !$this->isStaffRole()) {
             return $this->forbiddenResponse('You do not have permission to view this ticket.');
+        }
+
+        // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
+        if ($this->isStaffRole() && in_array($role, ['admin', 'dispatcher'], true)) {
+            if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+                return $forbidden;
+            }
         }
 
         // Enrich with unit-specific details
@@ -266,6 +359,10 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
         }
 
         if ($ticket['status'] !== 'pending') {
@@ -320,6 +417,10 @@ class TicketController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
+        if ($forbidden = $this->assertUnitAccess(3)) {
+            return $forbidden;
+        }
+
         if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
             return $this->errorResponse('This action is only valid for SSU Incident Reports.');
         }
@@ -372,6 +473,10 @@ class TicketController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
+        if ($forbidden = $this->assertUnitAccess(3)) {
+            return $forbidden;
+        }
+
         if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
             return $this->errorResponse('This action is only valid for SSU Incident Reports.');
         }
@@ -417,6 +522,10 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess(3)) {
+            return $forbidden;
         }
 
         if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
@@ -485,6 +594,10 @@ class TicketController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
+        if ($forbidden = $this->assertUnitAccess(3)) {
+            return $forbidden;
+        }
+
         if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
             return $this->errorResponse('This action is only valid for SSU Incident Reports.');
         }
@@ -537,6 +650,10 @@ class TicketController extends BaseController
      */
     public function investigatingQueue(string $unitCode): ResponseInterface
     {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
         $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
 
         if (!$unitId) {
@@ -561,6 +678,10 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
         }
 
         if ($ticket['status'] !== 'pending') {
@@ -614,6 +735,10 @@ class TicketController extends BaseController
 
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
         }
 
         if (!in_array($ticket['status'], ['processing', 'approved', 'resolved'])) {
@@ -1008,10 +1133,10 @@ class TicketController extends BaseController
     public function createProject(): ResponseInterface
     {
         $userId = $this->currentUserId();
-        // Only allow admins or dispatchers to create projects
-        $user = (new \App\Models\UserModel())->find($userId);
-        if (!$user || !in_array($user['role'], ['admin', 'dispatcher'])) {
-            return $this->errorResponse('Unauthorized to create projects.', [], ResponseInterface::HTTP_FORBIDDEN);
+        $role   = $this->currentUserRole();
+        // Only allow admins or superadmins to create project announcements
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized to create project announcements. Only Unit Admins may post projects.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -1020,6 +1145,10 @@ class TicketController extends BaseController
 
         if (!$unitId || !in_array($unitCode, ['FGMU', 'LEAU'])) {
             return $this->errorResponse('Projects can only be created for FGMU or LEAU.');
+        }
+
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
         }
 
         $title = sanitize_string($body['title'] ?? '');
@@ -1120,14 +1249,19 @@ class TicketController extends BaseController
     public function updateProject(string $ticketId): ResponseInterface
     {
         $userId = $this->currentUserId();
-        $user = (new \App\Models\UserModel())->find($userId);
-        if (!$user || !in_array($user['role'], ['admin', 'dispatcher'])) {
-            return $this->errorResponse('Unauthorized to update projects.', [], ResponseInterface::HTTP_FORBIDDEN);
+        $role   = $this->currentUserRole();
+        // Only allow admins or superadmins to update project announcements
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized to update project announcements. Only Unit Admins may manage projects.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket || !(bool)$ticket['is_project']) {
             return $this->notFoundResponse('Project');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -1168,8 +1302,15 @@ class TicketController extends BaseController
         // Authorization check: only ticket owner or staff roles can view ticket audit logs
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((int) $ticket['user_id'] !== (int) $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
+        if ((string) $ticket['user_id'] !== (string) $userId && !$this->isStaffRole()) {
             return $this->forbiddenResponse('You do not have permission to view logs for this ticket.');
+        }
+
+        // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
+        if ($this->isStaffRole() && in_array($role, ['admin', 'dispatcher'], true)) {
+            if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+                return $forbidden;
+            }
         }
 
         $logs = $this->logModel->getByTicket($ticketId);

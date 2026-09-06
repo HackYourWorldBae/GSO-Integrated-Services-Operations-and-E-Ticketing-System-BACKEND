@@ -54,7 +54,7 @@ class CreateUsersTable extends Migration
             ],
             'role' => [
                 'type'       => 'ENUM',
-                'constraint' => ['student', 'employee', 'admin', 'dispatcher', 'director', 'worker'],
+                'constraint' => ['student', 'employee', 'admin', 'dispatcher', 'director', 'worker', 'superadmin'],
                 'default'    => 'student',
                 'null'       => false,
             ],

@@ -53,6 +53,29 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'null'       => true,
                 'default'    => null,
             ],
+            'overtime_hours' => [
+                'type'       => 'DECIMAL',
+                'constraint' => '6,2',
+                'default'    => 0.00,
+                'null'       => false,
+            ],
+            'is_reassigned' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'reassigned_from_id' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 36,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'reassigned_reason' => [
+                'type'    => 'TEXT',
+                'null'    => true,
+                'default' => null,
+            ],
             'dispatcher_notes' => [
                 'type' => 'TEXT',
                 'null' => true,
@@ -80,11 +103,13 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
         ]);
 
         $this->forge->addPrimaryKey('id');
-        $this->forge->addKey('ticket_id',    false, false, 'idx_assignments_ticket');
-        $this->forge->addKey('personnel_id', false, false, 'idx_assignments_personnel');
+        $this->forge->addKey('ticket_id',          false, false, 'idx_assignments_ticket');
+        $this->forge->addKey('personnel_id',       false, false, 'idx_assignments_personnel');
+        $this->forge->addKey('reassigned_from_id', false, false, 'idx_assignments_reassigned_from');
 
-        $this->forge->addForeignKey('ticket_id',    'tickets',   'id', 'CASCADE', 'CASCADE', 'fk_assignment_ticket');
-        $this->forge->addForeignKey('personnel_id', 'personnel', 'id', 'CASCADE', 'CASCADE', 'fk_assignment_personnel');
+        $this->forge->addForeignKey('ticket_id',          'tickets',   'id', 'CASCADE',  'CASCADE', 'fk_assignment_ticket');
+        $this->forge->addForeignKey('personnel_id',       'personnel', 'id', 'CASCADE',  'CASCADE', 'fk_assignment_personnel');
+        $this->forge->addForeignKey('reassigned_from_id', 'personnel', 'id', 'SET NULL', 'CASCADE', 'fk_assignment_reassigned_from');
 
         $this->forge->createTable('ticket_assignments', true, [
             'ENGINE'         => 'InnoDB',

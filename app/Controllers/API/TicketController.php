@@ -726,6 +726,102 @@ class TicketController extends BaseController
     }
 
     /**
+     * Extend a project or ticket timeline due to unforeseen circumstances (Admins & Dispatchers).
+     *
+     * Body:
+     * {
+     *   extension_days?: int,
+     *   extension_reason: string,
+     *   extended_date?: string (Y-m-d),
+     *   overtime_hours?: float
+     * }
+     */
+    public function extendTicket(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $extensionDays = (int) ($body['extension_days'] ?? 0);
+        $reason        = sanitize_string($body['extension_reason'] ?? '');
+        $overtime      = (float) ($body['overtime_hours'] ?? 0.0);
+
+        if (empty($reason)) {
+            return $this->errorResponse('An extension reason is required explaining the unforeseen circumstances.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if ($extensionDays <= 0 && empty($body['extended_date']) && $overtime <= 0) {
+            return $this->errorResponse('Please specify extension working days, a new target date, or overtime hours.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Calculate new target date using WorkCalendar
+        $baseDate = !empty($ticket['extended_completion_date'])
+            ? new \DateTime($ticket['extended_completion_date'])
+            : (!empty($ticket['assignment']['implementation_date'])
+                ? new \DateTime($ticket['assignment']['implementation_date'])
+                : (!empty($ticket['project_target_date'])
+                    ? new \DateTime($ticket['project_target_date'])
+                    : new \DateTime()));
+
+        $extendedDate = !empty($body['extended_date'])
+            ? sanitize_string($body['extended_date'])
+            : \App\Libraries\WorkCalendar::addWorkingDays($baseDate, max(1, $extensionDays))->format('Y-m-d');
+
+        $totalExtensionDays = (int) ($ticket['extension_days'] ?? 0) + max(0, $extensionDays);
+        $totalOvertime      = (float) ($ticket['overtime_hours'] ?? 0) + max(0.0, $overtime);
+
+        $updateData = [
+            'extension_days'           => $totalExtensionDays,
+            'extended_completion_date' => $extendedDate,
+            'extension_reason'         => $reason,
+            'overtime_hours'           => $totalOvertime,
+            'updated_at'               => date('Y-m-d H:i:s'),
+        ];
+
+        $this->ticketModel->update($ticketId, $updateData);
+
+        // Update active assignment's implementation date & overtime hours
+        $db = Database::connect();
+        $db->table('ticket_assignments')
+           ->where('ticket_id', $ticketId)
+           ->where('completed_at IS NULL')
+           ->update([
+               'implementation_date' => $extendedDate,
+               'overtime_hours'      => $totalOvertime,
+           ]);
+
+        // Audit log
+        $logDetails = "Timeline Extended: +{$extensionDays} working day(s) to {$extendedDate}. Reason: {$reason}";
+        if ($overtime > 0) {
+            $logDetails .= " (Overtime logged: +{$overtime} hrs)";
+        }
+        $logModel = new \App\Models\TicketLogModel();
+        $logModel->logAction($ticketId, $this->currentUserId(), 'Timeline Extended', $logDetails);
+
+        // Notification to requestor
+        $notificationModel = new \App\Models\NotificationModel();
+        $notificationModel->createNotification(
+            $ticket['user_id'],
+            'warning',
+            "Ticket #{$ticketId} Timeline Extended",
+            "Project schedule adjusted to {$extendedDate} due to unforeseen circumstance: {$reason}"
+        );
+
+        return $this->successResponse('Ticket timeline extended successfully.', [
+            'ticket_id'                => $ticketId,
+            'extension_days'           => $totalExtensionDays,
+            'extended_completion_date' => $extendedDate,
+            'overtime_hours'           => $totalOvertime,
+        ]);
+    }
+
+    /**
      * Mark a ticket as completed/resolved (processing -> resolved/closed).
      *
      * Body (Optional for FGMU/LEAU):
@@ -845,10 +941,14 @@ class TicketController extends BaseController
 
         foreach ($assignments as $a) {
             if (!empty($a['personnel_id'])) {
-                $personnelModel->update($a['personnel_id'], [
-                    'status'     => 'available',
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
+                $curWorker = $personnelModel->find($a['personnel_id']);
+                // Only set back to 'available' if the worker is not currently 'on_leave'
+                if ($curWorker && $curWorker['status'] !== 'on_leave') {
+                    $personnelModel->update($a['personnel_id'], [
+                        'status'     => 'available',
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
             }
         }
 
@@ -1417,6 +1517,48 @@ class TicketController extends BaseController
             $ticket['working_days']        = !empty($ticket['project_working_days']) 
                 ? (int) $ticket['project_working_days'] 
                 : (!empty($ticket['assignment']['working_days']) ? (int) $ticket['assignment']['working_days'] : null);
+
+            $ticket['extension_days']           = (int) ($ticket['extension_days'] ?? 0);
+            $ticket['extended_completion_date'] = $ticket['extended_completion_date'] ?? null;
+            $ticket['extension_reason']         = $ticket['extension_reason'] ?? null;
+            $ticket['overtime_hours']           = (float) ($ticket['overtime_hours'] ?? 0.0);
+            $ticket['is_extended']              = ($ticket['extension_days'] > 0) || !empty($ticket['extended_completion_date']);
+            $ticket['effective_target_date']    = !empty($ticket['extended_completion_date'])
+                ? $ticket['extended_completion_date']
+                : (!empty($ticket['assignment']['implementation_date'])
+                    ? $ticket['assignment']['implementation_date']
+                    : (!empty($ticket['project_target_date']) ? $ticket['project_target_date'] : null));
+
+            // Compute business working hours (skipping weekends & holidays)
+            $startTimeStr = $ticket['assignment']['dispatched_at'] 
+                ?? $ticket['project_actual_start'] 
+                ?? $ticket['assignment']['implementation_date'] 
+                ?? null;
+
+            if ($startTimeStr && in_array($ticket['status'], ['processing', 'resolved', 'closed'], true)) {
+                try {
+                    $startDt = new \DateTime($startTimeStr);
+                    $endDt   = !empty($ticket['completed_at']) 
+                        ? new \DateTime($ticket['completed_at']) 
+                        : new \DateTime();
+
+                    $ticket['computed_working_hours'] = \App\Libraries\WorkCalendar::calculateWorkingHours(
+                        $startDt,
+                        $endDt,
+                        $ticket['overtime_hours']
+                    );
+                    $ticket['computed_working_duration'] = \App\Libraries\WorkCalendar::formatDuration(
+                        $ticket['computed_working_hours'],
+                        $ticket['overtime_hours']
+                    );
+                } catch (\Exception $e) {
+                    $ticket['computed_working_hours']    = 0.0;
+                    $ticket['computed_working_duration'] = 'N/A';
+                }
+            } else {
+                $ticket['computed_working_hours']    = null;
+                $ticket['computed_working_duration'] = null;
+            }
         }
         unset($ticket);
 

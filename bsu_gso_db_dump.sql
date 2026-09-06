@@ -61,23 +61,23 @@ CREATE TABLE `migrations` (
   `time` int(11) NOT NULL,
   `batch` int(11) unsigned NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=26 DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4;
 
 -- Dumping data for table `migrations`
-INSERT INTO `migrations` VALUES ('12', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
-('13', '2026_07_17_000002', 'App\\Database\\Migrations\\CreateUsersTable', 'default', 'App', '1784812909', '1'),
-('14', '2026_07_17_000003', 'App\\Database\\Migrations\\CreatePersonnelTable', 'default', 'App', '1784812909', '1'),
-('16', '2026_07_17_000005', 'App\\Database\\Migrations\\CreateTicketsTable', 'default', 'App', '1784812909', '1'),
-('17', '2026_07_17_000006', 'App\\Database\\Migrations\\CreateTicketAttachmentsTable', 'default', 'App', '1784812909', '1'),
-('18', '2026_07_17_000007', 'App\\Database\\Migrations\\CreateUnitTicketDetailTables', 'default', 'App', '1784812909', '1'),
-('19', '2026_07_17_000008', 'App\\Database\\Migrations\\CreateSsuLookupAndBridgeTables', 'default', 'App', '1784812910', '1'),
-('20', '2026_07_17_000009', 'App\\Database\\Migrations\\CreateTicketAssignmentsAndMaterialsTables', 'default', 'App', '1784812910', '1'),
-('21', '2026_07_17_000010', 'App\\Database\\Migrations\\CreateFeedbackAndDelayReasonTables', 'default', 'App', '1784812910', '1'),
-('22', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1'),
-('23', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812911', '2'),
-('24', '2026_07_17_000012', 'App\\Database\\Migrations\\CreateNotificationsTable', 'default', 'App', '1784812911', '3'),
-('25', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '3'),
-('26', '2026_08_10_000001', 'App\\Database\\Migrations\\AddSsuIncidentWorkflowColumnsToTickets', 'default', 'App', '1755475200', '4');
+INSERT INTO `migrations` VALUES ('1', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
+('2', '2026_07_17_000002', 'App\\Database\\Migrations\\CreateUsersTable', 'default', 'App', '1784812909', '1'),
+('3', '2026_07_17_000003', 'App\\Database\\Migrations\\CreatePersonnelTable', 'default', 'App', '1784812909', '1'),
+('4', '2026_07_17_000005', 'App\\Database\\Migrations\\CreateTicketsTable', 'default', 'App', '1784812909', '1'),
+('5', '2026_07_17_000006', 'App\\Database\\Migrations\\CreateTicketAttachmentsTable', 'default', 'App', '1784812909', '1'),
+('6', '2026_07_17_000007', 'App\\Database\\Migrations\\CreateUnitTicketDetailTables', 'default', 'App', '1784812909', '1'),
+('7', '2026_07_17_000008', 'App\\Database\\Migrations\\CreateSsuLookupAndBridgeTables', 'default', 'App', '1784812910', '1'),
+('8', '2026_07_17_000009', 'App\\Database\\Migrations\\CreateTicketAssignmentsAndMaterialsTables', 'default', 'App', '1784812910', '1'),
+('9', '2026_07_17_000010', 'App\\Database\\Migrations\\CreateFeedbackAndDelayReasonTables', 'default', 'App', '1784812910', '1'),
+('10', '2026_07_17_000011', 'App\\Database\\Migrations\\CreateTicketLogsTable', 'default', 'App', '1784812910', '1'),
+('11', '2026_07_17_000012', 'App\\Database\\Migrations\\CreateNotificationsTable', 'default', 'App', '1784812911', '1'),
+('12', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '1'),
+('13', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812913', '1'),
+('14', '2026_08_16_000002', 'App\\Database\\Migrations\\CreatePersonnelCategoriesTable', 'default', 'App', '1784812914', '1');
 
 
 -- Table structure for table `personnel`
@@ -234,6 +234,10 @@ CREATE TABLE `ticket_assignments` (
   `personnel_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `implementation_date` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `working_days` int(11) DEFAULT NULL,
+  `overtime_hours` decimal(6,2) NOT NULL DEFAULT '0.00',
+  `is_reassigned` tinyint(1) NOT NULL DEFAULT '0',
+  `reassigned_from_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `reassigned_reason` text COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `dispatcher_notes` text COLLATE utf8mb4_unicode_ci,
   `task_notes` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -242,7 +246,9 @@ CREATE TABLE `ticket_assignments` (
   PRIMARY KEY (`id`),
   KEY `idx_assignments_ticket` (`ticket_id`),
   KEY `idx_assignments_personnel` (`personnel_id`),
+  KEY `idx_assignments_reassigned_from` (`reassigned_from_id`),
   CONSTRAINT `fk_assignment_personnel` FOREIGN KEY (`personnel_id`) REFERENCES `personnel` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_assignment_reassigned_from` FOREIGN KEY (`reassigned_from_id`) REFERENCES `personnel` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_assignment_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -376,6 +382,10 @@ CREATE TABLE `tickets` (
   `project_actual_start` date DEFAULT NULL,
   `project_actual_completion` date DEFAULT NULL,
   `project_working_days` int(11) DEFAULT NULL,
+  `extension_days` int(11) NOT NULL DEFAULT '0',
+  `extended_completion_date` date DEFAULT NULL,
+  `extension_reason` text COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `overtime_hours` decimal(6,2) NOT NULL DEFAULT '0.00',
   PRIMARY KEY (`id`),
   KEY `fk_tickets_reviewer` (`reviewed_by`),
   KEY `idx_tickets_user` (`user_id`),

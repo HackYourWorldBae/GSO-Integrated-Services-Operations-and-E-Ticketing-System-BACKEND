@@ -111,9 +111,133 @@ class PersonnelController extends BaseController
             return $this->errorResponse("Status must be one of: " . implode(', ', $allowedStatuses));
         }
 
-        // Cannot manually set a 'working' worker to another status via this endpoint;
-        // that is managed automatically by Dispatch / Ticket completion flows.
-        if (in_array($worker['status'], ['working', 'on_trip'], true)) {
+        $assignmentModel   = new \App\Models\TicketAssignmentModel();
+        $ticketModel       = new \App\Models\TicketModel();
+        $notificationModel = new \App\Models\NotificationModel();
+
+        // Check for active assignments
+        $activeAssignments = $assignmentModel->getByPersonnel($personnelId);
+
+        if ($status === 'on_leave' && !empty($activeAssignments)) {
+            $leaveAction = sanitize_string($body['leave_action'] ?? '');
+            $leaveReason = sanitize_string($body['leave_reason'] ?? 'Sick / Medical Leave');
+
+            if (!in_array($leaveAction, ['reassign', 'extend'], true)) {
+                return $this->errorResponse(
+                    "Worker has active assignment(s). Please specify 'leave_action' ('reassign' or 'extend').",
+                    ['active_assignments' => $activeAssignments],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
+            if ($leaveAction === 'reassign') {
+                $targetWorkerId = sanitize_string($body['reassign_to_personnel_id'] ?? '');
+                if (empty($targetWorkerId)) {
+                    return $this->errorResponse('Target personnel ID is required for reassignment.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+                }
+
+                $targetWorker = $this->personnelModel->find($targetWorkerId);
+                if (!$targetWorker) {
+                    return $this->notFoundResponse('Replacement Personnel');
+                }
+
+                if ((int) $targetWorker['unit_id'] !== (int) $worker['unit_id']) {
+                    return $this->errorResponse("Replacement worker must belong to the same unit.");
+                }
+
+                if ($targetWorker['status'] === 'on_leave') {
+                    return $this->errorResponse("Selected replacement worker is currently on leave.");
+                }
+
+                // Reassign all active assignments to target worker
+                $hasRunningTicket = false;
+                foreach ($activeAssignments as $assignment) {
+                    $assignmentModel->update($assignment['id'], [
+                        'personnel_id'       => $targetWorkerId,
+                        'is_reassigned'      => 1,
+                        'reassigned_from_id' => $personnelId,
+                        'reassigned_reason'  => $leaveReason,
+                    ]);
+
+                    $ticket = $ticketModel->find($assignment['ticket_id']);
+                    if ($ticket && (int) $ticket['current_step'] === 5) {
+                        $hasRunningTicket = true;
+                    }
+
+                    $this->logModel->logAction(
+                        $assignment['ticket_id'],
+                        $this->currentUserId(),
+                        'Worker Reassigned',
+                        "Reassigned from {$worker['name']} (on leave: {$leaveReason}) to {$targetWorker['name']}."
+                    );
+
+                    if ($ticket) {
+                        $notificationModel->createNotification(
+                            $ticket['user_id'],
+                            'info',
+                            "Ticket #{$assignment['ticket_id']} Personnel Updated",
+                            "Staff assignment updated to {$targetWorker['name']}."
+                        );
+                    }
+                }
+
+                // Set new worker status to working if any of the tickets was actively running
+                if ($hasRunningTicket) {
+                    $this->personnelModel->update($targetWorkerId, [
+                        'status'     => 'working',
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+
+            } elseif ($leaveAction === 'extend') {
+                $extensionDays = (int) ($body['extension_days'] ?? 1);
+                $extendedDate  = sanitize_string($body['extended_completion_date'] ?? '');
+
+                foreach ($activeAssignments as $assignment) {
+                    $ticket = $ticketModel->find($assignment['ticket_id']);
+                    if (!$ticket) {
+                        continue;
+                    }
+
+                    $baseDate = !empty($ticket['extended_completion_date'])
+                        ? new \DateTime($ticket['extended_completion_date'])
+                        : (!empty($assignment['implementation_date'])
+                            ? new \DateTime($assignment['implementation_date'])
+                            : new \DateTime());
+
+                    $newTargetDate = !empty($extendedDate)
+                        ? $extendedDate
+                        : \App\Libraries\WorkCalendar::addWorkingDays($baseDate, max(1, $extensionDays))->format('Y-m-d');
+
+                    $totalDays = (int) ($ticket['extension_days'] ?? 0) + max(1, $extensionDays);
+
+                    $ticketModel->update($ticket['id'], [
+                        'extension_days'           => $totalDays,
+                        'extended_completion_date' => $newTargetDate,
+                        'extension_reason'         => "Assigned worker {$worker['name']} on leave ({$leaveReason})",
+                        'updated_at'               => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $assignmentModel->update($assignment['id'], [
+                        'implementation_date' => $newTargetDate,
+                    ]);
+
+                    $this->logModel->logAction(
+                        $ticket['id'],
+                        $this->currentUserId(),
+                        'Timeline Extended (Staff Leave)',
+                        "Target completion adjusted to {$newTargetDate} (+{$extensionDays} working days) because {$worker['name']} is on leave: {$leaveReason}."
+                    );
+
+                    $notificationModel->createNotification(
+                        $ticket['user_id'],
+                        'warning',
+                        "Ticket #{$ticket['id']} Extended",
+                        "Schedule adjusted to {$newTargetDate} due to staff leave."
+                    );
+                }
+            }
+        } elseif ($status === 'available' && in_array($worker['status'], ['working', 'on_trip'], true)) {
             return $this->errorResponse("Cannot change status of a worker who is actively working or on a trip. Complete their current job first.");
         }
 

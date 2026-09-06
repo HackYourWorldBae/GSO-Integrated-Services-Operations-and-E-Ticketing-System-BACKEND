@@ -20,6 +20,10 @@ class TicketAssignmentModel extends Model
         'assigned_at',
         'dispatched_at',
         'completed_at',
+        'overtime_hours',
+        'is_reassigned',
+        'reassigned_from_id',
+        'reassigned_reason',
     ];
 
     /**

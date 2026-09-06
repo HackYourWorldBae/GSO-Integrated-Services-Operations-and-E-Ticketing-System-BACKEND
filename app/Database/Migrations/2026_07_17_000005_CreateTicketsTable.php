@@ -42,6 +42,12 @@ class CreateTicketsTable extends Migration
                 'unsigned'   => true,
                 'null'       => false,
             ],
+            'title' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 255,
+                'default'    => 'Untitled Ticket',
+                'null'       => false,
+            ],
             'service_type' => [
                 'type'       => 'VARCHAR',
                 'constraint' => 150,
@@ -135,11 +141,50 @@ class CreateTicketsTable extends Migration
                 'null' => true,
                 'default' => null,
             ],
+            'extension_days' => [
+                'type'       => 'INT',
+                'constraint' => 11,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'extended_completion_date' => [
+                'type'    => 'DATE',
+                'null'    => true,
+                'default' => null,
+            ],
+            'extension_reason' => [
+                'type'    => 'TEXT',
+                'null'    => true,
+                'default' => null,
+            ],
+            'overtime_hours' => [
+                'type'       => 'DECIMAL',
+                'constraint' => '6,2',
+                'default'    => 0.00,
+                'null'       => false,
+            ],
             'is_archived' => [
                 'type'       => 'TINYINT',
                 'constraint' => 1,
                 'default'    => 0,
                 'null'       => false,
+            ],
+            'materials_logged' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'is_under_investigation' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'ssu_notation' => [
+                'type'    => 'TEXT',
+                'null'    => true,
+                'default' => null,
             ],
             'submitted_at' => [
                 'type'    => 'TIMESTAMP',
@@ -169,10 +214,11 @@ class CreateTicketsTable extends Migration
         ]);
 
         $this->forge->addPrimaryKey('id');
-        $this->forge->addKey('user_id',                  false, false, 'idx_tickets_user');
-        $this->forge->addKey(['unit_id', 'status'],      false, false, 'idx_tickets_unit_status');
-        $this->forge->addKey('is_archived',              false, false, 'idx_tickets_archived');
-        $this->forge->addKey('submitted_at',             false, false, 'idx_tickets_submitted');
+        $this->forge->addKey('user_id',                                                false, false, 'idx_tickets_user');
+        $this->forge->addKey(['unit_id', 'status'],                                    false, false, 'idx_tickets_unit_status');
+        $this->forge->addKey('is_archived',                                            false, false, 'idx_tickets_archived');
+        $this->forge->addKey(['unit_id', 'is_under_investigation', 'is_archived'],     false, false, 'idx_tickets_investigating');
+        $this->forge->addKey('submitted_at',                                           false, false, 'idx_tickets_submitted');
 
         $this->forge->addForeignKey('user_id',     'users', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_user');
         $this->forge->addForeignKey('unit_id',     'units', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_unit');

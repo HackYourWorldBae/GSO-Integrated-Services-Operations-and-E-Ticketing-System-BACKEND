@@ -48,6 +48,10 @@ class TicketModel extends Model
         'project_actual_start',
         'project_actual_completion',
         'project_working_days',
+        'extension_days',
+        'extended_completion_date',
+        'extension_reason',
+        'overtime_hours',
     ];
 
     // -------------------------------------------------------------------------

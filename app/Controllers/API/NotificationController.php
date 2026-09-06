@@ -40,6 +40,42 @@ class NotificationController extends BaseController
             ->orderBy('id', 'DESC')
             ->findAll();
 
+        $ticketModel = new \App\Models\TicketModel();
+        $ticketIds = [];
+        foreach ($notifications as &$n) {
+            $ticketId = null;
+            $text = ($n['title'] ?? '') . ' ' . ($n['message'] ?? '');
+            if (preg_match('/(?:Ticket|Incident|Request)\s*#?([A-Za-z0-9\-_]+)/i', $text, $matches)) {
+                $ticketId = $matches[1];
+            } elseif (preg_match('/#([A-Za-z0-9\-_]+)/', $text, $matches)) {
+                $ticketId = $matches[1];
+            }
+            $n['ticket_id'] = $ticketId;
+            if ($ticketId) {
+                $ticketIds[] = $ticketId;
+            }
+        }
+        unset($n);
+
+        if (!empty($ticketIds)) {
+            $foundTickets = $ticketModel->select('id, unit_id, status, is_archived, service_type')
+                ->whereIn('id', array_unique($ticketIds))
+                ->findAll();
+            $ticketsMap = [];
+            foreach ($foundTickets as $t) {
+                $ticketsMap[$t['id']] = $t;
+            }
+            foreach ($notifications as &$n) {
+                if (!empty($n['ticket_id']) && isset($ticketsMap[$n['ticket_id']])) {
+                    $t = $ticketsMap[$n['ticket_id']];
+                    $n['unit_id']     = (int) $t['unit_id'];
+                    $n['status']      = $t['status'];
+                    $n['is_archived'] = (int) $t['is_archived'];
+                }
+            }
+            unset($n);
+        }
+
         $unreadCount = count(array_filter($notifications, fn($n) => $n['is_read'] == 0));
 
         return $this->successResponse('Notifications fetched successfully.', [

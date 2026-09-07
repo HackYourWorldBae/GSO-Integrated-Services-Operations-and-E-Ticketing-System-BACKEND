@@ -266,6 +266,19 @@ class PersonnelController extends BaseController
         $unitId    = (int) ($body['unit_id'] ?? 0);
         $contact   = sanitize_string($body['contact_number'] ?? '');
 
+        // If 'name' is not provided directly, compose it from name components
+        if (empty($name) && !empty($body['first_name']) && !empty($body['last_name'])) {
+            $parts = [sanitize_string($body['first_name'])];
+            if (!empty($body['middle_initial'])) {
+                $parts[] = rtrim(sanitize_string($body['middle_initial']), '.') . '.';
+            }
+            $parts[] = sanitize_string($body['last_name']);
+            if (!empty($body['name_extension'])) {
+                $parts[] = sanitize_string($body['name_extension']);
+            }
+            $name = implode(' ', $parts);
+        }
+
         if (empty($name) || empty($specialty) || !$unitId) {
             return $this->errorResponse('name, specialty, and unit_id are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }

@@ -31,6 +31,7 @@ class UserModel extends Model
         'role',
         'unit_id',
         'id_card_image',
+        'avatar_path',
         'status',
         'is_verified',
     ];
@@ -80,6 +81,7 @@ class UserModel extends Model
 
     /**
      * Return a safe user payload for API responses (no password).
+     * Automatically enriches with dynamic RBAC permissions and avatar_url.
      */
     public function getSafeUser(string $userId): ?array
     {
@@ -90,6 +92,16 @@ class UserModel extends Model
         }
 
         unset($user['password_hash']);
+
+        // Attach avatar URL
+        $user['avatar_url'] = !empty($user['avatar_path'])
+            ? base_url('api/v1/auth/avatar/' . $user['id'])
+            : null;
+
+        // Attach dynamic RBAC permissions for the user's role
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $user['permissions'] = $rolePermissionModel->getPermissionsForRole($user['role']);
+
         return $user;
     }
 
@@ -98,7 +110,7 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                         ->join('units', 'units.id = users.unit_id', 'left');
 
         if (!empty($search)) {

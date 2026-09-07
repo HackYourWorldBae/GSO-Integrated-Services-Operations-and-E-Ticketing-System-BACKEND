@@ -1529,6 +1529,17 @@ class TicketController extends BaseController
                     ? $ticket['assignment']['implementation_date']
                     : (!empty($ticket['project_target_date']) ? $ticket['project_target_date'] : null));
 
+            $ticket['accomplishment_report_path'] = $ticket['accomplishment_report_path'] ?? null;
+            $ticket['accomplishment_notes']       = $ticket['accomplishment_notes'] ?? null;
+            $ticket['verification_status']        = $ticket['verification_status'] ?? 'pending_report';
+            $ticket['verified_by_user_id']        = $ticket['verified_by_user_id'] ?? null;
+            $ticket['verified_at']                = $ticket['verified_at'] ?? null;
+            $ticket['eodb_tier']                  = $ticket['eodb_tier'] ?? null;
+            $ticket['eodb_days']                  = !empty($ticket['eodb_days']) ? (int) $ticket['eodb_days'] : null;
+            $ticket['target_completion_date']     = $ticket['target_completion_date'] ?? null;
+            $ticket['is_emergency']               = (int) ($ticket['is_emergency'] ?? 0);
+            $ticket['is_vip']                     = (int) ($ticket['is_vip'] ?? 0);
+
             // Compute business working hours (skipping weekends & holidays)
             $startTimeStr = $ticket['assignment']['dispatched_at'] 
                 ?? $ticket['project_actual_start'] 
@@ -1792,16 +1803,41 @@ class TicketController extends BaseController
                     $storedMime = $mime;
                 }
 
+                $securityService = new \App\Libraries\FileSecurityService();
+                $inspection = $securityService->inspectFile($file->getTempName(), $clientName, $mime);
+                if (!$inspection['safe']) {
+                    $errors[] = $clientName . ' rejected: ' . $inspection['reason'];
+                    continue;
+                }
+
                 $newName = $file->getRandomName();
                 $fileSize = $file->getSize();
 
                 if ($file->move($uploadPath, $newName)) {
+                    $savedFullPath = $uploadPath . $newName;
+
+                    // Encrypt document at rest using AES-256-GCM
+                    $isEncrypted   = 0;
+                    $encryptionIv  = null;
+                    $encryptionTag = null;
+                    try {
+                        $encResult = $securityService->encryptFile($savedFullPath, $savedFullPath);
+                        $isEncrypted   = 1;
+                        $encryptionIv  = $encResult['iv'];
+                        $encryptionTag = $encResult['tag'];
+                    } catch (\Throwable $e) {
+                        log_message('error', 'Attachment encryption error: ' . $e->getMessage());
+                    }
+
                     $record = [
                         'ticket_id'       => $ticketId,
                         'file_name'       => $clientName,
                         'file_path'       => "tickets/{$year}/{$ticketId}/{$newName}",
                         'file_type'       => $storedMime,
                         'file_size_bytes' => $fileSize,
+                        'is_encrypted'    => $isEncrypted,
+                        'encryption_iv'   => $encryptionIv,
+                        'encryption_tag'  => $encryptionTag,
                         'uploaded_at'     => date('Y-m-d H:i:s'),
                     ];
                     
@@ -1829,7 +1865,7 @@ class TicketController extends BaseController
     }
 
     /**
-     * Download or view an attachment securely.
+     * Download or view an attachment securely with AES-256 decryption.
      */
     public function downloadAttachment(int $attachmentId)
     {
@@ -1848,7 +1884,7 @@ class TicketController extends BaseController
         // Security check
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker'])) {
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'superadmin'])) {
             return $this->response->setStatusCode(403)->setBody('Forbidden.');
         }
 
@@ -1858,7 +1894,268 @@ class TicketController extends BaseController
             return $this->response->setStatusCode(404)->setBody('File not found on server.');
         }
 
+        // If file was encrypted at rest, decrypt on-the-fly
+        if (!empty($attachment['is_encrypted']) && !empty($attachment['encryption_iv']) && !empty($attachment['encryption_tag'])) {
+            $securityService = new \App\Libraries\FileSecurityService();
+            $decrypted = $securityService->decryptFile($fullPath, $attachment['encryption_iv'], $attachment['encryption_tag']);
+            if ($decrypted === null) {
+                return $this->response->setStatusCode(500)->setBody('Integrity check failed: unable to decrypt attachment.');
+            }
+
+            return $this->response
+                ->setHeader('Content-Type', $attachment['file_type'] ?: 'application/octet-stream')
+                ->setHeader('Content-Disposition', 'attachment; filename="' . rawurlencode($attachment['file_name']) . '"')
+                ->setBody($decrypted);
+        }
+
         return $this->response->download($fullPath, null)->setFileName($attachment['file_name']);
+    }
+
+    /**
+     * Upload Accomplishment Report for a ticket.
+     * Mandatory proof of completion before a ticket can be closed.
+     */
+    public function uploadAccomplishment(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $file = $this->request->getFile('accomplishment_report');
+        if (!$file || !$file->isValid() || $file->hasMoved()) {
+            return $this->errorResponse('Accomplishment report file is required ("accomplishment_report").');
+        }
+
+        $securityService = new \App\Libraries\FileSecurityService();
+        $inspection = $securityService->inspectFile($file->getTempName(), $file->getClientName(), $file->getClientMimeType());
+        if (!$inspection['safe']) {
+            return $this->errorResponse('Security violation: ' . $inspection['reason'], [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $year = date('Y');
+        $uploadPath = WRITEPATH . "uploads/accomplishments/{$year}/{$ticketId}/";
+        if (!is_dir($uploadPath)) {
+            @mkdir($uploadPath, 0775, true);
+        }
+
+        $newName = $file->getRandomName();
+        if (!$file->move($uploadPath, $newName)) {
+            return $this->errorResponse('Failed to store accomplishment report.');
+        }
+
+        $savedFullPath = $uploadPath . $newName;
+        try {
+            $securityService->encryptSelfContained($savedFullPath, $savedFullPath);
+        } catch (\Throwable $e) {
+            log_message('error', 'Failed to encrypt accomplishment report: ' . $e->getMessage());
+        }
+
+        $reportRelPath = "accomplishments/{$year}/{$ticketId}/{$newName}";
+        $notes = sanitize_string($this->request->getPost('notes') ?? '');
+
+        $this->ticketModel->update($ticketId, [
+            'accomplishment_report_path' => $reportRelPath,
+            'accomplishment_notes'       => $notes,
+            'verification_status'        => 'pending_verification',
+            'status'                     => 'resolved',
+            'status_label'               => 'Resolved (Pending Verification)',
+            'updated_at'                 => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Accomplishment Report Uploaded',
+            "Accomplishment report uploaded: {$file->getClientName()}. Awaiting verification and ticket closure."
+        );
+
+        $notificationModel = new \App\Models\NotificationModel();
+        $notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Ticket #{$ticketId} Accomplishment Submitted",
+            "Field services have been completed with accomplishment report. Verification in progress."
+        );
+
+        return $this->successResponse('Accomplishment report submitted successfully. Ticket is pending verification.', [
+            'verification_status' => 'pending_verification',
+            'report_path'         => $reportRelPath,
+        ]);
+    }
+
+    /**
+     * Download or preview accomplishment report securely with AES-256 decryption.
+     */
+    public function downloadAccomplishment(string $ticketId)
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket || empty($ticket['accomplishment_report_path'])) {
+            return $this->response->setStatusCode(404)->setBody('Accomplishment report not found.');
+        }
+
+        $userId = $this->currentUserId();
+        $role   = $this->currentUserRole();
+        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'superadmin'], true)) {
+            return $this->response->setStatusCode(403)->setBody('Forbidden.');
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $ticket['accomplishment_report_path'];
+        if (!is_file($fullPath)) {
+            return $this->response->setStatusCode(404)->setBody('File not found on server.');
+        }
+
+        $securityService = new \App\Libraries\FileSecurityService();
+        $decrypted = $securityService->decryptSelfContained($fullPath);
+        if ($decrypted === null) {
+            return $this->response->setStatusCode(500)->setBody('Failed to decrypt accomplishment report.');
+        }
+
+        $ext  = strtolower(pathinfo($ticket['accomplishment_report_path'], PATHINFO_EXTENSION));
+        $mime = match($ext) {
+            'pdf'          => 'application/pdf',
+            'png'          => 'image/png',
+            'jpg', 'jpeg'  => 'image/jpeg',
+            'webp'         => 'image/webp',
+            default        => 'application/octet-stream',
+        };
+
+        return $this->response
+            ->setHeader('Content-Type', $mime)
+            ->setHeader('Content-Disposition', 'inline; filename="Accomplishment_Report_' . $ticketId . '.' . $ext . '"')
+            ->setBody($decrypted);
+    }
+
+    /**
+     * Officially verify services and close ticket.
+     * Strictly blocks closure if no accomplishment report has been uploaded.
+     */
+    public function verifyAndClose(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        // Must have verified accomplishment report
+        if (empty($ticket['accomplishment_report_path'])) {
+            return $this->errorResponse(
+                'Verification Error: The request cannot be closed without an uploaded Accomplishment Report proving services are finished.',
+                ['accomplishment_report' => 'Mandatory accomplishment report missing.']
+            );
+        }
+
+        $userId = $this->currentUserId();
+        $role   = $this->currentUserRole();
+        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'dispatcher', 'director', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to verify and close this ticket.');
+        }
+
+        $db = Database::connect();
+        $db->transStart();
+
+        $this->ticketModel->update($ticketId, [
+            'status'              => 'closed',
+            'status_label'        => 'Closed / Verified',
+            'verification_status' => 'verified_closed',
+            'verified_by_user_id' => $userId,
+            'verified_at'         => date('Y-m-d H:i:s'),
+            'completed_at'        => $ticket['completed_at'] ?? date('Y-m-d H:i:s'),
+            'current_step'        => 6,
+            'is_archived'         => 1,
+            'updated_at'          => date('Y-m-d H:i:s'),
+        ]);
+
+        // Complete any active assignments
+        $db->table('ticket_assignments')
+           ->where('ticket_id', $ticketId)
+           ->where('completed_at IS NULL')
+           ->update(['completed_at' => date('Y-m-d H:i:s'), 'status' => 'completed']);
+
+        // Set worker back to available if not on leave
+        $assignments = $db->table('ticket_assignments')->where('ticket_id', $ticketId)->get()->getResultArray();
+        $personnelModel = new \App\Models\PersonnelModel();
+        foreach ($assignments as $a) {
+            if (!empty($a['personnel_id'])) {
+                $worker = $personnelModel->find($a['personnel_id']);
+                if ($worker && $worker['status'] !== 'on_leave') {
+                    $personnelModel->update($a['personnel_id'], [
+                        'status'     => 'available',
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+        }
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Failed to close ticket.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Ticket Verified & Closed',
+            'Accomplishment verified and ticket officially marked as Closed.'
+        );
+
+        $notificationModel = new \App\Models\NotificationModel();
+        $notificationModel->createNotification(
+            $ticket['user_id'],
+            'success',
+            "Ticket #{$ticketId} Closed",
+            "Your service request has been verified and officially closed. Thank you!"
+        );
+
+        return $this->successResponse('Ticket verified and closed successfully.');
+    }
+
+    /**
+     * Update EODB turnaround classification on a ticket.
+     * 3 days: Simple, 7 days: Moderate, 21 days: Complex
+     */
+    public function updateEodb(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $tier = sanitize_string($body['eodb_tier'] ?? 'simple_3d');
+
+        $days = match($tier) {
+            'moderate_7d' => 7,
+            'complex_21d' => 21,
+            default       => 3,
+        };
+
+        $implDate = !empty($body['implementation_date'])
+            ? new \DateTime($body['implementation_date'])
+            : new \DateTime();
+
+        $targetDate = \App\Libraries\WorkCalendar::addWorkingDays($implDate, $days)->format('Y-m-d H:i:s');
+
+        $this->ticketModel->update($ticketId, [
+            'eodb_tier'              => $tier,
+            'eodb_days'              => $days,
+            'target_completion_date' => $targetDate,
+            'updated_at'             => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'EODB Classification Set',
+            "EODB tier set to {$tier} ({$days} working days). Target completion: {$targetDate}."
+        );
+
+        return $this->successResponse('EODB classification updated successfully.', [
+            'eodb_tier'              => $tier,
+            'eodb_days'              => $days,
+            'target_completion_date' => $targetDate,
+        ]);
     }
     private function formatServicesList(array $services): string
     {

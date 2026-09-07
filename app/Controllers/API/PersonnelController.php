@@ -106,7 +106,7 @@ class PersonnelController extends BaseController
         $body   = $this->request->getJSON(true) ?? [];
         $status = sanitize_string($body['status'] ?? '');
 
-        $allowedStatuses = ['available', 'on_leave'];
+        $allowedStatuses = ['available', 'on_leave', 'inactive', 'retired'];
         if (!in_array($status, $allowedStatuses, true)) {
             return $this->errorResponse("Status must be one of: " . implode(', ', $allowedStatuses));
         }
@@ -118,7 +118,39 @@ class PersonnelController extends BaseController
         // Check for active assignments
         $activeAssignments = $assignmentModel->getByPersonnel($personnelId);
 
-        if ($status === 'on_leave' && !empty($activeAssignments)) {
+        if (in_array($status, ['inactive', 'retired'], true) && !empty($activeAssignments)) {
+            // Automatically unassign all active and queued tasks and return to the unit queue
+            foreach ($activeAssignments as $assignment) {
+                $assignmentModel->update($assignment['id'], [
+                    'completed_at'       => date('Y-m-d H:i:s'),
+                    'reassignment_reason'=> "Staff member marked as {$status}",
+                ]);
+
+                $ticketModel->update($assignment['ticket_id'], [
+                    'status'       => 'approved',
+                    'status_label' => 'Approved (Pending Re-dispatch)',
+                    'current_step' => 2,
+                    'updated_at'   => date('Y-m-d H:i:s'),
+                ]);
+
+                $this->logModel->logAction(
+                    $assignment['ticket_id'],
+                    $this->currentUserId(),
+                    'Worker Unassigned (Staff Retired/Inactive)',
+                    "Staff {$worker['name']} was marked as {$status}. Task returned to unit dispatch queue for reassignment."
+                );
+
+                $ticket = $ticketModel->find($assignment['ticket_id']);
+                if ($ticket) {
+                    $notificationModel->createNotification(
+                        $ticket['user_id'],
+                        'info',
+                        "Ticket #{$assignment['ticket_id']} Schedule Update",
+                        "Staff assignment updated. Ticket queued for dispatch."
+                    );
+                }
+            }
+        } elseif ($status === 'on_leave' && !empty($activeAssignments)) {
             $leaveAction = sanitize_string($body['leave_action'] ?? '');
             $leaveReason = sanitize_string($body['leave_reason'] ?? 'Sick / Medical Leave');
 
@@ -156,7 +188,7 @@ class PersonnelController extends BaseController
                         'personnel_id'       => $targetWorkerId,
                         'is_reassigned'      => 1,
                         'reassigned_from_id' => $personnelId,
-                        'reassigned_reason'  => $leaveReason,
+                        'reassignment_reason'=> $leaveReason,
                     ]);
 
                     $ticket = $ticketModel->find($assignment['ticket_id']);
@@ -237,8 +269,6 @@ class PersonnelController extends BaseController
                     );
                 }
             }
-        } elseif ($status === 'available' && in_array($worker['status'], ['working', 'on_trip'], true)) {
-            return $this->errorResponse("Cannot change status of a worker who is actively working or on a trip. Complete their current job first.");
         }
 
         $this->personnelModel->update($personnelId, [

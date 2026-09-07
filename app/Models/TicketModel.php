@@ -52,6 +52,14 @@ class TicketModel extends Model
         'extended_completion_date',
         'extension_reason',
         'overtime_hours',
+        'eodb_tier',
+        'eodb_days',
+        'target_completion_date',
+        'verification_status',
+        'accomplishment_report_path',
+        'accomplishment_notes',
+        'verified_by_user_id',
+        'verified_at',
     ];
 
     // -------------------------------------------------------------------------
@@ -138,7 +146,7 @@ class TicketModel extends Model
     public function getActiveTickets(int $unitId): array
     {
         return $this->where('unit_id', $unitId)
-                    ->whereIn('status', ['processing'])
+                    ->whereIn('status', ['processing', 'resolved'])
                     ->where('is_archived', 0)
                     ->orderBy('submitted_at', 'ASC')
                     ->findAll();

@@ -51,10 +51,12 @@ class PersonnelModel extends Model
         $personnelIds = array_column($personnel, 'id');
         
         $assignments = $db->table('ticket_assignments ta')
-            ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status')
+            ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status, t.eodb_tier, t.target_completion_date')
             ->join('tickets t', 't.id = ta.ticket_id', 'left')
             ->whereIn('ta.personnel_id', $personnelIds)
             ->where('ta.completed_at IS NULL')
+            ->orderBy('ta.is_emergency', 'DESC')
+            ->orderBy('ta.queue_order', 'ASC')
             ->orderBy('ta.assigned_at', 'ASC')
             ->get()->getResultArray();
 
@@ -64,25 +66,50 @@ class PersonnelModel extends Model
         }
 
         foreach ($personnel as &$p) {
-            $p['assignments'] = $assignmentMap[$p['id']] ?? [];
-            
-            // To maintain backward compatibility, extract current and next
-            $p['assigned_ticket_id'] = $p['assignments'][0]['ticket_id'] ?? null;
-            $p['is_project']         = (int) ($p['assignments'][0]['is_project'] ?? 0);
-            $p['project_title']      = $p['assignments'][0]['project_title'] ?? null;
-            $p['ticket_task']        = !empty($p['is_project']) 
-                                        ? ($p['project_title'] ?: 'Office Project') 
-                                        : (!empty($p['assignments'][0]['service_type']) ? $p['assignments'][0]['service_type'] : ($p['assignments'][0]['task_notes'] ?? null));
-            $p['implementation_date'] = $p['assignments'][0]['implementation_date'] ?? null;
-            $p['ticket_status']       = $p['assignments'][0]['ticket_status'] ?? null;
-            $p['service_type']        = $p['assignments'][0]['service_type'] ?? null;
-             
-            $p['next_assignment_id'] = $p['assignments'][1]['ticket_id'] ?? null;
-            $p['next_is_project']    = (int) ($p['assignments'][1]['is_project'] ?? 0);
-            $p['next_ticket_task']   = !empty($p['next_is_project']) 
-                                        ? ($p['assignments'][1]['project_title'] ?? 'Office Project') 
-                                        : (!empty($p['assignments'][1]['service_type']) ? $p['assignments'][1]['service_type'] : ($p['assignments'][1]['task_notes'] ?? null));
-            $p['next_implementation_date'] = $p['assignments'][1]['implementation_date'] ?? null;
+            $rawAssignments = $assignmentMap[$p['id']] ?? [];
+            $formattedAssignments = [];
+            foreach ($rawAssignments as $idx => $a) {
+                $taskName = !empty($a['is_project'])
+                    ? ($a['project_title'] ?: 'Office Project')
+                    : (!empty($a['service_type']) ? $a['service_type'] : ($a['task_notes'] ?? 'Assigned Work'));
+
+                $formattedAssignments[] = [
+                    'id'                  => $a['id'],
+                    'ticket_id'           => $a['ticket_id'],
+                    'service_type'        => $a['service_type'] ?? null,
+                    'is_project'          => (int) ($a['is_project'] ?? 0),
+                    'project_title'       => $a['project_title'] ?? null,
+                    'task'                => $taskName,
+                    'implementation_date' => $a['implementation_date'] ?? null,
+                    'ticket_status'       => $a['ticket_status'] ?? null,
+                    'is_emergency'        => (int) ($a['is_emergency'] ?? 0),
+                    'queue_order'         => (int) ($a['queue_order'] ?? ($idx + 1)),
+                    'status'              => $a['status'] ?? 'active',
+                    'eodb_tier'           => $a['eodb_tier'] ?? null,
+                    'target_completion_date' => $a['target_completion_date'] ?? null,
+                ];
+            }
+
+            $p['assignments']      = $formattedAssignments;
+            $p['assignment_count'] = count($formattedAssignments);
+
+            // Backward compatibility fields for current/next slots
+            $p['assigned_ticket_id'] = $formattedAssignments[0]['ticket_id'] ?? null;
+            $p['is_project']         = $formattedAssignments[0]['is_project'] ?? 0;
+            $p['project_title']      = $formattedAssignments[0]['project_title'] ?? null;
+            $p['ticket_task']        = $formattedAssignments[0]['task'] ?? null;
+            $p['implementation_date'] = $formattedAssignments[0]['implementation_date'] ?? null;
+            $p['ticket_status']       = $formattedAssignments[0]['ticket_status'] ?? null;
+            $p['service_type']        = $formattedAssignments[0]['service_type'] ?? null;
+            $p['is_emergency']        = $formattedAssignments[0]['is_emergency'] ?? 0;
+
+            $p['next_assignment_id'] = $formattedAssignments[1]['ticket_id'] ?? null;
+            $p['next_is_project']    = $formattedAssignments[1]['is_project'] ?? 0;
+            $p['next_ticket_task']   = $formattedAssignments[1]['task'] ?? null;
+            $p['next_implementation_date'] = $formattedAssignments[1]['implementation_date'] ?? null;
+
+            // Full backlog beyond first active job
+            $p['backlog'] = array_slice($formattedAssignments, 1);
         }
 
         return $personnel;
@@ -90,11 +117,12 @@ class PersonnelModel extends Model
 
     /**
      * Get all available workers in a unit (for dispatcher assignment dropdowns).
+     * Excludes only staff who are currently on leave or inactive/retired.
      */
     public function getAvailableByUnit(int $unitId): array
     {
         return $this->where('unit_id', $unitId)
-                    ->whereIn('status', ['available'])
+                    ->whereNotIn('status', ['on_leave', 'inactive', 'retired'])
                     ->orderBy('specialty', 'ASC')
                     ->findAll();
     }

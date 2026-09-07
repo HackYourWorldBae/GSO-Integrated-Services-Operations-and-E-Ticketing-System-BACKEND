@@ -24,6 +24,9 @@ class TicketAssignmentModel extends Model
         'is_reassigned',
         'reassigned_from_id',
         'reassigned_reason',
+        'is_emergency',
+        'queue_order',
+        'status',
     ];
 
     /**

@@ -30,10 +30,9 @@ class DatabaseSeeder extends Seeder
         $this->call('UsersSeeder');
 
 
-        // 6. Personnel (empty — admins manage the roster via UI)
-        $this->call('PersonnelSeeder');
+        // 5. Personnel roster is initially empty — admins manage personnel via UI
 
-        // 7. Seed system personnel categories
+        // 6. Seed system personnel categories (FGMU & LEAU baseline specialties)
         $this->call('PersonnelCategorySeeder');
     }
 }

@@ -86,6 +86,24 @@ class CreateTicketAssignmentsAndMaterialsTables extends Migration
                 'null'       => true,
                 'default'    => null,
             ],
+            'is_emergency' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'queue_order' => [
+                'type'       => 'INT',
+                'constraint' => 11,
+                'default'    => 1,
+                'null'       => false,
+            ],
+            'status' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 30,
+                'default'    => 'active',
+                'null'       => false,
+            ],
             'assigned_at' => [
                 'type'    => 'TIMESTAMP',
                 'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),

@@ -16,6 +16,9 @@ class TicketAttachmentModel extends Model
         'file_path',
         'file_type',
         'file_size_bytes',
+        'is_encrypted',
+        'encryption_iv',
+        'encryption_tag',
         'uploaded_at',
     ];
 

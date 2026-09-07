@@ -58,8 +58,8 @@ class DispatchController extends BaseController
     public function assign(): ResponseInterface
     {
         $role = $this->currentUserRole();
-        if (!in_array($role, ['dispatcher', 'superadmin'], true)) {
-            return $this->errorResponse('Unauthorized. Only dispatchers may assign personnel.', [], ResponseInterface::HTTP_FORBIDDEN);
+        if (!in_array($role, ['admin', 'dispatcher', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only Unit Heads and dispatchers may assign personnel.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -117,16 +117,48 @@ class DispatchController extends BaseController
         }
 
         $implementationDate = sanitize_string($body['implementation_date'] ?? date('Y-m-d'));
-        $workingDays        = !empty($body['working_days']) ? (int) $body['working_days'] : null;
         $taskNotes          = sanitize_string($body['task_notes'] ?? '');
         $dispatcherNotes    = sanitize_string($body['dispatcher_notes'] ?? '');
 
-        // When just dispatching, the worker is not working yet!
-        // We leave the status as 'available'. The database handles the assignment via the `ticket_assignments` table.
-        $workerStatus = 'available';
-        
-        // Update ticket to indicate it's been dispatched but NOT started
-        $statusLabel  = 'Dispatched / Scheduled';
+        // EODB (RA 11032) Turnaround Calculation: 3 (Simple), 7 (Moderate), 21 (Complex)
+        $eodbTier = sanitize_string($body['eodb_tier'] ?? ($ticket['eodb_tier'] ?: 'simple_3d'));
+        $eodbDays = match($eodbTier) {
+            'moderate_7d' => 7,
+            'complex_21d' => 21,
+            default       => 3,
+        };
+        $workingDays = !empty($body['working_days']) ? (int) $body['working_days'] : $eodbDays;
+
+        $baseDate = new \DateTime($implementationDate);
+        $targetCompletionDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDate, $workingDays)->format('Y-m-d H:i:s');
+
+        // Emergency & Priority Preemption
+        $isEmergency  = !empty($body['is_emergency']) ? 1 : 0;
+        $pauseCurrent = !empty($body['pause_current']) ? 1 : 0;
+        $queueOrder   = $isEmergency ? 0 : 1;
+        $assignmentStatus = $isEmergency ? 'active' : 'queued';
+
+        $db = \Config\Database::connect();
+
+        if ($isEmergency && $pauseCurrent) {
+            // Find active running assignment for this worker and pause it
+            $activeAss = $db->table('ticket_assignments')
+                ->where('personnel_id', $personnelId)
+                ->where('completed_at IS NULL')
+                ->where('status !=', 'paused')
+                ->get()->getResultArray();
+
+            foreach ($activeAss as $ass) {
+                $db->table('ticket_assignments')->where('id', $ass['id'])->update(['status' => 'paused']);
+                $this->ticketModel->update($ass['ticket_id'], [
+                    'status_label' => 'Paused (Emergency Preempted)',
+                    'updated_at'   => date('Y-m-d H:i:s'),
+                ]);
+            }
+        }
+
+        $workerStatus = $isEmergency ? 'working' : 'available';
+        $statusLabel  = $isEmergency ? '🚨 Emergency / In Progress' : 'Dispatched / Scheduled';
 
         // --- Insert assignment record ---
         $assignmentId = $this->assignmentModel->insert([
@@ -136,21 +168,25 @@ class DispatchController extends BaseController
             'working_days'       => $workingDays,
             'task_notes'         => $taskNotes,
             'dispatcher_notes'   => $dispatcherNotes,
+            'is_emergency'       => $isEmergency,
+            'queue_order'        => $queueOrder,
+            'status'             => $assignmentStatus,
             'assigned_at'        => date('Y-m-d H:i:s'),
-        ], true); // true = return inserted ID
+        ], true);
 
         // --- Update ticket status to processing ---
-        // Setting it to 'processing' moves it out of the dispatcher's pending queue,
-        // but 'status_label' ensures everyone knows it's only dispatched, not started.
         $this->ticketModel->update($ticketId, [
-            'status'               => 'processing',
-            'status_label'         => $statusLabel,
-            'current_step'         => 4, // 4 = Dispatch & Schedule for FGMU/LEAU
-            'project_working_days' => $workingDays,
-            'updated_at'           => date('Y-m-d H:i:s'),
+            'status'                 => 'processing',
+            'status_label'           => $statusLabel,
+            'current_step'           => $isEmergency ? 5 : 4,
+            'eodb_tier'              => $eodbTier,
+            'eodb_days'              => $workingDays,
+            'target_completion_date' => $targetCompletionDate,
+            'project_working_days'   => $workingDays,
+            'updated_at'             => date('Y-m-d H:i:s'),
         ]);
 
-        // --- Update worker status (remain available until they start the job) ---
+        // --- Update worker status ---
         $this->personnelModel->update($personnelId, [
             'status'     => $workerStatus,
             'updated_at' => date('Y-m-d H:i:s'),
@@ -158,21 +194,17 @@ class DispatchController extends BaseController
 
         // --- If the ticket is a project, persist the dispatcher-set scheduling fields ---
         if (!empty($ticket['is_project'])) {
-            $projectUpdate = ['updated_at' => date('Y-m-d H:i:s')];
-
-            if ($implementationDate) {
-                $projectUpdate['project_target_date'] = $implementationDate;
-            }
-
-            if ($workingDays !== null) {
-                $projectUpdate['project_target_duration'] = $workingDays . ' Working Days';
-            }
-
+            $projectUpdate = [
+                'updated_at'              => date('Y-m-d H:i:s'),
+                'project_target_date'     => $implementationDate,
+                'project_target_duration' => $workingDays . ' Working Days',
+            ];
             $this->ticketModel->update($ticketId, $projectUpdate);
         }
-        $detail = "Assigned to {$worker['name']}";
+
+        $detail = ($isEmergency ? "EMERGENCY: " : "") . "Assigned to {$worker['name']}";
         if ($implementationDate) {
-            $detail .= " — scheduled for {$implementationDate}";
+            $detail .= " — scheduled for {$implementationDate} (EODB: {$workingDays} working days)";
         }
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Worker Assigned', $detail);
 
@@ -299,8 +331,8 @@ class DispatchController extends BaseController
     public function startJob(): ResponseInterface
     {
         $role = $this->currentUserRole();
-        if (!in_array($role, ['dispatcher', 'worker', 'superadmin'], true)) {
-            return $this->errorResponse('Unauthorized. Only dispatchers or field workers may start a job.', [], ResponseInterface::HTTP_FORBIDDEN);
+        if (!in_array($role, ['admin', 'dispatcher', 'worker', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only dispatchers, Unit Heads, or field workers may start a job.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];

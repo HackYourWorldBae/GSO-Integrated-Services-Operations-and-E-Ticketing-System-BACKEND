@@ -21,6 +21,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
 
+    // Public Avatar Stream
+    $routes->get('auth/avatar/(:segment)', 'AuthController::getAvatar/$1');
+
     // --------------------------------------------------------------------------
     // 2. PROTECTED ROUTES (Require JWT & Rate Limiting)
     // --------------------------------------------------------------------------
@@ -32,6 +35,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('auth/me',               'AuthController::me');
         $routes->patch('auth/profile',        'AuthController::updateProfile');
         $routes->post('auth/change-password', 'AuthController::changePassword');
+        $routes->post('auth/avatar',          'AuthController::uploadAvatar');
+        $routes->get('auth/avatar/(:segment)','AuthController::getAvatar/$1');
 
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');
@@ -41,9 +46,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('tickets/(:segment)',        'TicketController::show/$1');
         $routes->get('tickets/(:segment)/logs',   'TicketController::logs/$1');
         
-        // -- Ticket Attachments --
-        $routes->post('tickets/(:segment)/attachments', 'TicketController::uploadAttachment/$1');
-        $routes->get('attachments/(:num)',              'TicketController::downloadAttachment/$1');
+        // -- Ticket Attachments & Verification --
+        $routes->post('tickets/(:segment)/attachments',     'TicketController::uploadAttachment/$1');
+        $routes->get('attachments/(:num)',                  'TicketController::downloadAttachment/$1');
+        $routes->post('tickets/(:segment)/accomplishment',  'TicketController::uploadAccomplishment/$1', ['filter' => 'role:admin,dispatcher,worker']);
+        $routes->get('tickets/(:segment)/accomplishment',   'TicketController::downloadAccomplishment/$1');
+        $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketController::verifyAndClose/$1', ['filter' => 'role:admin,dispatcher,director,user,superadmin']);
+        $routes->patch('tickets/(:segment)/eodb',           'TicketController::updateEodb/$1',           ['filter' => 'role:admin,dispatcher']);
 
         // -- Ticket Queues (Per Unit — Admin & Dispatcher) --
         $routes->get('tickets/queue/(:segment)',          'TicketController::pendingQueue/$1',   ['filter' => 'role:admin,dispatcher']);
@@ -55,7 +64,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- Ticket Actions (Admin Role) --
         $routes->patch('tickets/(:segment)/approve',        'TicketController::approve/$1',               ['filter' => 'role:admin']);
         $routes->patch('tickets/(:segment)/decline',        'TicketController::decline/$1',               ['filter' => 'role:admin']);
-        $routes->patch('tickets/(:segment)/complete',       'TicketController::complete/$1',              ['filter' => 'role:admin,dispatcher']);
+        $routes->patch('tickets/(:segment)/complete',       'TicketController::complete/$1',              ['filter' => 'role:admin,dispatcher,worker']);
         $routes->patch('tickets/(:segment)/extend',         'TicketController::extendTicket/$1',          ['filter' => 'role:admin,dispatcher']);
 
         // -- SSU Incident Report Workflow (Admin Role) --
@@ -69,11 +78,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('projects',              'TicketController::createProject',   ['filter' => 'role:admin']);
         $routes->patch('projects/(:segment)',  'TicketController::updateProject/$1',['filter' => 'role:admin']);
 
-        // -- Dispatch (Dispatchers) --
-        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:dispatcher']);
-        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:dispatcher,worker']);
-        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:dispatcher']);
-        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:dispatcher']);
+        // -- Dispatch (Admin & Dispatcher — Unit Head inherits dispatcher capabilities) --
+        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);
+        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:admin,dispatcher,worker']);
+        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin,dispatcher']);
+        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin,dispatcher']);
 
         // -- Personnel Categories (Admin) --
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
@@ -98,7 +107,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director']);
         $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director']);
 
-        // -- Superadmin (Master Administration & User Lifecycle) --
+        // -- Superadmin (Master Administration, User Lifecycle & RBAC Matrix) --
         $routes->get('superadmin/stats',                  'SuperadminController::stats',          ['filter' => 'role:superadmin']);
         $routes->get('superadmin/users',                  'SuperadminController::users',          ['filter' => 'role:superadmin']);
         $routes->post('superadmin/users',                 'SuperadminController::createUser',     ['filter' => 'role:superadmin']);
@@ -106,6 +115,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->put('superadmin/users/(:segment)',       'SuperadminController::updateUser/$1',  ['filter' => 'role:superadmin']);
         $routes->delete('superadmin/users/(:segment)',    'SuperadminController::deleteUser/$1',  ['filter' => 'role:superadmin']);
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/rbac-matrix',            'SuperadminController::getRbacMatrix',  ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/rbac-matrix',           'SuperadminController::updateRbacMatrix',['filter' => 'role:superadmin']);
 
         // -- Notifications --
         $routes->get('notifications',             'NotificationController::index');

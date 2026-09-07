@@ -156,12 +156,19 @@ class FeedbackController extends BaseController
             }
         }
 
-        $this->ticketModel->update($ticketId, [
+        $updateTicket = [
             'is_archived'  => $isArchived,
             'status'       => $status,
             'status_label' => $statusLabel,
             'updated_at'   => date('Y-m-d H:i:s'),
-        ]);
+        ];
+        if ($status === 'closed') {
+            $updateTicket['verification_status'] = 'verified_closed';
+            $updateTicket['verified_by_user_id'] = $userId;
+            $updateTicket['verified_at']         = date('Y-m-d H:i:s');
+        }
+
+        $this->ticketModel->update($ticketId, $updateTicket);
 
         $db->transComplete();
 

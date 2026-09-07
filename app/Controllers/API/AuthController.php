@@ -5,6 +5,7 @@ namespace App\Controllers\API;
 use App\Controllers\BaseController;
 use App\Libraries\JwtService;
 use App\Models\UserModel;
+use App\Models\UserSessionModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -14,26 +15,28 @@ use CodeIgniter\HTTP\ResponseInterface;
  *
  * Endpoints:
  *  POST /api/v1/auth/login    - Login (student ID or email)
- *  POST /api/v1/auth/logout   - Logout (client-side token invalidation)
+ *  POST /api/v1/auth/logout   - Logout (revokes active session & clears HttpOnly cookie)
  *  GET  /api/v1/auth/me       - Get authenticated user's profile
  *  PATCH /api/v1/auth/profile - Update own profile (name, contact number)
  */
 class AuthController extends BaseController
 {
     private UserModel $userModel;
+    private UserSessionModel $userSessionModel;
     private JwtService $jwt;
 
     public function __construct()
     {
-        $this->userModel = new UserModel();
-        $this->jwt       = new JwtService();
+        $this->userModel        = new UserModel();
+        $this->userSessionModel = new UserSessionModel();
+        $this->jwt              = new JwtService();
     }
 
     /**
      * Login
      *
      * Accepts an email address as identifier.
-     * Returns a signed JWT access token on success.
+     * Enforces single active session per user and issues an HttpOnly cookie.
      */
     public function login(): ResponseInterface
     {
@@ -110,15 +113,36 @@ class AuthController extends BaseController
             );
         }
 
-        // --- Build JWT Payload ---
+        // --- Generate Unique Session ID & Enforce "One Session Per User" ---
+        $sessionId = bin2hex(random_bytes(16));
+        $ipAddress = $this->request->getIPAddress();
+        $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+        $this->userSessionModel->registerSession($user['id'], $sessionId, $ipAddress, $userAgent);
+
+        // --- Build JWT Payload with sid (Session ID) ---
         $tokenPayload = [
             'id'      => $user['id'],
             'role'    => $user['role'],
             'unit_id' => $user['unit_id'],
+            'sid'     => $sessionId,
         ];
 
         $accessToken  = $this->jwt->generateAccessToken($tokenPayload);
         $refreshToken = $this->jwt->generateRefreshToken($tokenPayload);
+
+        // --- Issue HttpOnly Secure Cookie ---
+        $expiresIn = $this->jwt->getExpiresIn();
+        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $this->response->setCookie([
+            'name'     => 'gso_jwt_token',
+            'value'    => $accessToken,
+            'expire'   => $expiresIn,
+            'domain'   => '',
+            'path'     => '/',
+            'secure'   => $isSecure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
 
         // Remove sensitive fields before returning user data
         unset($user['password_hash'], $user['id_card_image']);
@@ -127,7 +151,7 @@ class AuthController extends BaseController
             'access_token'  => $accessToken,
             'refresh_token' => $refreshToken,
             'token_type'    => 'Bearer',
-            'expires_in'    => (int) env('JWT_EXPIRES_IN', 3600),
+            'expires_in'    => $expiresIn,
             'user'          => $user,
         ]);
     }
@@ -135,12 +159,18 @@ class AuthController extends BaseController
     /**
      * Logout
      *
-     * Since JWTs are stateless, logout is handled client-side.
-     * This endpoint is a standard convention for clients to confirm logout.
-     * For production, extend with a token blacklist table if needed.
+     * Invalidates active session in user_sessions table and clears the HttpOnly cookie.
      */
     public function logout(): ResponseInterface
     {
+        $userId = $this->currentUserId();
+        if ($userId) {
+            $this->userSessionModel->destroyUserSession($userId);
+        }
+
+        // Clear the HttpOnly session cookie
+        $this->response->deleteCookie('gso_jwt_token', '', '/', '');
+
         return $this->successResponse('Logged out successfully.');
     }
 
@@ -233,5 +263,83 @@ class AuthController extends BaseController
         ]);
 
         return $this->successResponse('Password changed successfully.');
+    }
+
+    /**
+     * Upload avatar image for authenticated user.
+     * Uses FileSecurityService for magic-byte verification and malware/script scanning.
+     */
+    public function uploadAvatar(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        if (!$userId) {
+            return $this->errorResponse('Unauthenticated.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $file = $this->request->getFile('avatar');
+        if (!$file || !$file->isValid() || $file->hasMoved()) {
+            return $this->errorResponse('Please upload a valid image file using the "avatar" field.');
+        }
+
+        // Validate size (3MB max)
+        if ($file->getSizeByUnit('mb') > 3) {
+            return $this->errorResponse('Avatar size must not exceed 3MB.');
+        }
+
+        $securityService = new \App\Libraries\FileSecurityService();
+        $inspection = $securityService->inspectFile($file->getTempName(), $file->getClientName(), $file->getClientMimeType());
+        if (!$inspection['safe']) {
+            return $this->errorResponse('Security violation: ' . $inspection['reason'], [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $ext = strtolower($file->getClientExtension());
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+            return $this->errorResponse('Only JPG, PNG, and WebP images are allowed for avatars.');
+        }
+
+        $uploadDir = WRITEPATH . 'uploads/avatars/';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0775, true);
+        }
+
+        $fileName = 'avatar_' . $userId . '_' . time() . '.' . $ext;
+        if (!$file->move($uploadDir, $fileName)) {
+            return $this->errorResponse('Failed to save avatar image.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $avatarRelativePath = 'avatars/' . $fileName;
+        $this->userModel->update($userId, [
+            'avatar_path' => $avatarRelativePath,
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($userId);
+
+        return $this->successResponse('Avatar uploaded successfully.', ['user' => $safeUser]);
+    }
+
+    /**
+     * Publicly or authenticated stream avatar image.
+     */
+    public function getAvatar(string $userId)
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || empty($user['avatar_path'])) {
+            return $this->response->setStatusCode(404)->setBody('Avatar not found.');
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $user['avatar_path'];
+        if (!is_file($fullPath)) {
+            return $this->response->setStatusCode(404)->setBody('Avatar file not found on disk.');
+        }
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $fullPath);
+        finfo_close($finfo);
+
+        return $this->response
+            ->setHeader('Content-Type', $mime ?: 'image/jpeg')
+            ->setHeader('Cache-Control', 'public, max-age=86400')
+            ->setBody(file_get_contents($fullPath));
     }
 }

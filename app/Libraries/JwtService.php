@@ -39,6 +39,14 @@ class JwtService
     }
 
     /**
+     * Get the configured access token lifetime in seconds.
+     */
+    public function getExpiresIn(): int
+    {
+        return $this->expiresIn;
+    }
+
+    /**
      * Generate a signed access token for an authenticated user.
      *
      * @param array $payload Data to embed (user id, role, unit_id, etc.)

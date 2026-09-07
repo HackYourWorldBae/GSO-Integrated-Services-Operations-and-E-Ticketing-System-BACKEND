@@ -46,13 +46,22 @@ class RoleGuardFilter implements FilterInterface
         }
 
         if (!in_array($currentRole, $arguments, true)) {
-            return Services::response()
-                ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
-                ->setJSON([
-                    'status'  => false,
-                    'message' => "Access denied. Required role(s): " . implode(', ', $arguments) . ". Your role: {$currentRole}.",
-                    'code'    => 'FORBIDDEN',
-                ]);
+            // Check dynamic capability matrix (e.g. Unit Head 'admin' inheriting dispatcher features)
+            $permissionModel = new \App\Models\RolePermissionModel();
+            $hasDynamicAccess = false;
+            if ($currentRole === 'admin' && in_array('dispatcher', $arguments, true)) {
+                $hasDynamicAccess = $permissionModel->hasPermission('admin', 'tickets.dispatch');
+            }
+
+            if (!$hasDynamicAccess) {
+                return Services::response()
+                    ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
+                    ->setJSON([
+                        'status'  => false,
+                        'message' => "Access denied. Required role(s): " . implode(', ', $arguments) . ". Your role: {$currentRole}.",
+                        'code'    => 'FORBIDDEN',
+                    ]);
+            }
         }
 
         return null; // Role is authorized — allow through.

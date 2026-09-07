@@ -183,5 +183,29 @@ abstract class BaseController extends Controller
         // Other roles (e.g. student, employee) do not have unit management access
         return $this->forbiddenResponse('You do not have permission to manage this unit.');
     }
+
+    /**
+     * Asserts that the authenticated user has the specified capability according to the dynamic RBAC matrix.
+     */
+    protected function assertPermission(string $featureKey, string $customMessage = ''): ?ResponseInterface
+    {
+        $role = $this->currentUserRole();
+        if (!$role) {
+            return $this->forbiddenResponse('Unauthenticated.');
+        }
+        if ($role === 'superadmin') {
+            return null;
+        }
+
+        $permissionModel = new \App\Models\RolePermissionModel();
+        if (!$permissionModel->hasPermission($role, $featureKey)) {
+            $msg = !empty($customMessage) 
+                ? $customMessage 
+                : "Access Denied: Your role ({$role}) does not have permission for '{$featureKey}'.";
+            return $this->forbiddenResponse($msg);
+        }
+
+        return null;
+    }
 }
 

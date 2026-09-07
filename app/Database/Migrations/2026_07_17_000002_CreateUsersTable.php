@@ -75,6 +75,12 @@ class CreateUsersTable extends Migration
                 'type' => 'TEXT',
                 'null' => true,
             ],
+            'avatar_path' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 255,
+                'null'       => true,
+                'default'    => null,
+            ],
             'status' => [
                 'type'       => 'ENUM',
                 'constraint' => ['Active', 'Pending', 'Rejected', 'Suspended'],

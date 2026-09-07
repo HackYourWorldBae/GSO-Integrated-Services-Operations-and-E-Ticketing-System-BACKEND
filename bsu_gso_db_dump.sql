@@ -77,7 +77,9 @@ INSERT INTO `migrations` VALUES ('1', '2026_07_17_000001', 'App\\Database\\Migra
 ('11', '2026_07_17_000012', 'App\\Database\\Migrations\\CreateNotificationsTable', 'default', 'App', '1784812911', '1'),
 ('12', '2026_07_17_000013', 'App\\Database\\Migrations\\CreateOtpCodesTable', 'default', 'App', '1784812912', '1'),
 ('13', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812913', '1'),
-('14', '2026_08_16_000002', 'App\\Database\\Migrations\\CreatePersonnelCategoriesTable', 'default', 'App', '1784812914', '1');
+('14', '2026_08_16_000002', 'App\\Database\\Migrations\\CreatePersonnelCategoriesTable', 'default', 'App', '1784812914', '1'),
+('15', '2026_09_08_000001', 'App\\Database\\Migrations\\CreateUserSessionsTable', 'default', 'App', '1784812915', '1'),
+('16', '2026_09_08_000002', 'App\\Database\\Migrations\\CreateRolePermissionsTable', 'default', 'App', '1784812916', '1');
 
 
 -- Table structure for table `personnel`
@@ -240,6 +242,9 @@ CREATE TABLE `ticket_assignments` (
   `reassigned_reason` text COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `dispatcher_notes` text COLLATE utf8mb4_unicode_ci,
   `task_notes` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_emergency` tinyint(1) NOT NULL DEFAULT '0',
+  `queue_order` int(11) NOT NULL DEFAULT '1',
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
   `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `dispatched_at` timestamp NULL DEFAULT NULL,
   `completed_at` timestamp NULL DEFAULT NULL,
@@ -264,6 +269,9 @@ CREATE TABLE `ticket_attachments` (
   `file_path` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `file_type` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `file_size_bytes` bigint(20) unsigned DEFAULT NULL,
+  `is_encrypted` tinyint(1) NOT NULL DEFAULT '0',
+  `encryption_iv` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `encryption_tag` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `uploaded_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_attachments_ticket` (`ticket_id`),
@@ -360,8 +368,16 @@ CREATE TABLE `tickets` (
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('pending','approved','processing','resolved','closed','declined','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
   `status_label` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Pending Approval',
+  `verification_status` enum('pending_report','pending_verification','verified_closed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending_report',
+  `accomplishment_report_path` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `accomplishment_notes` text COLLATE utf8mb4_unicode_ci,
+  `verified_by_user_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verified_at` datetime DEFAULT NULL,
   `decline_reason` text COLLATE utf8mb4_unicode_ci,
   `current_step` int(1) NOT NULL DEFAULT '1',
+  `eodb_tier` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `eodb_days` int(11) DEFAULT 3,
+  `target_completion_date` datetime DEFAULT NULL,
   `location` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `office_room` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `is_archived` tinyint(1) NOT NULL DEFAULT '0',
@@ -388,12 +404,14 @@ CREATE TABLE `tickets` (
   `overtime_hours` decimal(6,2) NOT NULL DEFAULT '0.00',
   PRIMARY KEY (`id`),
   KEY `fk_tickets_reviewer` (`reviewed_by`),
+  KEY `idx_tickets_verified_by` (`verified_by_user_id`),
   KEY `idx_tickets_user` (`user_id`),
   KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   KEY `idx_tickets_archived` (`is_archived`),
   KEY `idx_tickets_investigating` (`unit_id`,`is_under_investigation`,`is_archived`),
   KEY `idx_tickets_submitted` (`submitted_at`),
   CONSTRAINT `fk_tickets_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL,
+  CONSTRAINT `fk_tickets_verified_by` FOREIGN KEY (`verified_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_tickets_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_tickets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -433,6 +451,7 @@ CREATE TABLE `users` (
   `unit_id` int(11) unsigned DEFAULT NULL,
   `student_id_number` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `id_card_image` text COLLATE utf8mb4_unicode_ci,
+  `avatar_path` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `status` enum('Active','Pending','Rejected','Suspended') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Active',
   `is_verified` tinyint(1) NOT NULL DEFAULT '1',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -446,14 +465,15 @@ CREATE TABLE `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dumping data for table `users`
-INSERT INTO `users` VALUES ('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'End User', 'Test', 'enduser@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'student', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('4ad09d8a-975f-4ad9-8481-ff8b45781998', 'FGMU', 'Dispatcher', 'fgmu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '1', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('d4a8de41-bf10-495d-93e8-e2480d5d78be', 'LEAU', 'Dispatcher', 'leau-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '2', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '3', NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
-('a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d', 'Super', 'Administrator', 'superadmin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', '09123456789', 'superadmin', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
+INSERT INTO `users` (`id`, `first_name`, `last_name`, `email`, `password_hash`, `contact_number`, `role`, `unit_id`, `student_id_number`, `id_card_image`, `avatar_path`, `status`, `is_verified`, `created_at`, `updated_at`) VALUES
+('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'End User', 'Test', 'enduser@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'student', NULL, NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('4ad09d8a-975f-4ad9-8481-ff8b45781998', 'FGMU', 'Dispatcher', 'fgmu-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '1', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '2', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '1', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('d4a8de41-bf10-495d-93e8-e2480d5d78be', 'LEAU', 'Dispatcher', 'leau-dispatcher@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'dispatcher', '2', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', '3', NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51'),
+('a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d', 'Super', 'Administrator', 'superadmin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', '09123456789', 'superadmin', NULL, NULL, NULL, NULL, 'Active', '1', '2026-07-23 21:21:51', '2026-07-23 21:21:51');
 
 
 
@@ -494,5 +514,116 @@ CREATE TABLE `ci_sessions` (
   `data` blob NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Table structure for table `user_sessions`
+DROP TABLE IF EXISTS `user_sessions`;
+CREATE TABLE `user_sessions` (
+  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `session_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ip_address` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_activity` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_user_sessions_user` (`user_id`),
+  KEY `idx_user_sessions_sid` (`session_id`),
+  CONSTRAINT `fk_user_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Table structure for table `role_permissions`
+DROP TABLE IF EXISTS `role_permissions`;
+CREATE TABLE `role_permissions` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `role` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `feature_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_role_feature` (`role`,`feature_key`)
+) ENGINE=InnoDB AUTO_INCREMENT=78 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dumping data for table `role_permissions`
+INSERT INTO `role_permissions` (`id`, `role`, `feature_key`, `is_enabled`, `created_at`, `updated_at`) VALUES
+(1, 'superadmin', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(2, 'superadmin', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(3, 'superadmin', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(4, 'superadmin', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(5, 'superadmin', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(6, 'superadmin', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(7, 'superadmin', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(8, 'superadmin', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(9, 'superadmin', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(10, 'superadmin', 'users.provision', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(11, 'superadmin', 'system.matrix_control', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(12, 'admin', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(13, 'admin', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(14, 'admin', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(15, 'admin', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(16, 'admin', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(17, 'admin', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(18, 'admin', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(19, 'admin', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(20, 'admin', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(21, 'admin', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(22, 'admin', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(23, 'dispatcher', 'tickets.create', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(24, 'dispatcher', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(25, 'dispatcher', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(26, 'dispatcher', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(27, 'dispatcher', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(28, 'dispatcher', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(29, 'dispatcher', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(30, 'dispatcher', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(31, 'dispatcher', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(32, 'dispatcher', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(33, 'dispatcher', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(34, 'director', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(35, 'director', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(36, 'director', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(37, 'director', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(38, 'director', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(39, 'director', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(40, 'director', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(41, 'director', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(42, 'director', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(43, 'director', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(44, 'director', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(45, 'worker', 'tickets.create', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(46, 'worker', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(47, 'worker', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(48, 'worker', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(49, 'worker', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(50, 'worker', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(51, 'worker', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(52, 'worker', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(53, 'worker', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(54, 'worker', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(55, 'worker', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(56, 'employee', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(57, 'employee', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(58, 'employee', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(59, 'employee', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(60, 'employee', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(61, 'employee', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(62, 'employee', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(63, 'employee', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(64, 'employee', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(65, 'employee', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(66, 'employee', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(67, 'student', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(68, 'student', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(69, 'student', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(70, 'student', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(71, 'student', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(72, 'student', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(73, 'student', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(74, 'student', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(75, 'student', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(76, 'student', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
+(77, 'student', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00');
 
 SET FOREIGN_KEY_CHECKS=1;

@@ -52,6 +52,24 @@ class CreateTicketAttachmentsTable extends Migration
                 'null'     => true,
                 'default'  => null,
             ],
+            'is_encrypted' => [
+                'type'       => 'TINYINT',
+                'constraint' => 1,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'encryption_iv' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 64,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'encryption_tag' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 64,
+                'null'       => true,
+                'default'    => null,
+            ],
             'uploaded_at' => [
                 'type'    => 'TIMESTAMP',
                 'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),

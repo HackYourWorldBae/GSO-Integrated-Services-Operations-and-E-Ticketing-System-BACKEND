@@ -131,14 +131,16 @@ class SuperadminController extends BaseController
         $body = $this->request->getJSON(true) ?? [];
 
         $rules = [
-            'first_name'     => 'required|max_length[100]',
-            'last_name'      => 'required|max_length[100]',
-            'email'          => 'required|valid_email|is_unique[users.email]',
-            'password'       => 'required|min_length[6]',
-            'role'           => 'required|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
-            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
-            'unit_id'        => 'permit_empty',
-            'contact_number' => 'permit_empty|max_length[30]',
+            'first_name'        => 'required|max_length[100]',
+            'last_name'         => 'required|max_length[100]',
+            'email'             => 'required|valid_email|is_unique[users.email]',
+            'password'          => 'required|min_length[6]',
+            'confirm_password'  => 'permit_empty|matches[password]',
+            'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
+            'status'            => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
+            'unit_id'           => 'permit_empty',
+            'contact_number'    => 'permit_empty|max_length[30]',
+            'student_id_number' => 'permit_empty|max_length[50]',
         ];
 
         if (!$this->validateData($body, $rules)) {
@@ -147,6 +149,12 @@ class SuperadminController extends BaseController
                 $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
+        }
+
+        if (!empty($body['confirm_password']) && $body['password'] !== $body['confirm_password']) {
+            return $this->errorResponse('Password and confirmation password do not match.', [
+                'confirm_password' => ['Passwords do not match.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $userId = sprintf(
@@ -161,24 +169,28 @@ class SuperadminController extends BaseController
         $unitId = !empty($body['unit_id']) ? (int) $body['unit_id'] : null;
 
         $insertData = [
-            'id'             => $userId,
-            'first_name'     => trim($body['first_name']),
-            'last_name'      => trim($body['last_name']),
-            'email'          => strtolower(trim($body['email'])),
-            'password_hash'  => password_hash($body['password'], PASSWORD_DEFAULT),
-            'role'           => $body['role'],
-            'unit_id'        => $unitId,
-            'contact_number' => $body['contact_number'] ?? null,
-            'status'         => $body['status'] ?? 'Active',
-            'is_verified'    => 1,
+            'id'                => $userId,
+            'first_name'        => trim($body['first_name']),
+            'last_name'         => trim($body['last_name']),
+            'email'             => strtolower(trim($body['email'])),
+            'password_hash'     => password_hash($body['password'], PASSWORD_DEFAULT),
+            'role'              => $body['role'],
+            'unit_id'           => $unitId,
+            'contact_number'    => !empty($body['contact_number']) ? trim($body['contact_number']) : null,
+            'student_id_number' => !empty($body['student_id_number']) ? trim($body['student_id_number']) : null,
+            'status'            => $body['status'] ?? 'Active',
+            'is_verified'       => 1,
         ];
 
-        if ($this->userModel->insert($insertData)) {
+        if ($this->userModel->skipValidation(true)->insert($insertData)) {
             $createdUser = $this->userModel->getSafeUser($userId);
             return $this->successResponse('User created successfully.', $createdUser, ResponseInterface::HTTP_CREATED);
         }
 
-        return $this->errorResponse('Failed to create user account.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        $errors = $this->userModel->errors() ?: [];
+        $dbError = $this->userModel->db->error();
+        $message = !empty($errors) ? implode(' ', $errors) : ($dbError['message'] ?? 'Failed to create user account.');
+        return $this->errorResponse($message, $errors, ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
     }
 
     /**
@@ -237,12 +249,15 @@ class SuperadminController extends BaseController
             return $this->errorResponse('No valid fields provided to update.');
         }
 
-        if ($this->userModel->update($id, $updateData)) {
+        if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
             $safeUser = $this->userModel->getSafeUser($id);
             return $this->successResponse('User account updated successfully.', $safeUser);
         }
 
-        return $this->errorResponse('Failed to update user account.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        $errors = $this->userModel->errors() ?: [];
+        $dbError = $this->userModel->db->error();
+        $message = !empty($errors) ? implode(' ', $errors) : ($dbError['message'] ?? 'Failed to update user account.');
+        return $this->errorResponse($message, $errors, ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
     }
 
     /**
@@ -320,5 +335,34 @@ class SuperadminController extends BaseController
             'logs'  => $logs,
             'total' => $total,
         ]);
+    }
+
+    /**
+     * Get the dynamic Role & Capability Access Control Matrix.
+     */
+    public function getRbacMatrix(): ResponseInterface
+    {
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $data = $rolePermissionModel->getFullMatrix();
+
+        return $this->successResponse('RBAC matrix retrieved successfully.', $data);
+    }
+
+    /**
+     * Bulk update the Role & Capability Access Control Matrix.
+     */
+    public function updateRbacMatrix(): ResponseInterface
+    {
+        $body = $this->request->getJSON(true) ?? [];
+        $matrix = $body['matrix'] ?? [];
+
+        if (!is_array($matrix)) {
+            return $this->errorResponse('Invalid matrix payload. Expected an array.');
+        }
+
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $rolePermissionModel->saveMatrix($matrix);
+
+        return $this->successResponse('RBAC capability matrix updated successfully.', $rolePermissionModel->getFullMatrix());
     }
 }

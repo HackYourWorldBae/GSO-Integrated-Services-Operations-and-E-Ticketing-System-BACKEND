@@ -69,6 +69,33 @@ class CreateTicketsTable extends Migration
                 'default'    => 'Pending Approval',
                 'null'       => false,
             ],
+            'verification_status' => [
+                'type'       => 'ENUM',
+                'constraint' => ['pending_report', 'pending_verification', 'verified_closed'],
+                'default'    => 'pending_report',
+                'null'       => false,
+            ],
+            'accomplishment_report_path' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 255,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'accomplishment_notes' => [
+                'type' => 'TEXT',
+                'null' => true,
+            ],
+            'verified_by_user_id' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 36,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'verified_at' => [
+                'type'    => 'DATETIME',
+                'null'    => true,
+                'default' => null,
+            ],
             'decline_reason' => [
                 'type' => 'TEXT',
                 'null' => true,
@@ -79,6 +106,23 @@ class CreateTicketsTable extends Migration
                 'constraint' => 1,
                 'default'    => 1,
                 'null'       => false,
+            ],
+            'eodb_tier' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 50,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'eodb_days' => [
+                'type'       => 'INT',
+                'constraint' => 11,
+                'null'       => true,
+                'default'    => 3,
+            ],
+            'target_completion_date' => [
+                'type'    => 'DATETIME',
+                'null'    => true,
+                'default' => null,
             ],
             'location' => [
                 'type'       => 'VARCHAR',
@@ -117,7 +161,7 @@ class CreateTicketsTable extends Migration
             ],
             'project_manpower' => [
                 'type'       => 'VARCHAR',
-                'constraint' => 100,
+                'constraint' => 255,
                 'null'       => true,
                 'default'    => null,
             ],
@@ -220,9 +264,12 @@ class CreateTicketsTable extends Migration
         $this->forge->addKey(['unit_id', 'is_under_investigation', 'is_archived'],     false, false, 'idx_tickets_investigating');
         $this->forge->addKey('submitted_at',                                           false, false, 'idx_tickets_submitted');
 
-        $this->forge->addForeignKey('user_id',     'users', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_user');
-        $this->forge->addForeignKey('unit_id',     'units', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_unit');
-        $this->forge->addForeignKey('reviewed_by', 'users', 'id', 'SET NULL', 'CASCADE',  'fk_tickets_reviewer');
+        $this->forge->addKey('verified_by_user_id',                                    false, false, 'idx_tickets_verified_by');
+
+        $this->forge->addForeignKey('user_id',             'users', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_user');
+        $this->forge->addForeignKey('unit_id',             'units', 'id', 'CASCADE',  'CASCADE',  'fk_tickets_unit');
+        $this->forge->addForeignKey('reviewed_by',         'users', 'id', 'SET NULL', 'CASCADE',  'fk_tickets_reviewer');
+        $this->forge->addForeignKey('verified_by_user_id', 'users', 'id', 'SET NULL', 'CASCADE',  'fk_tickets_verified_by');
 
         $this->forge->createTable('tickets', true, [
             'ENGINE'         => 'InnoDB',

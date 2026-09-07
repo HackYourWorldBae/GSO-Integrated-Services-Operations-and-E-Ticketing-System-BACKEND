@@ -60,26 +60,24 @@ class TicketModel extends Model
 
     /**
      * Get all active (not archived / pending action) tickets for a specific user/requestor.
+     * Strictly mutually exclusive with getArchivedByUser.
      */
     public function getActiveByUser(string $userId): array
     {
         $db = \Config\Database::connect();
 
         return $this->where('user_id', $userId)
-                    ->groupStart()
-                        ->where('is_archived', 0)
-                        ->orGroupStart()
-                            ->where('updated_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)')
-                            ->whereNotIn('status', ['closed', 'cancelled'])
-                        ->groupEnd()
-                    ->groupEnd()
+                    ->where('is_archived', 0)
+                    ->whereNotIn('status', ['closed', 'completed', 'declined', 'cancelled'])
+                    ->where("id NOT IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
                     ->orderBy('submitted_at', 'DESC')
                     ->findAll();
     }
 
     /**
      * Get all archived/completed tickets for a specific user.
-     * Includes any ticket that is fully closed/archived, or has feedback submitted by the user.
+     * Includes any ticket that is fully closed/archived, has a terminal status,
+     * or has feedback submitted by the user.
      */
     public function getArchivedByUser(string $userId): array
     {
@@ -88,7 +86,7 @@ class TicketModel extends Model
         return $this->where('user_id', $userId)
                     ->groupStart()
                         ->where('is_archived', 1)
-                        ->orWhereIn('status', ['closed', 'completed'])
+                        ->orWhereIn('status', ['closed', 'completed', 'declined', 'cancelled'])
                         ->orWhere("id IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
                     ->groupEnd()
                     ->orderBy('submitted_at', 'DESC')

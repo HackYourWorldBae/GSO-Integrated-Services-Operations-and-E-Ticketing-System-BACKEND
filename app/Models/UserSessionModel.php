@@ -29,6 +29,8 @@ class UserSessionModel extends Model
         'last_activity',
     ];
 
+    protected static bool $tableChecked = false;
+
     public function __construct()
     {
         parent::__construct();
@@ -41,6 +43,10 @@ class UserSessionModel extends Model
      */
     protected function ensureTableExists(): void
     {
+        if (self::$tableChecked) {
+            return;
+        }
+
         try {
             if (!$this->db->tableExists($this->table)) {
                 $forge = \Config\Database::forge();
@@ -96,6 +102,7 @@ class UserSessionModel extends Model
                     'COLLATE'         => 'utf8mb4_unicode_ci',
                 ]);
             }
+            self::$tableChecked = true;
         } catch (\Throwable $e) {
             log_message('error', '[UserSessionModel] ensureTableExists error: ' . $e->getMessage());
         }
@@ -109,33 +116,21 @@ class UserSessionModel extends Model
     {
         helper('sanitize');
         $id = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
-
         $now = date('Y-m-d H:i:s');
 
-        // Check if user already has an active session record
-        $existing = $this->where('user_id', $userId)->first();
+        // Strictly enforce 1 session per user: delete any prior session for this user
+        $this->where('user_id', $userId)->delete();
 
-        if ($existing) {
-            // Update the existing record with the new session ID
-            $this->update($existing['id'], [
-                'session_id'    => $sessionId,
-                'ip_address'    => $ipAddress,
-                'user_agent'    => $userAgent,
-                'created_at'    => $now,
-                'last_activity' => $now,
-            ]);
-        } else {
-            // Insert a new session record
-            $this->insert([
-                'id'            => $id,
-                'user_id'       => $userId,
-                'session_id'    => $sessionId,
-                'ip_address'    => $ipAddress,
-                'user_agent'    => $userAgent,
-                'created_at'    => $now,
-                'last_activity' => $now,
-            ]);
-        }
+        // Insert the single active session record
+        $this->insert([
+            'id'            => $id,
+            'user_id'       => $userId,
+            'session_id'    => $sessionId,
+            'ip_address'    => $ipAddress,
+            'user_agent'    => $userAgent,
+            'created_at'    => $now,
+            'last_activity' => $now,
+        ]);
     }
 
     /**

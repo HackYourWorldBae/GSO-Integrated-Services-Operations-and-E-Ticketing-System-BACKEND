@@ -33,6 +33,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- Auth --
         $routes->post('auth/logout',          'AuthController::logout');
         $routes->get('auth/me',               'AuthController::me');
+        $routes->get('auth/check-session',    'AuthController::checkSession');
         $routes->patch('auth/profile',        'AuthController::updateProfile');
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/avatar',          'AuthController::uploadAvatar');

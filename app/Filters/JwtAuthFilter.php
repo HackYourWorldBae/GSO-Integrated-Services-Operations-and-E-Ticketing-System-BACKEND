@@ -24,13 +24,13 @@ class JwtAuthFilter implements FilterInterface
     {
         $jwt = new JwtService();
 
-        // 1. Primary: Extract from HttpOnly cookie
-        $token = $request->getCookie('gso_jwt_token');
+        // 1. Primary: Extract from Authorization header (specific to client instance / device / tab)
+        $authHeader = $request->getHeaderLine('Authorization');
+        $token      = $jwt->extractBearerToken($authHeader);
 
-        // 2. Secondary fallback: Extract from Authorization header (API / mobile clients)
+        // 2. Secondary fallback: Extract from HttpOnly cookie (cookie-based web clients)
         if (empty($token)) {
-            $authHeader = $request->getHeaderLine('Authorization');
-            $token      = $jwt->extractBearerToken($authHeader);
+            $token = $request->getCookie('gso_jwt_token');
         }
 
         if (empty($token)) {

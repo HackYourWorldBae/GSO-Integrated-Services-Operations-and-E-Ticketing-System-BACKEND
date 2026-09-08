@@ -196,6 +196,24 @@ class AuthController extends BaseController
     }
 
     /**
+     * Check whether current session is active and valid.
+     * Protected by JwtAuthFilter — if superseded, 401 SESSION_SUPERSEDED is returned automatically.
+     */
+    public function checkSession(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+
+        if (!$userId) {
+            return $this->errorResponse('Unable to resolve user identity.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        return $this->successResponse('Session is active and valid.', [
+            'valid'   => true,
+            'user_id' => $userId,
+        ]);
+    }
+
+    /**
      * Update the current user's profile fields (name, contact number).
      * Requires: JwtAuthFilter
      */

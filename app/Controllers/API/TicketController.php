@@ -219,11 +219,12 @@ class TicketController extends BaseController
                     $workerStatus = 'working';
                     $statusLabel  = 'Job Started';
                     $newStep      = 5;
+                    $now          = date('Y-m-d H:i:s');
 
                     $this->ticketModel->update($ticket['id'], [
                         'status_label' => $statusLabel,
                         'current_step' => $newStep,
-                        'updated_at'   => date('Y-m-d H:i:s'),
+                        'updated_at'   => $now,
                     ]);
 
                     $assignments = $assignmentModel->getByTicket($ticket['id']);
@@ -231,8 +232,18 @@ class TicketController extends BaseController
                         if (!empty($assignment['personnel_id'])) {
                             $personnelModel->update($assignment['personnel_id'], [
                                 'status'     => $workerStatus,
-                                'updated_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => $now,
                             ]);
+                        }
+                        // Stamp dispatched_at if not yet set
+                        if (empty($assignment['dispatched_at'])) {
+                            $dispatchedTime = !empty($assignment['assigned_at']) ? $assignment['assigned_at'] : $now;
+                            $assignmentModel->update($assignment['id'], [
+                                'dispatched_at' => $dispatchedTime,
+                            ]);
+                            if (isset($ticket['assignment']['id']) && $ticket['assignment']['id'] == $assignment['id']) {
+                                $ticket['assignment']['dispatched_at'] = $dispatchedTime;
+                            }
                         }
                     }
 
@@ -1542,12 +1553,17 @@ class TicketController extends BaseController
 
             // Compute business working hours (skipping weekends & holidays)
             $startTimeStr = $ticket['assignment']['dispatched_at'] 
+                ?? $ticket['assignment']['assigned_at'] 
                 ?? $ticket['project_actual_start'] 
                 ?? $ticket['assignment']['implementation_date'] 
                 ?? null;
 
             if ($startTimeStr && in_array($ticket['status'], ['processing', 'resolved', 'closed'], true)) {
                 try {
+                    // If date-only string (e.g. YYYY-MM-DD), anchor to standard work start hour (8:00 AM)
+                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($startTimeStr))) {
+                        $startTimeStr = trim($startTimeStr) . ' 08:00:00';
+                    }
                     $startDt = new \DateTime($startTimeStr);
                     $endDt   = !empty($ticket['completed_at']) 
                         ? new \DateTime($ticket['completed_at']) 

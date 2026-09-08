@@ -157,8 +157,15 @@ class DispatchController extends BaseController
             }
         }
 
-        $workerStatus = $isEmergency ? 'working' : 'available';
-        $statusLabel  = $isEmergency ? '🚨 Emergency / In Progress' : 'Dispatched / Scheduled';
+        $now = date('Y-m-d H:i:s');
+        $implYmd = !empty($implementationDate) ? date('Y-m-d', strtotime($implementationDate)) : date('Y-m-d');
+        $todayYmd = date('Y-m-d');
+
+        // If scheduled for today or an emergency or past, work starts immediately
+        $isImmediate  = ($implYmd <= $todayYmd || $isEmergency);
+        $dispatchedAt = $isImmediate ? $now : null;
+        $workerStatus = $isImmediate ? 'working' : 'available';
+        $statusLabel  = $isEmergency ? '🚨 Emergency / In Progress' : ($isImmediate ? 'Job Started' : 'Dispatched / Scheduled');
 
         // --- Insert assignment record ---
         $assignmentId = $this->assignmentModel->insert([
@@ -171,25 +178,26 @@ class DispatchController extends BaseController
             'is_emergency'       => $isEmergency,
             'queue_order'        => $queueOrder,
             'status'             => $assignmentStatus,
-            'assigned_at'        => date('Y-m-d H:i:s'),
+            'assigned_at'        => $now,
+            'dispatched_at'      => $dispatchedAt,
         ], true);
 
         // --- Update ticket status to processing ---
         $this->ticketModel->update($ticketId, [
             'status'                 => 'processing',
             'status_label'           => $statusLabel,
-            'current_step'           => $isEmergency ? 5 : 4,
+            'current_step'           => $isImmediate ? 5 : 4,
             'eodb_tier'              => $eodbTier,
             'eodb_days'              => $workingDays,
             'target_completion_date' => $targetCompletionDate,
             'project_working_days'   => $workingDays,
-            'updated_at'             => date('Y-m-d H:i:s'),
+            'updated_at'             => $now,
         ]);
 
         // --- Update worker status ---
         $this->personnelModel->update($personnelId, [
             'status'     => $workerStatus,
-            'updated_at' => date('Y-m-d H:i:s'),
+            'updated_at' => $now,
         ]);
 
         // --- If the ticket is a project, persist the dispatcher-set scheduling fields ---

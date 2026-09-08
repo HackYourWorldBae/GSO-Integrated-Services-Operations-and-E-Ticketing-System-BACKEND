@@ -132,27 +132,28 @@ class FeedbackController extends BaseController
 
         // --- Archival state determination ---
         $unitId = (int) $ticket['unit_id'];
-        $materialsLogged = !empty($ticket['materials_logged']);
+        $materialsCount = $db->query("SELECT COUNT(*) as cnt FROM ticket_materials WHERE ticket_id = ?", [$ticketId])->getRowArray()['cnt'] ?? 0;
+        $materialsLogged = !empty($ticket['materials_logged']) || ($materialsCount > 0);
         
         $isArchived  = 0;
         $status      = 'resolved';
-        $statusLabel = 'Awaiting Material Liquidation';
+        $statusLabel = 'Awaiting User Rating';
 
         if ($unitId === 3) {
-            // SSU does not require material liquidation
+            // SSU does not require material logging
             $isArchived  = 1;
             $status      = 'closed';
             $statusLabel = 'Closed';
         } else {
-            // FGMU & LEAU require both user rating AND material liquidation
-            if ($materialsLogged) {
+            // FGMU & LEAU: automatically close after dispatcher marked job done & inputted materials
+            if ($materialsLogged || $ticket['status'] === 'resolved' || (int) ($ticket['current_step'] ?? 0) >= 6) {
                 $isArchived  = 1;
                 $status      = 'closed';
                 $statusLabel = 'Closed';
             } else {
                 $isArchived  = 0;
                 $status      = 'resolved';
-                $statusLabel = 'Awaiting Material Liquidation';
+                $statusLabel = 'Awaiting User Rating';
             }
         }
 
@@ -163,6 +164,7 @@ class FeedbackController extends BaseController
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
         if ($status === 'closed') {
+            $updateTicket['current_step']        = 6;
             $updateTicket['verification_status'] = 'verified_closed';
             $updateTicket['verified_by_user_id'] = $userId;
             $updateTicket['verified_at']         = date('Y-m-d H:i:s');

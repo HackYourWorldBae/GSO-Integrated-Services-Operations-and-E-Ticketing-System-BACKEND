@@ -45,12 +45,33 @@ class RoleGuardFilter implements FilterInterface
             return null;
         }
 
+        $permissionModel = new \App\Models\RolePermissionModel();
+
         if (!in_array($currentRole, $arguments, true)) {
-            // Check dynamic capability matrix (e.g. Unit Head 'admin' inheriting dispatcher features)
-            $permissionModel = new \App\Models\RolePermissionModel();
+            // Check dynamic capability matrix for cross-role delegations
             $hasDynamicAccess = false;
+
+            // Unit Head 'admin' accessing dispatcher endpoints
             if ($currentRole === 'admin' && in_array('dispatcher', $arguments, true)) {
-                $hasDynamicAccess = $permissionModel->hasPermission('admin', 'tickets.dispatch');
+                $hasDynamicAccess = $permissionModel->hasPermission('admin', 'tickets.dispatch')
+                                 || $permissionModel->hasPermission('admin', 'tickets.assign_worker');
+            }
+
+            // Dispatcher accessing admin endpoints (e.g. personnel management, ticket queue/approval)
+            if ($currentRole === 'dispatcher' && in_array('admin', $arguments, true)) {
+                $hasDynamicAccess = $permissionModel->hasPermission('dispatcher', 'personnel.manage')
+                                 || $permissionModel->hasPermission('dispatcher', 'tickets.approve_decline');
+            }
+
+            // Admin or Dispatcher accessing Director analytics
+            if (in_array($currentRole, ['admin', 'dispatcher'], true) && in_array('director', $arguments, true)) {
+                $hasDynamicAccess = $permissionModel->hasPermission($currentRole, 'reports.view');
+            }
+
+            // Admin or Director accessing Superadmin account management
+            if (in_array($currentRole, ['admin', 'director'], true) && in_array('superadmin', $arguments, true)) {
+                $hasDynamicAccess = $permissionModel->hasPermission($currentRole, 'users.provision')
+                                 || $permissionModel->hasPermission($currentRole, 'system.matrix_control');
             }
 
             if (!$hasDynamicAccess) {
@@ -62,6 +83,18 @@ class RoleGuardFilter implements FilterInterface
                         'code'    => 'FORBIDDEN',
                     ]);
             }
+        }
+
+        // Check explicit feature restrictions if disabled in the matrix
+        $uriPath = $request->getUri()->getPath();
+        if (str_contains($uriPath, 'personnel') && !$permissionModel->hasPermission($currentRole, 'personnel.manage')) {
+            return Services::response()
+                ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
+                ->setJSON([
+                    'status'  => false,
+                    'message' => 'Personnel management capability is disabled for your role.',
+                    'code'    => 'FEATURE_DISABLED',
+                ]);
         }
 
         return null; // Role is authorized — allow through.

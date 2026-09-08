@@ -144,15 +144,15 @@ class AuthController extends BaseController
             'samesite' => 'Lax',
         ]);
 
-        // Remove sensitive fields before returning user data
-        unset($user['password_hash'], $user['id_card_image']);
+        // Fetch safe user payload enriched with dynamic RBAC permissions and avatar URL
+        $safeUser = $this->userModel->getSafeUser($user['id']);
 
         return $this->successResponse('Login successful.', [
             'access_token'  => $accessToken,
             'refresh_token' => $refreshToken,
             'token_type'    => 'Bearer',
             'expires_in'    => $expiresIn,
-            'user'          => $user,
+            'user'          => $safeUser ?? $user,
         ]);
     }
 
@@ -198,6 +198,7 @@ class AuthController extends BaseController
     /**
      * Check whether current session is active and valid.
      * Protected by JwtAuthFilter — if superseded, 401 SESSION_SUPERSEDED is returned automatically.
+     * Also returns dynamic RBAC permissions to keep client UI synchronized.
      */
     public function checkSession(): ResponseInterface
     {
@@ -207,9 +208,20 @@ class AuthController extends BaseController
             return $this->errorResponse('Unable to resolve user identity.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
+        $user = $this->userModel->find($userId);
+        if (!$user || $user['status'] !== 'Active') {
+            return $this->errorResponse('Account is not active or no longer exists.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $role = $user['role'] ?? ($this->request->jwtPayload['role'] ?? '');
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $permissions = !empty($role) ? $rolePermissionModel->getPermissionsForRole($role) : [];
+
         return $this->successResponse('Session is active and valid.', [
-            'valid'   => true,
-            'user_id' => $userId,
+            'valid'       => true,
+            'user_id'     => $userId,
+            'role'        => $role,
+            'permissions' => $permissions,
         ]);
     }
 

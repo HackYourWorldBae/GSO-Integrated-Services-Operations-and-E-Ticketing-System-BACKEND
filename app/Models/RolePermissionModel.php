@@ -211,6 +211,7 @@ class RolePermissionModel extends Model
      */
     public function saveMatrix(array $matrix): bool
     {
+        helper('sanitize');
         $now = date('Y-m-d H:i:s');
         foreach ($matrix as $item) {
             $role    = sanitize_string($item['role'] ?? '');

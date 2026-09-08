@@ -912,7 +912,7 @@ class TicketController extends BaseController
         } elseif ($materialsLogged) {
             $isArchived  = 0;
             $newStatus   = 'resolved';
-            $statusLabel = 'Awaiting User Feedback';
+            $statusLabel = 'Awaiting User Rating';
         } else {
             $isArchived  = 0;
             $newStatus   = 'resolved';
@@ -2028,21 +2028,12 @@ class TicketController extends BaseController
 
     /**
      * Officially verify services and close ticket.
-     * Strictly blocks closure if no accomplishment report has been uploaded.
      */
     public function verifyAndClose(string $ticketId): ResponseInterface
     {
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket) {
             return $this->notFoundResponse('Ticket');
-        }
-
-        // Must have verified accomplishment report
-        if (empty($ticket['accomplishment_report_path'])) {
-            return $this->errorResponse(
-                'Verification Error: The request cannot be closed without an uploaded Accomplishment Report proving services are finished.',
-                ['accomplishment_report' => 'Mandatory accomplishment report missing.']
-            );
         }
 
         $userId = $this->currentUserId();
@@ -2097,7 +2088,7 @@ class TicketController extends BaseController
             $ticketId,
             $userId,
             'Ticket Verified & Closed',
-            'Accomplishment verified and ticket officially marked as Closed.'
+            'Ticket verified and officially marked as Closed.'
         );
 
         $notificationModel = new \App\Models\NotificationModel();

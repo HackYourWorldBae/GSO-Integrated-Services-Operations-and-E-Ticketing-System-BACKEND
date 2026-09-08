@@ -166,6 +166,26 @@ class FeedbackController extends BaseController
             $updateTicket['verification_status'] = 'verified_closed';
             $updateTicket['verified_by_user_id'] = $userId;
             $updateTicket['verified_at']         = date('Y-m-d H:i:s');
+
+            // Complete any active assignments and free worker
+            $db->table('ticket_assignments')
+               ->where('ticket_id', $ticketId)
+               ->where('completed_at IS NULL')
+               ->update(['completed_at' => date('Y-m-d H:i:s'), 'status' => 'completed']);
+
+            $assignments = $db->table('ticket_assignments')->where('ticket_id', $ticketId)->get()->getResultArray();
+            $personnelModel = new \App\Models\PersonnelModel();
+            foreach ($assignments as $a) {
+                if (!empty($a['personnel_id'])) {
+                    $worker = $personnelModel->find($a['personnel_id']);
+                    if ($worker && $worker['status'] !== 'on_leave') {
+                        $personnelModel->update($a['personnel_id'], [
+                            'status'     => 'available',
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                }
+            }
         }
 
         $this->ticketModel->update($ticketId, $updateTicket);

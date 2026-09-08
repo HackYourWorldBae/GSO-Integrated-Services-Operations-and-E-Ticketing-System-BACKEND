@@ -87,14 +87,38 @@ class RoleGuardFilter implements FilterInterface
 
         // Check explicit feature restrictions if disabled in the matrix
         $uriPath = $request->getUri()->getPath();
-        if (str_contains($uriPath, 'personnel') && !$permissionModel->hasPermission($currentRole, 'personnel.manage')) {
-            return Services::response()
-                ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
-                ->setJSON([
-                    'status'  => false,
-                    'message' => 'Personnel management capability is disabled for your role.',
-                    'code'    => 'FEATURE_DISABLED',
-                ]);
+        if (str_contains($uriPath, 'personnel')) {
+            $method = strtolower($request->getMethod());
+
+            // Mutating personnel/roster operations require explicit management permissions
+            if (in_array($method, ['post', 'put', 'delete'], true)) {
+                if (!$permissionModel->hasPermission($currentRole, 'personnel.manage')) {
+                    return Services::response()
+                        ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
+                        ->setJSON([
+                            'status'  => false,
+                            'message' => 'Personnel management capability is disabled for your role.',
+                            'code'    => 'FEATURE_DISABLED',
+                        ]);
+                }
+            } elseif ($method === 'get') {
+                // Viewing the personnel roster is permitted for operational roles (admin, dispatcher, director)
+                // or if dynamic capabilities (tickets.dispatch, tickets.assign_worker, personnel.manage) are granted.
+                $canView = in_array($currentRole, ['admin', 'director', 'superadmin'], true)
+                    || $permissionModel->hasPermission($currentRole, 'personnel.manage')
+                    || $permissionModel->hasPermission($currentRole, 'tickets.dispatch')
+                    || $permissionModel->hasPermission($currentRole, 'tickets.assign_worker');
+
+                if (!$canView) {
+                    return Services::response()
+                        ->setStatusCode(ResponseInterface::HTTP_FORBIDDEN)
+                        ->setJSON([
+                            'status'  => false,
+                            'message' => 'You do not have permission to view the personnel roster.',
+                            'code'    => 'FEATURE_DISABLED',
+                        ]);
+                }
+            }
         }
 
         return null; // Role is authorized — allow through.

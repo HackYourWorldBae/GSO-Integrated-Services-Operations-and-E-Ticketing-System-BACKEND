@@ -57,7 +57,8 @@ class PersonnelController extends BaseController
         // Group by specialty for display
         $grouped = [];
         foreach ($personnel as $person) {
-            $grouped[$person['specialty']][] = $person;
+            $specialty = !empty(trim($person['specialty'] ?? '')) ? trim($person['specialty']) : 'General';
+            $grouped[$specialty][] = $person;
         }
 
         return $this->successResponse('Personnel roster retrieved.', [

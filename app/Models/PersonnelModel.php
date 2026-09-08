@@ -111,6 +111,7 @@ class PersonnelModel extends Model
             // Full backlog beyond first active job
             $p['backlog'] = array_slice($formattedAssignments, 1);
         }
+        unset($p);
 
         return $personnel;
     }

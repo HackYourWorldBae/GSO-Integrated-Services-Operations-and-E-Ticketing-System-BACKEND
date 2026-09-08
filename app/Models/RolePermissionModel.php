@@ -133,6 +133,34 @@ class RolePermissionModel extends Model
             return true;
         }
 
+        // Fallback default: Dispatcher
+        if ($role === 'dispatcher' && in_array($featureKey, [
+            'tickets.view_all', 'tickets.dispatch', 'tickets.assign_worker', 'tickets.complete_work'
+        ], true)) {
+            return true;
+        }
+
+        // Fallback default: Director
+        if ($role === 'director' && in_array($featureKey, [
+            'tickets.view_all', 'reports.view'
+        ], true)) {
+            return true;
+        }
+
+        // Fallback default: Worker
+        if ($role === 'worker' && in_array($featureKey, [
+            'tickets.complete_work'
+        ], true)) {
+            return true;
+        }
+
+        // Fallback default: Requestor (employee / student)
+        if (in_array($role, ['employee', 'student'], true) && in_array($featureKey, [
+            'tickets.create', 'tickets.rate'
+        ], true)) {
+            return true;
+        }
+
         return false;
     }
 

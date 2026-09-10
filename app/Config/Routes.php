@@ -24,6 +24,15 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     // Public Avatar Stream
     $routes->get('auth/avatar/(:segment)', 'AuthController::getAvatar/$1');
 
+    // System Health & Connectivity Probe
+    $routes->get('health', function() {
+        return response()->setStatusCode(200)->setJSON([
+            'status'    => 'ok',
+            'timestamp' => time(),
+            'service'   => 'GSO E-Ticketing System API'
+        ]);
+    });
+
     // --------------------------------------------------------------------------
     // 2. PROTECTED ROUTES (Require JWT & Rate Limiting)
     // --------------------------------------------------------------------------

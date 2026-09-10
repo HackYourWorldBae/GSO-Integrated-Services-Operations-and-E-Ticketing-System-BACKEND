@@ -61,7 +61,7 @@ CREATE TABLE `migrations` (
   `time` int(11) NOT NULL,
   `batch` int(11) unsigned NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4;
 
 -- Dumping data for table `migrations`
 INSERT INTO `migrations` VALUES ('1', '2026_07_17_000001', 'App\\Database\\Migrations\\CreateUnitsTable', 'default', 'App', '1784812908', '1'),
@@ -79,7 +79,8 @@ INSERT INTO `migrations` VALUES ('1', '2026_07_17_000001', 'App\\Database\\Migra
 ('13', '2026_08_04_000001', 'App\\Database\\Migrations\\CreateCiSessionsTable', 'default', 'App', '1784812913', '1'),
 ('14', '2026_08_16_000002', 'App\\Database\\Migrations\\CreatePersonnelCategoriesTable', 'default', 'App', '1784812914', '1'),
 ('15', '2026_09_08_000001', 'App\\Database\\Migrations\\CreateUserSessionsTable', 'default', 'App', '1784812915', '1'),
-('16', '2026_09_08_000002', 'App\\Database\\Migrations\\CreateRolePermissionsTable', 'default', 'App', '1784812916', '1');
+('16', '2026_09_08_000002', 'App\\Database\\Migrations\\CreateRolePermissionsTable', 'default', 'App', '1784812916', '1'),
+('17', '2026_09_10_000001', 'App\\Database\\Migrations\\MakeUserEmailNullable', 'default', 'App', '1784812917', '1');
 
 
 -- Table structure for table `personnel`
@@ -444,7 +445,7 @@ CREATE TABLE `users` (
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `first_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `last_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `password_hash` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `contact_number` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `role` enum('student','employee','admin','dispatcher','director','worker','superadmin') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
@@ -461,6 +462,8 @@ CREATE TABLE `users` (
   KEY `fk_users_unit` (`unit_id`),
   KEY `idx_users_role` (`role`),
   KEY `idx_users_status` (`status`),
+  KEY `idx_users_student_id` (`student_id_number`),
+  KEY `idx_users_contact` (`contact_number`),
   CONSTRAINT `fk_users_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

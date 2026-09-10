@@ -22,8 +22,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
 
-    // Public Avatar Stream
-    $routes->get('auth/avatar/(:segment)', 'AuthController::getAvatar/$1');
+    // Public Avatar & Institutional ID Card Stream
+    $routes->get('auth/avatar/(:segment)',  'AuthController::getAvatar/$1');
+    $routes->get('auth/id-card/(:segment)', 'AuthController::getIdCard/$1');
 
     // System Health & Connectivity Probe
     $routes->get('health', function() {
@@ -48,7 +49,6 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/avatar',          'AuthController::uploadAvatar');
         $routes->get('auth/avatar/(:segment)','AuthController::getAvatar/$1');
-        $routes->get('auth/id-card/(:segment)','AuthController::getIdCard/$1');
 
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');

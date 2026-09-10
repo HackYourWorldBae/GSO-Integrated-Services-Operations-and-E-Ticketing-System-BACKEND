@@ -111,7 +111,7 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                                 ->join('units', 'units.id = users.unit_id', 'left')
                                 ->where('users.id', $id)
                                 ->first();

@@ -506,9 +506,19 @@ class AuthController extends BaseController
             return $this->response->setStatusCode(404)->setBody('ID card image not found.');
         }
 
-        $fullPath = WRITEPATH . 'uploads/' . $user['id_card_image'];
+        $relativePath = ltrim(str_replace('\\', '/', $user['id_card_image']), '/');
+        if (str_starts_with($relativePath, 'uploads/')) {
+            $relativePath = substr($relativePath, 8);
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $relativePath;
         if (!is_file($fullPath)) {
-            return $this->response->setStatusCode(404)->setBody('ID card file not found on disk.');
+            $altPath = WRITEPATH . $relativePath;
+            if (is_file($altPath)) {
+                $fullPath = $altPath;
+            } else {
+                return $this->response->setStatusCode(404)->setBody('ID card file not found on disk.');
+            }
         }
 
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -517,7 +527,10 @@ class AuthController extends BaseController
 
         return $this->response
             ->setHeader('Content-Type', $mime ?: 'image/jpeg')
-            ->setHeader('Cache-Control', 'private, max-age=3600')
+            ->setHeader('Access-Control-Allow-Origin', '*')
+            ->setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            ->setHeader('Access-Control-Allow-Headers', '*')
+            ->setHeader('Cache-Control', 'public, max-age=86400')
             ->setBody(file_get_contents($fullPath));
     }
 }

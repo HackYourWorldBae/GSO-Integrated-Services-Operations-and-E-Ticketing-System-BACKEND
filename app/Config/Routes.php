@@ -114,8 +114,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('feedback/(:segment)',    'FeedbackController::show/$1');
 
         // -- Director Analytics --
-        $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director']);
-        $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director']);
+        $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director,superadmin']);
+        $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director,superadmin']);
 
         // -- Superadmin (Master Administration, User Lifecycle & RBAC Matrix) --
         $routes->get('superadmin/stats',                  'SuperadminController::stats',          ['filter' => 'role:superadmin']);

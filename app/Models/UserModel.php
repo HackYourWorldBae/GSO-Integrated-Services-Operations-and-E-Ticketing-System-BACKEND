@@ -28,6 +28,7 @@ class UserModel extends Model
         'email',
         'password_hash',
         'contact_number',
+        'student_id_number',
         'role',
         'unit_id',
         'id_card_image',
@@ -42,7 +43,7 @@ class UserModel extends Model
     protected $validationRules = [
         'first_name'        => 'required|max_length[100]',
         'last_name'         => 'required|max_length[100]',
-        'email'             => 'required|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
+        'email'             => 'permit_empty|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
         'password_hash'     => 'required|min_length[8]',
         'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
     ];
@@ -56,6 +57,21 @@ class UserModel extends Model
     // -------------------------------------------------------------------------
     // Query helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Find a user by email, employee/student ID number, or contact number.
+     * Supports multi-identifier login for all roles and offline/elderly users.
+     */
+    public function findUserByIdentifier(string $identifier): ?array
+    {
+        $clean = trim($identifier);
+        return $this->groupStart()
+                        ->where('email', $clean)
+                        ->orWhere('student_id_number', $clean)
+                        ->orWhere('contact_number', $clean)
+                    ->groupEnd()
+                    ->first();
+    }
 
     /**
      * Find a user by student ID number.
@@ -110,7 +126,7 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                         ->join('units', 'units.id = users.unit_id', 'left');
 
         if (!empty($search)) {

@@ -291,6 +291,53 @@ class SuperadminController extends BaseController
     }
 
     /**
+     * Verify a user account after inspecting their uploaded Employee / Student ID.
+     * Sets is_verified = 1 and status = 'Active', immediately granting requestor privileges.
+     */
+    public function verifyUser(string $id): ResponseInterface
+    {
+        $existing = $this->userModel->find($id);
+        if (!$existing) {
+            return $this->notFoundResponse('User account not found.');
+        }
+
+        $this->userModel->update($id, [
+            'is_verified' => 1,
+            'status'      => 'Active',
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($id);
+        return $this->successResponse('User account identity successfully verified and request submission unlocked.', $safeUser);
+    }
+
+    /**
+     * Reject account verification.
+     * Sets status = 'Rejected' with an optional rejection reason.
+     */
+    public function rejectVerification(string $id): ResponseInterface
+    {
+        $existing = $this->userModel->find($id);
+        if (!$existing) {
+            return $this->notFoundResponse('User account not found.');
+        }
+
+        $body   = $this->request->getJSON(true) ?? [];
+        $reason = trim((string) ($body['reason'] ?? 'Identity document could not be verified.'));
+
+        $this->userModel->update($id, [
+            'status'     => 'Rejected',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($id);
+        return $this->successResponse('User account verification was rejected.', [
+            'user'   => $safeUser,
+            'reason' => $reason
+        ]);
+    }
+
+    /**
      * Explore system-wide audit logs.
      */
     public function auditLogs(): ResponseInterface

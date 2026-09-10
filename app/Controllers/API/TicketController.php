@@ -1022,6 +1022,12 @@ class TicketController extends BaseController
         $body   = $this->request->getJSON(true) ?? [];
         $userId = $this->currentUserId();
 
+        $userModel = new \App\Models\UserModel();
+        $user = $userModel->find($userId);
+        if (!$user || empty($user['is_verified']) || (int)$user['is_verified'] !== 1) {
+            return $this->errorResponse('Your account is pending verification by the Super Administrator before you can submit service requests.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
         if (empty($body)) {
             return $this->errorResponse('Request body is empty.');
         }

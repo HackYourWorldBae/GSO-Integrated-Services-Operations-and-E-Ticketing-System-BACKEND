@@ -14,8 +14,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     // 1. PUBLIC ROUTES (No Auth Required)
     // --------------------------------------------------------------------------
 
-    // Authentication (Rate limited: max 10 login attempts per minute per IP to prevent brute force)
-    $routes->post('auth/login',  'AuthController::login', ['filter' => 'throttle:10,60']);
+    // Authentication (Rate limited: max 10 login/register attempts per minute per IP to prevent abuse)
+    $routes->post('auth/login',    'AuthController::login',    ['filter' => 'throttle:10,60']);
+    $routes->post('auth/register', 'AuthController::register', ['filter' => 'throttle:10,60']);
 
     // Public Scheduled Projects Announcements (FGMU & LEAU)
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
@@ -47,6 +48,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/avatar',          'AuthController::uploadAvatar');
         $routes->get('auth/avatar/(:segment)','AuthController::getAvatar/$1');
+        $routes->get('auth/id-card/(:segment)','AuthController::getIdCard/$1');
 
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');
@@ -117,16 +119,16 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director,superadmin']);
         $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director,superadmin']);
 
-        // -- Superadmin (Master Administration, User Lifecycle & RBAC Matrix) --
+        // -- Superadmin (Master Administration, User Lifecycle & Verification) --
         $routes->get('superadmin/stats',                  'SuperadminController::stats',          ['filter' => 'role:superadmin']);
         $routes->get('superadmin/users',                  'SuperadminController::users',          ['filter' => 'role:superadmin']);
         $routes->post('superadmin/users',                 'SuperadminController::createUser',     ['filter' => 'role:superadmin']);
         $routes->get('superadmin/users/(:segment)',       'SuperadminController::showUser/$1',    ['filter' => 'role:superadmin']);
         $routes->put('superadmin/users/(:segment)',       'SuperadminController::updateUser/$1',  ['filter' => 'role:superadmin']);
         $routes->delete('superadmin/users/(:segment)',    'SuperadminController::deleteUser/$1',  ['filter' => 'role:superadmin']);
+        $routes->patch('superadmin/users/(:segment)/verify', 'SuperadminController::verifyUser/$1', ['filter' => 'role:superadmin']);
+        $routes->patch('superadmin/users/(:segment)/reject', 'SuperadminController::rejectVerification/$1', ['filter' => 'role:superadmin']);
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
-        $routes->get('superadmin/rbac-matrix',            'SuperadminController::getRbacMatrix',  ['filter' => 'role:superadmin']);
-        $routes->post('superadmin/rbac-matrix',           'SuperadminController::updateRbacMatrix',['filter' => 'role:superadmin']);
 
         // -- Notifications --
         $routes->get('notifications',             'NotificationController::index');

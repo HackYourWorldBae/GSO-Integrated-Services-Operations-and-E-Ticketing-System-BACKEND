@@ -33,9 +33,147 @@ class AuthController extends BaseController
     }
 
     /**
+     * Register a new user account (Self-service sign up).
+     *
+     * Fields:
+     * - first_name (required)
+     * - last_name (required)
+     * - role (required: student or employee)
+     * - student_id_number (required)
+     * - contact_number (required)
+     * - email (optional, must be valid and unique if provided)
+     * - password (required, min 8 chars)
+     * - id_card_image (file, required, clear photo of student/employee ID)
+     */
+    public function register(): ResponseInterface
+    {
+        $firstName       = trim((string) ($this->request->getPost('first_name') ?? ''));
+        $lastName        = trim((string) ($this->request->getPost('last_name') ?? ''));
+        $role            = trim((string) ($this->request->getPost('role') ?? ''));
+        $studentIdNumber = trim((string) ($this->request->getPost('student_id_number') ?? ''));
+        $contactNumber   = trim((string) ($this->request->getPost('contact_number') ?? ''));
+        $email           = trim((string) ($this->request->getPost('email') ?? ''));
+        $password        = (string) ($this->request->getPost('password') ?? '');
+
+        $errors = [];
+        if (empty($firstName)) $errors['first_name'] = ['First name is required.'];
+        if (empty($lastName))  $errors['last_name']  = ['Last name is required.'];
+        if (!in_array($role, ['student', 'employee'], true)) {
+            $errors['role'] = ['Role must be either Student or Employee.'];
+        }
+        if (empty($studentIdNumber)) {
+            $errors['student_id_number'] = ['Employee / Student ID Number is required.'];
+        }
+        if (empty($contactNumber)) {
+            $errors['contact_number'] = ['Contact number is required.'];
+        }
+        if (strlen($password) < 8) {
+            $errors['password'] = ['Password must be at least 8 characters long.'];
+        }
+
+        // Email validation (optional)
+        $emailToSave = null;
+        if (!empty($email)) {
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors['email'] = ['Please enter a valid email address.'];
+            } else {
+                $existingEmail = $this->userModel->where('email', strtolower($email))->first();
+                if ($existingEmail) {
+                    $errors['email'] = ['This email address is already registered.'];
+                } else {
+                    $emailToSave = strtolower($email);
+                }
+            }
+        }
+
+        // Check if student_id_number is already used
+        if (!empty($studentIdNumber)) {
+            $existingId = $this->userModel->where('student_id_number', $studentIdNumber)->first();
+            if ($existingId) {
+                $errors['student_id_number'] = ['This Employee / Student ID Number is already registered.'];
+            }
+        }
+
+        // File upload verification for Employee / Student ID picture
+        $file = $this->request->getFile('id_card_image');
+        if (!$file || !$file->isValid() || $file->hasMoved()) {
+            $errors['id_card_image'] = ['Please upload a clear picture of your Employee or Student ID.'];
+        } else {
+            if ($file->getSizeByUnit('mb') > 5) {
+                $errors['id_card_image'] = ['The ID picture size must not exceed 5MB.'];
+            }
+            $ext = strtolower($file->getClientExtension());
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $errors['id_card_image'] = ['Only JPG, PNG, and WebP images are allowed for the ID picture.'];
+            }
+        }
+
+        if (!empty($errors)) {
+            return $this->errorResponse('Registration validation failed. Please check the form.', $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Security inspection using FileSecurityService
+        $securityService = new \App\Libraries\FileSecurityService();
+        $inspection = $securityService->inspectFile($file->getTempName(), $file->getClientName(), $file->getClientMimeType());
+        if (!$inspection['safe']) {
+            return $this->errorResponse('Security check failed: ' . $inspection['reason'], ['id_card_image' => [$inspection['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Generate UUID
+        $userId = sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+        );
+
+        // Move ID file to WRITEPATH uploads/id_cards/
+        $uploadDir = WRITEPATH . 'uploads/id_cards/';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0775, true);
+        }
+        $fileName = 'id_card_' . $userId . '_' . time() . '.' . $ext;
+        if (!$file->move($uploadDir, $fileName)) {
+            return $this->errorResponse('Failed to save ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $idCardRelativePath = 'id_cards/' . $fileName;
+
+        $insertData = [
+            'id'                => $userId,
+            'first_name'        => $firstName,
+            'last_name'         => $lastName,
+            'email'             => $emailToSave,
+            'password_hash'     => password_hash($password, PASSWORD_DEFAULT),
+            'contact_number'    => $contactNumber,
+            'student_id_number' => $studentIdNumber,
+            'role'              => $role,
+            'unit_id'           => null,
+            'id_card_image'     => $idCardRelativePath,
+            'status'            => 'Active',
+            'is_verified'       => 0, // Unverified initially
+        ];
+
+        if (!$this->userModel->skipValidation(true)->insert($insertData)) {
+            $dbError = $this->userModel->db->error();
+            return $this->errorResponse('Failed to register account: ' . ($dbError['message'] ?? 'Database error'), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $createdUser = $this->userModel->getSafeUser($userId);
+
+        return $this->successResponse(
+            'Account created successfully! You can now log in to view your dashboard. Please note that an administrator must verify your ID card before you can submit service requests.',
+            ['user' => $createdUser],
+            ResponseInterface::HTTP_CREATED
+        );
+    }
+
+    /**
      * Login
      *
-     * Accepts an email address as identifier.
+     * Accepts an email address, employee/student ID, or contact number as identifier.
      * Enforces single active session per user and issues an HttpOnly cookie.
      */
     public function login(): ResponseInterface
@@ -44,42 +182,34 @@ class AuthController extends BaseController
         $body = $this->request->getJSON(true) ?? [];
 
         $rules = [
-            'identifier' => 'required|valid_email',
+            'identifier' => 'required',
             'password'   => 'required'
         ];
 
         if (!$this->validateData($body, $rules)) {
             return $this->errorResponse(
-                'Please provide a valid Email and password.',
+                'Please provide your identifier (Email, Student ID, or Employee ID) and password.',
                 $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
         }
 
-        $identifier = $body['identifier'];
-        $password   = $body['password'];
+        $identifier = trim((string) ($body['identifier'] ?? ''));
+        $password   = (string) ($body['password'] ?? '');
 
-        // --- Fetch User ---
-        $user = $this->userModel->findByEmail($identifier);
+        // --- Fetch User by Email, Student ID, or Contact Number ---
+        $user = $this->userModel->findUserByIdentifier($identifier);
 
         // --- User Not Found ---
         if (!$user) {
             return $this->errorResponse(
-                'Invalid credentials. Please check your Email and password.',
+                'Invalid credentials. Please check your Email / ID Number and password.',
                 [],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );
         }
 
         // --- Account Status Checks ---
-        if ($user['status'] === 'Pending') {
-            return $this->errorResponse(
-                'Your account is pending review. Please wait for administrator approval.',
-                [],
-                ResponseInterface::HTTP_UNAUTHORIZED
-            );
-        }
-
         if ($user['status'] === 'Rejected') {
             return $this->errorResponse(
                 'Your account has been rejected. Please contact the GSO office for assistance.',
@@ -96,18 +226,10 @@ class AuthController extends BaseController
             );
         }
 
-        if (!$user['is_verified']) {
-            return $this->errorResponse(
-                'Please verify your email address before logging in.',
-                [],
-                ResponseInterface::HTTP_UNAUTHORIZED
-            );
-        }
-
         // --- Password Verification ---
         if (!password_verify($password, $user['password_hash'])) {
             return $this->errorResponse(
-                'Invalid credentials. Please check your ID/Email and password.',
+                'Invalid credentials. Please check your Email / ID Number and password.',
                 [],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );
@@ -370,6 +492,32 @@ class AuthController extends BaseController
         return $this->response
             ->setHeader('Content-Type', $mime ?: 'image/jpeg')
             ->setHeader('Cache-Control', 'public, max-age=86400')
+            ->setBody(file_get_contents($fullPath));
+    }
+
+    /**
+     * Stream uploaded Employee / Student ID card image for verification.
+     * Accessible by Superadmin, Director, Admin, or the user themselves.
+     */
+    public function getIdCard(string $userId)
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || empty($user['id_card_image'])) {
+            return $this->response->setStatusCode(404)->setBody('ID card image not found.');
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $user['id_card_image'];
+        if (!is_file($fullPath)) {
+            return $this->response->setStatusCode(404)->setBody('ID card file not found on disk.');
+        }
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $fullPath);
+        finfo_close($finfo);
+
+        return $this->response
+            ->setHeader('Content-Type', $mime ?: 'image/jpeg')
+            ->setHeader('Cache-Control', 'private, max-age=3600')
             ->setBody(file_get_contents($fullPath));
     }
 }

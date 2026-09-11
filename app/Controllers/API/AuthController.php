@@ -212,7 +212,7 @@ class AuthController extends BaseController
         // --- Account Status Checks ---
         if ($user['status'] === 'Rejected') {
             return $this->errorResponse(
-                'Your account has been rejected. Please contact the GSO office for assistance.',
+                'Your account has been rejected. Please contact or visit the GSO office for assistance.',
                 [],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );

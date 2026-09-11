@@ -26,6 +26,7 @@ class TicketModel extends Model
         'description',
         'status',
         'status_label',
+        'is_emergency',
         'decline_reason',
         'current_step',
         'location',

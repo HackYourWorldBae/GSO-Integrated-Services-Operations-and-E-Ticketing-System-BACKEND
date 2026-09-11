@@ -394,6 +394,28 @@ class TicketController extends BaseController
         $logMessage  = 'Ticket approved — queued for dispatch.';
         // SSU Incident Reports are handled by /investigate, /notation, and /resolve endpoints.
 
+        $body = $this->request->getJSON(true) ?? [];
+        $isEmergency = isset($body['is_emergency']) ? (!empty($body['is_emergency']) ? 1 : 0) : null;
+
+        // Auto-heal/ensure is_emergency column exists in tickets table
+        try {
+            $db = \Config\Database::connect();
+            if (!$db->fieldExists('is_emergency', 'tickets')) {
+                $forge = \Config\Database::forge();
+                $forge->addColumn('tickets', [
+                    'is_emergency' => [
+                        'type'       => 'TINYINT',
+                        'constraint' => 1,
+                        'default'    => 0,
+                        'null'       => false,
+                        'after'      => 'status_label',
+                    ],
+                ]);
+            }
+        } catch (\Throwable $e) {
+            log_message('warning', 'Schema check for tickets.is_emergency: ' . $e->getMessage());
+        }
+
         $updateData = [
             'status'       => $newStatus,
             'status_label' => $statusLabel,
@@ -403,18 +425,34 @@ class TicketController extends BaseController
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
 
+        if ($isEmergency !== null) {
+            $updateData['is_emergency'] = $isEmergency;
+            if ($isEmergency === 1) {
+                $logMessage = 'Ticket approved as EMERGENCY PRIORITY by Director — queued for immediate dispatch.';
+            }
+        }
+
         $this->ticketModel->update($ticketId, $updateData);
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
+        $notifTitle = ($isEmergency === 1) ? "Ticket #{$ticketId} Approved (Emergency Priority)" : "Ticket #{$ticketId} Approved";
+        $notifBody  = ($isEmergency === 1)
+            ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the Director."
+            : "Your request for {$ticket['service_type']} has been approved.";
+
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'success',
-            "Ticket #{$ticketId} Approved",
-            "Your request for {$ticket['service_type']} has been approved."
+            $notifTitle,
+            $notifBody
         );
 
-        return $this->successResponse('Ticket approved successfully.', ['ticket_id' => $ticketId, 'status' => 'approved']);
+        return $this->successResponse('Ticket approved successfully.', [
+            'ticket_id'    => $ticketId, 
+            'status'       => 'approved',
+            'is_emergency' => $isEmergency ?? (int) ($ticket['is_emergency'] ?? 0)
+        ]);
     }
 
     // -------------------------------------------------------------------------

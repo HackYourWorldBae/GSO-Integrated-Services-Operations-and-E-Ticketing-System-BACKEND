@@ -220,8 +220,8 @@ class AuthController extends BaseController
 
         if ($user['status'] === 'Suspended') {
             return $this->errorResponse(
-                'Your account has been suspended. Please contact the GSO office.',
-                [],
+                'Account Suspended: Your account has been suspended by the administrator. Login access is disabled. Please contact the GSO office for assistance.',
+                ['is_suspended' => true],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );
         }

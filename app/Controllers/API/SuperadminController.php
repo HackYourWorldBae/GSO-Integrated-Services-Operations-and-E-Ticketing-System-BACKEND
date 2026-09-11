@@ -212,7 +212,7 @@ class SuperadminController extends BaseController
             'last_name'      => 'permit_empty|max_length[100]',
             'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
             'role'           => 'permit_empty|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
-            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
+            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Deactivated]',
             'contact_number' => 'permit_empty|max_length[30]',
             'unit_id'        => 'permit_empty',
             'password'       => 'permit_empty|min_length[6]',
@@ -224,6 +224,17 @@ class SuperadminController extends BaseController
                 $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
+        }
+
+        // Policy: Registered user accounts (student, employee) cannot be edited by the Superadmin
+        if (in_array($existing['role'], ['student', 'employee'])) {
+            if (isset($body['first_name']) || isset($body['last_name']) || isset($body['email']) || isset($body['password']) || isset($body['role']) || isset($body['student_id_number'])) {
+                return $this->errorResponse(
+                    'Registered user accounts (Students & Employees) cannot be edited by the Super Administrator. You may only deactivate, suspend, or delete the account.',
+                    [],
+                    ResponseInterface::HTTP_FORBIDDEN
+                );
+            }
         }
 
         // Prevent self-demotion
@@ -263,7 +274,46 @@ class SuperadminController extends BaseController
     }
 
     /**
-     * Deactivate or delete user account safely.
+     * Change user account status directly (Active, Deactivated, Suspended).
+     */
+    public function updateStatus(string $id): ResponseInterface
+    {
+        $existing = $this->userModel->find($id);
+        if (!$existing) {
+            return $this->notFoundResponse('User account not found.');
+        }
+
+        $currentUserId = $this->currentUserId();
+        if ((string) $id === (string) $currentUserId) {
+            return $this->errorResponse('Cannot alter the status of your own Superadmin account.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $newStatus = $body['status'] ?? null;
+        if (!in_array($newStatus, ['Active', 'Deactivated', 'Suspended', 'Rejected'])) {
+            return $this->errorResponse('Invalid status. Supported statuses: Active, Deactivated, Suspended, Rejected.');
+        }
+
+        $updateData = ['status' => $newStatus];
+        if ($newStatus === 'Active') {
+            $updateData['is_verified'] = 1;
+        }
+
+        if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
+            if ($newStatus === 'Suspended') {
+                $sessionModel = new \App\Models\UserSessionModel();
+                $sessionModel->where('user_id', $id)->delete();
+            }
+
+            $safeUser = $this->userModel->getSafeUser($id);
+            return $this->successResponse("User account status successfully updated to {$newStatus}.", $safeUser);
+        }
+
+        return $this->errorResponse('Failed to update user status.');
+    }
+
+    /**
+     * Strict deletion endpoint for user accounts.
      */
     public function deleteUser(string $id): ResponseInterface
     {
@@ -279,17 +329,23 @@ class SuperadminController extends BaseController
 
         // Check if user has active tickets
         $hasActiveTickets = $this->ticketModel->where('user_id', $id)
-                                             ->whereIn('status', ['pending', 'approved', 'ongoing'])
+                                             ->whereIn('status', ['pending', 'approved', 'ongoing', 'processing'])
                                              ->countAllResults();
 
         if ($hasActiveTickets > 0) {
-            // Soft-disable instead of hard delete to preserve integrity
-            $this->userModel->update($id, ['status' => 'Suspended']);
-            return $this->successResponse('User account has active service tickets and was suspended instead of permanently deleted to preserve audit trails.');
+            return $this->errorResponse(
+                'Cannot permanently delete an account with active ongoing service tickets. Please resolve or close their tickets first, or Deactivate/Suspend the account instead.',
+                ['has_active_tickets' => true],
+                ResponseInterface::HTTP_CONFLICT
+            );
         }
 
+        // Clean up sessions before permanent deletion
+        $sessionModel = new \App\Models\UserSessionModel();
+        $sessionModel->where('user_id', $id)->delete();
+
         $this->userModel->delete($id);
-        return $this->successResponse('User account deleted successfully.');
+        return $this->successResponse('User account permanently deleted successfully.');
     }
 
     /**

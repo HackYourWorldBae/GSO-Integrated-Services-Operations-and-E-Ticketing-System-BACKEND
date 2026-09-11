@@ -83,7 +83,7 @@ class CreateUsersTable extends Migration
             ],
             'status' => [
                 'type'       => 'ENUM',
-                'constraint' => ['Active', 'Pending', 'Rejected', 'Suspended'],
+                'constraint' => ['Active', 'Pending', 'Rejected', 'Suspended', 'Deactivated'],
                 'default'    => 'Active',
                 'null'       => false,
             ],

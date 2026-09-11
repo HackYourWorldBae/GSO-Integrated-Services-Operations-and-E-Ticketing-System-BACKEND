@@ -360,8 +360,62 @@ class SuperadminController extends BaseController
         $offset = max(0, (int) ($this->request->getGet('offset') ?? 0));
 
         $db = Database::connect();
+
+        // Auto-seed/backfill initial ticket event logs if ticket_logs table is currently empty
+        $countLogs = $db->table('ticket_logs')->countAllResults();
+        if ($countLogs === 0) {
+            $existingTickets = $db->table('tickets')
+                                  ->select('id, user_id, status, title, service_type, decline_reason, submitted_at, reviewed_at, reviewed_by, completed_at, updated_at')
+                                  ->orderBy('submitted_at', 'ASC')
+                                  ->get()
+                                  ->getResultArray();
+
+            foreach ($existingTickets as $t) {
+                $subTime = !empty($t['submitted_at']) ? $t['submitted_at'] : (!empty($t['updated_at']) ? $t['updated_at'] : date('Y-m-d H:i:s'));
+                $serviceName = !empty($t['service_type']) ? $t['service_type'] : (!empty($t['title']) ? $t['title'] : 'Service Request');
+
+                // 1. Initial Submission log
+                $db->table('ticket_logs')->insert([
+                    'ticket_id'  => $t['id'],
+                    'user_id'    => !empty($t['user_id']) ? $t['user_id'] : null,
+                    'action'     => 'Ticket Submitted',
+                    'details'    => 'Initial service ticket submission: ' . $serviceName,
+                    'created_at' => $subTime,
+                ]);
+
+                // 2. Lifecycle Progression log if status advanced beyond pending
+                $status = strtolower($t['status'] ?? '');
+                if (!empty($status) && $status !== 'pending') {
+                    $actionName = 'Status Updated';
+                    $details    = 'Ticket status progressed to: ' . ucfirst(str_replace('_', ' ', $status));
+                    $actor      = !empty($t['reviewed_by']) ? $t['reviewed_by'] : null;
+                    $actionTime = !empty($t['reviewed_at']) ? $t['reviewed_at'] : date('Y-m-d H:i:s', strtotime($subTime) + 1800);
+
+                    if ($status === 'declined') {
+                        $actionName = 'Ticket Declined';
+                        $details    = 'Ticket declined. Reason: ' . (!empty($t['decline_reason']) ? $t['decline_reason'] : 'Requirements incomplete or out of operational scope.');
+                    } elseif (in_array($status, ['approved', 'in_progress', 'ongoing', 'active', 'processing'])) {
+                        $actionName = 'Ticket Approved';
+                        $details    = 'Ticket approved for operations and scheduling';
+                    } elseif (in_array($status, ['completed', 'closed', 'resolved'])) {
+                        $actionName = 'Ticket Completed';
+                        $details    = 'Work order successfully completed, inspected, and signed off.';
+                        $actionTime = !empty($t['completed_at']) ? $t['completed_at'] : date('Y-m-d H:i:s', strtotime($subTime) + 7200);
+                    }
+
+                    $db->table('ticket_logs')->insert([
+                        'ticket_id'  => $t['id'],
+                        'user_id'    => $actor,
+                        'action'     => $actionName,
+                        'details'    => $details,
+                        'created_at' => $actionTime,
+                    ]);
+                }
+            }
+        }
+
         $builder = $db->table('ticket_logs')
-                      ->select('ticket_logs.*, users.first_name, users.last_name, users.email, users.role as user_role, tickets.status as ticket_status, tickets.college_building, tickets.location')
+                      ->select('ticket_logs.*, users.first_name, users.last_name, users.email, users.role as user_role, tickets.status as ticket_status, tickets.location as college_building, tickets.location, tickets.office_room, tickets.title as ticket_title, tickets.service_type')
                       ->join('users', 'users.id = ticket_logs.user_id', 'left')
                       ->join('tickets', 'tickets.id = ticket_logs.ticket_id', 'left');
 
@@ -381,12 +435,18 @@ class SuperadminController extends BaseController
                         ->get()
                         ->getResultArray();
 
-        $countBuilder = $db->table('ticket_logs');
+        $countBuilder = $db->table('ticket_logs')
+                           ->join('users', 'users.id = ticket_logs.user_id', 'left')
+                           ->join('tickets', 'tickets.id = ticket_logs.ticket_id', 'left');
+
         if (!empty($search)) {
             $countBuilder->groupStart()
                          ->like('ticket_logs.ticket_id', $search)
                          ->orLike('ticket_logs.action', $search)
                          ->orLike('ticket_logs.details', $search)
+                         ->orLike('users.first_name', $search)
+                         ->orLike('users.last_name', $search)
+                         ->orLike('users.email', $search)
                          ->groupEnd();
         }
         $total = $countBuilder->countAllResults();

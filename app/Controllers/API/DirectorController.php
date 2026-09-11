@@ -271,6 +271,119 @@ class DirectorController extends BaseController
             ORDER BY t.unit_id, MONTH(t.submitted_at)
         ", [$trendYear])->getResultArray();
 
+        // 7. Materials Consumption & Resource Valuation
+        $matConds = [];
+        $matParams = [];
+
+        if ($period === 'year') {
+            $matConds[] = "YEAR(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ?";
+            $matParams[] = $year;
+        } elseif ($period === 'quarter') {
+            $matConds[] = "YEAR(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ? AND QUARTER(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ?";
+            $matParams[] = $year;
+            $matParams[] = $quarter;
+        } elseif ($period === 'month') {
+            $matConds[] = "YEAR(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ? AND MONTH(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ?";
+            $matParams[] = $year;
+            $matParams[] = $month;
+        }
+
+        if ($unitFilter !== 'ALL' && isset(self::UNIT_MAP[$unitFilter])) {
+            $matConds[] = "t.unit_id = ?";
+            $matParams[] = self::UNIT_MAP[$unitFilter];
+        }
+
+        $matWhereSql = !empty($matConds) ? "WHERE " . implode(" AND ", $matConds) : "";
+
+        $materialRows = $db->query("
+            SELECT
+                tm.id,
+                tm.material_name,
+                tm.quantity,
+                COALESCE(NULLIF(TRIM(tm.unit_measurement), ''), 'pcs') AS unit_measurement,
+                tm.unit_price,
+                CASE 
+                    WHEN tm.total_price > 0 THEN tm.total_price 
+                    ELSE (tm.quantity * tm.unit_price) 
+                END AS total_price,
+                tm.created_at,
+                COALESCE(tm.ticket_id, ta.ticket_id) AS ticket_id,
+                t.title AS ticket_title,
+                t.service_type,
+                t.unit_id,
+                u.code AS unit_code,
+                u.name AS unit_name
+            FROM ticket_materials tm
+            LEFT JOIN ticket_assignments ta ON ta.id = tm.assignment_id
+            JOIN tickets t ON t.id = COALESCE(tm.ticket_id, ta.ticket_id)
+            JOIN units u ON u.id = t.unit_id
+            {$matWhereSql}
+            ORDER BY tm.created_at DESC, tm.id DESC
+        ", $matParams)->getResultArray();
+
+        $totalMaterialsWorth = 0.0;
+        $totalMaterialsQuantity = 0.0;
+        $unitMaterialsWorth = [
+            'FGMU' => 0.0,
+            'LEAU' => 0.0,
+            'SSU'  => 0.0,
+        ];
+        $unitMaterialsCount = [
+            'FGMU' => 0,
+            'LEAU' => 0,
+            'SSU'  => 0,
+        ];
+        $materialsItems = [];
+
+        foreach ($materialRows as $mRow) {
+            $qty   = (float) ($mRow['quantity'] ?? 1);
+            $price = (float) ($mRow['unit_price'] ?? 0);
+            $tot   = (float) ($mRow['total_price'] ?? ($qty * $price));
+            $uCode = strtoupper((string) ($mRow['unit_code'] ?? 'FGMU'));
+
+            $totalMaterialsWorth += $tot;
+            $totalMaterialsQuantity += $qty;
+
+            if (isset($unitMaterialsWorth[$uCode])) {
+                $unitMaterialsWorth[$uCode] += $tot;
+                $unitMaterialsCount[$uCode]++;
+            }
+
+            $materialsItems[] = [
+                'id'               => (int) $mRow['id'],
+                'material_name'    => $mRow['material_name'],
+                'quantity'         => $qty,
+                'unit_measurement' => $mRow['unit_measurement'],
+                'unit_price'       => $price,
+                'total_price'      => $tot,
+                'ticket_id'        => $mRow['ticket_id'],
+                'ticket_title'     => $mRow['ticket_title'] ?: ($mRow['service_type'] ?: 'General Maintenance'),
+                'unit_code'        => $uCode,
+                'created_at'       => $mRow['created_at'],
+            ];
+        }
+
+        $materialsSummary = [
+            'total_worth'      => round($totalMaterialsWorth, 2),
+            'total_quantity'   => round($totalMaterialsQuantity, 2),
+            'total_records'    => count($materialsItems),
+            'by_unit'          => [
+                'FGMU' => [
+                    'total_worth' => round($unitMaterialsWorth['FGMU'], 2),
+                    'count'       => $unitMaterialsCount['FGMU'],
+                ],
+                'LEAU' => [
+                    'total_worth' => round($unitMaterialsWorth['LEAU'], 2),
+                    'count'       => $unitMaterialsCount['LEAU'],
+                ],
+                'SSU'  => [
+                    'total_worth' => round($unitMaterialsWorth['SSU'], 2),
+                    'count'       => $unitMaterialsCount['SSU'],
+                ],
+            ],
+            'items'            => $materialsItems,
+        ];
+
         // Current user / director info
         $currentUser = $this->currentUser();
         $directorName = trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''));
@@ -291,18 +404,20 @@ class DirectorController extends BaseController
             ],
             'available_years' => $availableYears,
             'summary' => [
-                'total_requests'     => $totalRequestsAcross,
-                'total_resolved'     => $totalResolvedAcross,
-                'total_declined'     => $totalDeclinedAcross,
-                'total_pending'      => $totalPendingAcross,
-                'total_processing'   => $totalProcessingAcross,
-                'total_scheduled'    => $totalScheduledAcross,
-                'total_active_working' => $totalActiveWorkingAcross,
-                'completion_rate'    => min(100, $overallCompletionRate),
-                'overall_ratings'    => $overallRatings,
+                'total_requests'        => $totalRequestsAcross,
+                'total_resolved'        => $totalResolvedAcross,
+                'total_declined'        => $totalDeclinedAcross,
+                'total_pending'         => $totalPendingAcross,
+                'total_processing'      => $totalProcessingAcross,
+                'total_scheduled'       => $totalScheduledAcross,
+                'total_active_working'  => $totalActiveWorkingAcross,
+                'completion_rate'       => min(100, $overallCompletionRate),
+                'total_materials_worth' => round($totalMaterialsWorth, 2),
+                'overall_ratings'       => $overallRatings,
             ],
             'units'               => $units,
             'service_breakdown'   => $serviceBreakdown,
+            'materials_summary'   => $materialsSummary,
             'completion_health'   => [
                 'on_time'            => $onTime,
                 'beyond_time'        => $beyondTime,

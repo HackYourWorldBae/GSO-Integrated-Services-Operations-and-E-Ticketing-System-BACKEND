@@ -20,6 +20,7 @@ class UserModel extends Model
     protected $useTimestamps    = true;
     protected $createdField     = 'created_at';
     protected $updatedField     = 'updated_at';
+    protected $skipValidation   = true;
 
     protected $allowedFields = [
         'id',
@@ -38,7 +39,7 @@ class UserModel extends Model
     ];
 
     // -------------------------------------------------------------------------
-    // Validation rules
+    // Validation rules (explicitly validated in controllers)
     // -------------------------------------------------------------------------
     protected $validationRules = [
         'first_name'        => 'required|max_length[100]',
@@ -109,6 +110,9 @@ class UserModel extends Model
 
         unset($user['password_hash']);
 
+        // Explicitly cast is_verified to int (0 or 1) so JSON serialization is boolean-friendly
+        $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
+
         // Attach avatar URL
         $user['avatar_url'] = !empty($user['avatar_path'])
             ? base_url('api/v1/auth/avatar/' . $user['id'])
@@ -154,8 +158,15 @@ class UserModel extends Model
             $builder->where('users.status', $status);
         }
 
-        return $builder->orderBy('users.created_at', 'DESC')
-                       ->findAll($limit, $offset);
+        $users = $builder->orderBy('users.created_at', 'DESC')
+                         ->findAll($limit, $offset);
+
+        foreach ($users as &$u) {
+            $u['is_verified'] = (int) ($u['is_verified'] ?? 0);
+        }
+        unset($u);
+
+        return $users;
     }
 
     /**

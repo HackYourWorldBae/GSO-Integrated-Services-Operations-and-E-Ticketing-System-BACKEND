@@ -152,7 +152,7 @@ class AuthController extends BaseController
             'role'              => $role,
             'unit_id'           => null,
             'id_card_image'     => $idCardRelativePath,
-            'status'            => 'Active',
+            'status'            => 'Pending',
             'is_verified'       => 0, // Unverified initially
         ];
 

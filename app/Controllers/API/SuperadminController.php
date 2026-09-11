@@ -120,6 +120,8 @@ class SuperadminController extends BaseController
             return $this->notFoundResponse('User account not found.');
         }
 
+        $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
+
         return $this->successResponse('User details retrieved successfully.', $user);
     }
 
@@ -301,11 +303,16 @@ class SuperadminController extends BaseController
             return $this->notFoundResponse('User account not found.');
         }
 
-        $this->userModel->update($id, [
+        $updated = $this->userModel->skipValidation(true)->update($id, [
             'is_verified' => 1,
             'status'      => 'Active',
             'updated_at'  => date('Y-m-d H:i:s'),
         ]);
+
+        if (!$updated) {
+            $dbError = $this->userModel->db->error();
+            return $this->errorResponse('Failed to verify user: ' . ($dbError['message'] ?? 'Database error'), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
 
         $safeUser = $this->userModel->getSafeUser($id);
         return $this->successResponse('User account identity successfully verified and request submission unlocked.', $safeUser);
@@ -313,7 +320,7 @@ class SuperadminController extends BaseController
 
     /**
      * Reject account verification.
-     * Sets status = 'Rejected' with an optional rejection reason.
+     * Sets status = 'Rejected' and is_verified = 0 with an optional rejection reason.
      */
     public function rejectVerification(string $id): ResponseInterface
     {
@@ -325,10 +332,16 @@ class SuperadminController extends BaseController
         $body   = $this->request->getJSON(true) ?? [];
         $reason = trim((string) ($body['reason'] ?? 'Identity document could not be verified.'));
 
-        $this->userModel->update($id, [
-            'status'     => 'Rejected',
-            'updated_at' => date('Y-m-d H:i:s'),
+        $updated = $this->userModel->skipValidation(true)->update($id, [
+            'status'      => 'Rejected',
+            'is_verified' => 0,
+            'updated_at'  => date('Y-m-d H:i:s'),
         ]);
+
+        if (!$updated) {
+            $dbError = $this->userModel->db->error();
+            return $this->errorResponse('Failed to reject user verification: ' . ($dbError['message'] ?? 'Database error'), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
 
         $safeUser = $this->userModel->getSafeUser($id);
         return $this->successResponse('User account verification was rejected.', [

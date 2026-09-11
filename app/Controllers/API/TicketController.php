@@ -1507,6 +1507,20 @@ class TicketController extends BaseController
         $feedbacks       = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
         $materialsMap    = $this->buildMaterialsMap($db, $ticketIds);
 
+        // Load user/requester profiles in bulk for tickets
+        $userIds = array_filter(array_unique(array_column($tickets, 'user_id')));
+        $usersMap = [];
+        if (!empty($userIds)) {
+            $userRows = $db->table('users')
+                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, contact_number as requester_contact')
+                           ->whereIn('id', $userIds)
+                           ->get()
+                           ->getResultArray();
+            foreach ($userRows as $u) {
+                $usersMap[$u['id']] = $u;
+            }
+        }
+
         // Enrich SSU Incident Reports with 3NF bridge table arrays (incidents, information, roles)
         if (!empty($ssuIrDetails)) {
             $irIds = array_keys($ssuIrDetails);
@@ -1561,6 +1575,33 @@ class TicketController extends BaseController
                 3       => $ssuIrDetails[$id] ?? null,
                 default => null,
             };
+
+            // Attach user/requester profile
+            $u = $usersMap[$ticket['user_id']] ?? null;
+            if ($u) {
+                if (empty($ticket['first_name']))        $ticket['first_name']        = $u['first_name'];
+                if (empty($ticket['last_name']))         $ticket['last_name']         = $u['last_name'];
+                if (empty($ticket['email']))             $ticket['email']             = $u['email'];
+                if (empty($ticket['requester_role']))    $ticket['requester_role']    = $u['requester_role'];
+                if (empty($ticket['student_id_number'])) $ticket['student_id_number'] = $u['student_id_number'];
+                if (empty($ticket['requester_contact'])) $ticket['requester_contact'] = $u['requester_contact'];
+                if (empty($ticket['contact_number']))    $ticket['contact_number']    = $u['requester_contact'];
+                $ticket['requester'] = trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? ''));
+                $ticket['user'] = $u;
+            } else if (!empty($ticket['first_name']) || !empty($ticket['last_name'])) {
+                $ticket['requester'] = trim(($ticket['first_name'] ?? '') . ' ' . ($ticket['last_name'] ?? ''));
+                if (empty($ticket['contact_number']) && !empty($ticket['requester_contact'])) {
+                    $ticket['contact_number'] = $ticket['requester_contact'];
+                }
+            }
+
+            // Normalize nature of work and job particulars
+            if (empty($ticket['service']) && !empty($ticket['service_type'])) {
+                $ticket['service'] = $ticket['service_type'];
+            }
+            if (empty($ticket['job_description']) && !empty($ticket['description'])) {
+                $ticket['job_description'] = $ticket['description'];
+            }
 
             $ticket['assignment']          = $assignments[$id] ?? null;
             $ticket['assignments']         = $assignmentsList[$id] ?? [];

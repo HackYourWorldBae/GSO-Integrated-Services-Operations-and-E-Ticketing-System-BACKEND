@@ -134,10 +134,12 @@ class TicketModel extends Model
      */
     public function getDispatchQueue(int $unitId): array
     {
-        return $this->where('unit_id', $unitId)
-                    ->whereIn('status', ['approved'])
-                    ->where('is_archived', 0)
-                    ->orderBy('submitted_at', 'ASC')
+        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+                    ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->where('tickets.unit_id', $unitId)
+                    ->whereIn('tickets.status', ['approved'])
+                    ->where('tickets.is_archived', 0)
+                    ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
 
@@ -146,10 +148,12 @@ class TicketModel extends Model
      */
     public function getActiveTickets(int $unitId): array
     {
-        return $this->where('unit_id', $unitId)
-                    ->whereIn('status', ['processing', 'resolved'])
-                    ->where('is_archived', 0)
-                    ->orderBy('submitted_at', 'ASC')
+        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+                    ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->where('tickets.unit_id', $unitId)
+                    ->whereIn('tickets.status', ['processing', 'resolved'])
+                    ->where('tickets.is_archived', 0)
+                    ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
 
@@ -158,24 +162,26 @@ class TicketModel extends Model
      */
     public function getArchivedByUnit(int $unitId, array $filters = []): array
     {
-        $builder = $this->where('unit_id', $unitId)
-                        ->where('is_archived', 1)
-                        ->orderBy('completed_at', 'DESC');
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+                        ->join('users', 'users.id = tickets.user_id', 'left')
+                        ->where('tickets.unit_id', $unitId)
+                        ->where('tickets.is_archived', 1)
+                        ->orderBy('tickets.completed_at', 'DESC');
 
         if (!empty($filters['search'])) {
-            $builder->like('id', $filters['search']);
+            $builder->like('tickets.id', $filters['search']);
         }
 
         if (!empty($filters['status'])) {
-            $builder->where('status', $filters['status']);
+            $builder->where('tickets.status', $filters['status']);
         }
 
         if (!empty($filters['date_from'])) {
-            $builder->where('submitted_at >=', $filters['date_from']);
+            $builder->where('tickets.submitted_at >=', $filters['date_from']);
         }
 
         if (!empty($filters['date_to'])) {
-            $builder->where('submitted_at <=', $filters['date_to'] . ' 23:59:59');
+            $builder->where('tickets.submitted_at <=', $filters['date_to'] . ' 23:59:59');
         }
 
         return $builder->findAll();

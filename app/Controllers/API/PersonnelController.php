@@ -11,7 +11,7 @@ use CodeIgniter\HTTP\ResponseInterface;
 /**
  * PersonnelController
  *
- * Manages unit field staff (workers, technicians, etc.).
+ * Manages unit field staff (workers, personnel, etc.).
  *
  * Endpoints:
  *  GET   /api/v1/personnel/:unitCode              - Full roster for a unit (admin/dispatcher view)

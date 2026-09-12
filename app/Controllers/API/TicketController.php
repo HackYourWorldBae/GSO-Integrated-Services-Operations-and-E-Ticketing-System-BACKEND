@@ -1775,7 +1775,7 @@ class TicketController extends BaseController
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
 
         $rows = $db->query("
-            SELECT ta.*, p.name AS personnel_name, p.contact_number AS personnel_contact
+            SELECT ta.*, p.name AS personnel_name, p.specialty AS specialty, p.specialty AS profession, p.contact_number AS personnel_contact
             FROM ticket_assignments ta
             LEFT JOIN personnel p ON p.id = ta.personnel_id
             WHERE ta.ticket_id IN ({$placeholders})
@@ -1788,17 +1788,28 @@ class TicketController extends BaseController
             $tId = $row['ticket_id'];
             $listMap[$tId][] = $row;
             $pName = trim((string)($row['personnel_name'] ?? ''));
+            $pSpec = trim((string)($row['specialty'] ?? ''));
 
             if (isset($map[$tId])) {
                 if ($pName !== '') {
-                    $existingNames = array_map('trim', explode(',', $map[$tId]['personnel_name']));
+                    $existingNames = array_map('trim', explode(',', (string)$map[$tId]['personnel_name']));
                     if (!in_array($pName, $existingNames, true)) {
                         $map[$tId]['personnel_name'] .= ', ' . $pName;
+                    }
+                }
+                if ($pSpec !== '') {
+                    $existingSpecs = array_map('trim', explode(',', (string)($map[$tId]['specialty'] ?? '')));
+                    if (!in_array($pSpec, $existingSpecs, true)) {
+                        $currentSpec = trim((string)($map[$tId]['specialty'] ?? ''));
+                        $map[$tId]['specialty'] = $currentSpec !== '' ? $currentSpec . ', ' . $pSpec : $pSpec;
+                        $map[$tId]['profession'] = $map[$tId]['specialty'];
                     }
                 }
             } else {
                 $map[$tId] = $row;
                 $map[$tId]['personnel_name'] = $pName;
+                $map[$tId]['specialty'] = $pSpec;
+                $map[$tId]['profession'] = $pSpec;
             }
         }
 

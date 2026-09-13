@@ -323,18 +323,34 @@ class AuthController extends BaseController
         }
 
         $user = $this->userModel->find($userId);
-        if (!$user || $user['status'] !== 'Active') {
-            return $this->errorResponse('Account is not active or no longer exists.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        if (!$user) {
+            return $this->errorResponse('Account no longer exists.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        if ($user['status'] === 'Suspended') {
+            return $this->errorResponse('Account Suspended: Your account has been suspended by the administrator.', ['is_suspended' => true], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        if ($user['status'] === 'Rejected') {
+            return $this->errorResponse('Account Rejected: Your registration was rejected by the administrator.', ['is_rejected' => true], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
         $role = $user['role'] ?? ($this->request->jwtPayload['role'] ?? '');
         $rolePermissionModel = new \App\Models\RolePermissionModel();
         $permissions = !empty($role) ? $rolePermissionModel->getPermissionsForRole($role) : [];
 
+        // Deactivated or unverified pending accounts cannot create tickets
+        $isVerified = (int)($user['is_verified'] ?? 0) === 1;
+        if ($user['status'] === 'Deactivated' || !$isVerified) {
+            $permissions = array_values(array_diff($permissions, ['tickets.create']));
+        }
+
         return $this->successResponse('Session is active and valid.', [
             'valid'       => true,
             'user_id'     => $userId,
             'role'        => $role,
+            'status'      => $user['status'],
+            'is_verified' => (int) ($user['is_verified'] ?? 0),
             'permissions' => $permissions,
         ]);
     }

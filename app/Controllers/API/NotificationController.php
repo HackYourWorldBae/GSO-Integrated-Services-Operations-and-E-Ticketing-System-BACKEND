@@ -38,6 +38,7 @@ class NotificationController extends BaseController
         $notifications = $this->notificationModel
             ->where('user_id', $userId)
             ->orderBy('id', 'DESC')
+            ->limit(50)
             ->findAll();
 
         $ticketModel = new \App\Models\TicketModel();

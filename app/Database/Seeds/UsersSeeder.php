@@ -14,6 +14,7 @@ class UsersSeeder extends Seeder
 {
     public function run(): void
     {
+        helper('sanitize');
         $passwordHash = password_hash('access', PASSWORD_DEFAULT);
 
         // Map units to IDs based on UnitsSeeder
@@ -38,7 +39,7 @@ class UsersSeeder extends Seeder
         $data = [];
         foreach ($users as $index => $u) {
             $data[] = [
-                'id' => sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)),
+                'id' => generate_uuid(),
                 'first_name' => $u['first_name'],
                 'last_name' => $u['last_name'],
                 'email' => $u['email'],

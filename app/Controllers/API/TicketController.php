@@ -153,12 +153,7 @@ class TicketController extends BaseController
             return $forbidden;
         }
 
-        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
-
-        if (!$unitId) {
-            return $this->errorResponse("Unknown unit code: {$unitCode}.");
-        }
-
+        $unitId = $this->resolveUnitId($unitCode);
         $tickets = $this->ticketModel->getPendingQueue($unitId);
         $tickets = $this->enrichTickets($tickets);
 
@@ -174,12 +169,7 @@ class TicketController extends BaseController
             return $forbidden;
         }
 
-        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
-
-        if (!$unitId) {
-            return $this->errorResponse("Unknown unit code: {$unitCode}.");
-        }
-
+        $unitId = $this->resolveUnitId($unitCode);
         $tickets = $this->ticketModel->getDispatchQueue($unitId);
         $tickets = $this->enrichTickets($tickets);
 
@@ -195,12 +185,7 @@ class TicketController extends BaseController
             return $forbidden;
         }
 
-        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
-
-        if (!$unitId) {
-            return $this->errorResponse("Unknown unit code: {$unitCode}.");
-        }
-
+        $unitId = $this->resolveUnitId($unitCode);
         $tickets = $this->ticketModel->getActiveTickets($unitId);
         $tickets = $this->enrichTickets($tickets);
 
@@ -268,12 +253,7 @@ class TicketController extends BaseController
             return $forbidden;
         }
 
-        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
-
-        if (!$unitId) {
-            return $this->errorResponse("Unknown unit code: {$unitCode}.");
-        }
-
+        $unitId = $this->resolveUnitId($unitCode);
         $filters = [
             'search'    => sanitize_string($this->request->getGet('search') ?? ''),
             'status'    => sanitize_string($this->request->getGet('status') ?? ''),
@@ -396,25 +376,6 @@ class TicketController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
         $isEmergency = isset($body['is_emergency']) ? (!empty($body['is_emergency']) ? 1 : 0) : null;
-
-        // Auto-heal/ensure is_emergency column exists in tickets table
-        try {
-            $db = \Config\Database::connect();
-            if (!$db->fieldExists('is_emergency', 'tickets')) {
-                $forge = \Config\Database::forge();
-                $forge->addColumn('tickets', [
-                    'is_emergency' => [
-                        'type'       => 'TINYINT',
-                        'constraint' => 1,
-                        'default'    => 0,
-                        'null'       => false,
-                        'after'      => 'status_label',
-                    ],
-                ]);
-            }
-        } catch (\Throwable $e) {
-            log_message('warning', 'Schema check for tickets.is_emergency: ' . $e->getMessage());
-        }
 
         $updateData = [
             'status'       => $newStatus,
@@ -710,12 +671,7 @@ class TicketController extends BaseController
             return $forbidden;
         }
 
-        $unitId = self::UNIT_MAP[strtoupper($unitCode)] ?? null;
-
-        if (!$unitId) {
-            return $this->errorResponse("Unknown unit code: {$unitCode}.");
-        }
-
+        $unitId = $this->resolveUnitId($unitCode);
         $tickets = $this->ticketModel->getUnderInvestigationQueue($unitId);
         $tickets = $this->enrichTickets($tickets);
 

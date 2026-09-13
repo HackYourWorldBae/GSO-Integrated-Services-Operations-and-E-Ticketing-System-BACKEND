@@ -93,6 +93,18 @@ class CreateUsersTable extends Migration
                 'default'    => 1,
                 'null'       => false,
             ],
+            'failed_login_attempts' => [
+                'type'       => 'INT',
+                'constraint' => 10,
+                'unsigned'   => true,
+                'default'    => 0,
+                'null'       => false,
+            ],
+            'lockout_until' => [
+                'type'    => 'DATETIME',
+                'null'    => true,
+                'default' => null,
+            ],
             'created_at' => [
                 'type'    => 'TIMESTAMP',
                 'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),

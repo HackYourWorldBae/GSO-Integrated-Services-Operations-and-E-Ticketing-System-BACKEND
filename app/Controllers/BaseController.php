@@ -60,13 +60,21 @@ abstract class BaseController extends Controller
     /**
      * Return a JSON error response.
      */
-    protected function errorResponse(string $message, array $errors = [], int $httpCode = ResponseInterface::HTTP_BAD_REQUEST): ResponseInterface
+    protected function errorResponse(string $message, array $errors = [], int $httpCode = ResponseInterface::HTTP_BAD_REQUEST, array $data = []): ResponseInterface
     {
-        return $this->response->setStatusCode($httpCode)->setJSON([
+        $payload = [
             'status'  => false,
             'message' => $message,
             'errors'  => $errors,
-        ]);
+        ];
+
+        if (!empty($data)) {
+            $payload['data'] = $data;
+        } elseif (!empty($errors) && !isset($errors[0])) {
+            $payload['data'] = $errors;
+        }
+
+        return $this->response->setStatusCode($httpCode)->setJSON($payload);
     }
 
     /**

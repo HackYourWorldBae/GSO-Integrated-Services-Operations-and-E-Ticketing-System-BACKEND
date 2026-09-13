@@ -36,6 +36,8 @@ class UserModel extends Model
         'avatar_path',
         'status',
         'is_verified',
+        'failed_login_attempts',
+        'lockout_until',
     ];
 
     // -------------------------------------------------------------------------
@@ -130,7 +132,7 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                         ->join('units', 'units.id = users.unit_id', 'left');
 
         if (!empty($search)) {
@@ -161,12 +163,103 @@ class UserModel extends Model
         $users = $builder->orderBy('users.created_at', 'DESC')
                          ->findAll($limit, $offset);
 
+        $now = time();
         foreach ($users as &$u) {
             $u['is_verified'] = (int) ($u['is_verified'] ?? 0);
+            $u['failed_login_attempts'] = (int) ($u['failed_login_attempts'] ?? 0);
+            $lockoutTimestamp = !empty($u['lockout_until']) ? strtotime($u['lockout_until']) : 0;
+            $u['is_locked'] = ($lockoutTimestamp > $now);
+            $u['lockout_remaining_seconds'] = $u['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
         }
         unset($u);
 
         return $users;
+    }
+
+    /**
+     * Check if a user is currently locked out from logging in.
+     */
+    public function isLockedOut(array $user): bool
+    {
+        if (empty($user['lockout_until'])) {
+            return false;
+        }
+
+        $lockoutTime = strtotime($user['lockout_until']);
+        return (time() < $lockoutTime);
+    }
+
+    /**
+     * Get remaining lockout duration in seconds. Returns 0 if not locked out.
+     */
+    public function getRemainingLockoutSeconds(array $user): int
+    {
+        if (empty($user['lockout_until'])) {
+            return 0;
+        }
+
+        $lockoutTime = strtotime($user['lockout_until']);
+        $remaining = $lockoutTime - time();
+        return max(0, $remaining);
+    }
+
+    /**
+     * Record a failed login attempt for a user.
+     * When attempts reach $maxAttempts (default 5), locks the account for $lockoutMinutes (default 15).
+     *
+     * @return array{ attempts: int, is_locked: bool, lockout_until: string|null, remaining_seconds: int, remaining_attempts: int }
+     */
+    public function recordFailedAttempt(string $userId, int $currentAttempts, int $maxAttempts = 5, int $lockoutMinutes = 15): array
+    {
+        $newAttempts = $currentAttempts + 1;
+
+        if ($newAttempts >= $maxAttempts) {
+            $lockoutUntil = date('Y-m-d H:i:s', strtotime("+{$lockoutMinutes} minutes"));
+            $this->update($userId, [
+                'failed_login_attempts' => $newAttempts,
+                'lockout_until'         => $lockoutUntil,
+            ]);
+
+            return [
+                'attempts'           => $newAttempts,
+                'is_locked'          => true,
+                'lockout_until'      => $lockoutUntil,
+                'remaining_seconds'  => $lockoutMinutes * 60,
+                'remaining_attempts' => 0,
+            ];
+        }
+
+        $this->update($userId, [
+            'failed_login_attempts' => $newAttempts,
+            'lockout_until'         => null,
+        ]);
+
+        return [
+            'attempts'           => $newAttempts,
+            'is_locked'          => false,
+            'lockout_until'      => null,
+            'remaining_seconds'  => 0,
+            'remaining_attempts' => max(0, $maxAttempts - $newAttempts),
+        ];
+    }
+
+    /**
+     * Reset lockout and failed login attempts for a user.
+     */
+    public function resetLockout(string $userId): bool
+    {
+        return $this->update($userId, [
+            'failed_login_attempts' => 0,
+            'lockout_until'         => null,
+        ]);
+    }
+
+    /**
+     * Superadmin manual unlock for an account.
+     */
+    public function unlockUser(string $userId): bool
+    {
+        return $this->resetLockout($userId);
     }
 
     /**

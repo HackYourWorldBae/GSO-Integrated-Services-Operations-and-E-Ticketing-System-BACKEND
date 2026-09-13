@@ -111,7 +111,7 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                                 ->join('units', 'units.id = users.unit_id', 'left')
                                 ->where('users.id', $id)
                                 ->first();
@@ -120,7 +120,12 @@ class SuperadminController extends BaseController
             return $this->notFoundResponse('User account not found.');
         }
 
+        $now = time();
         $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
+        $user['failed_login_attempts'] = (int) ($user['failed_login_attempts'] ?? 0);
+        $lockoutTimestamp = !empty($user['lockout_until']) ? strtotime($user['lockout_until']) : 0;
+        $user['is_locked'] = ($lockoutTimestamp > $now);
+        $user['lockout_remaining_seconds'] = $user['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
 
         return $this->successResponse('User details retrieved successfully.', $user);
     }
@@ -533,5 +538,21 @@ class SuperadminController extends BaseController
         $rolePermissionModel->saveMatrix($matrix);
 
         return $this->successResponse('RBAC capability matrix updated successfully.', $rolePermissionModel->getFullMatrix());
+    }
+
+    /**
+     * Manually unlock a user account locked out due to failed login attempts.
+     */
+    public function unlockUser(string $id): ResponseInterface
+    {
+        $existing = $this->userModel->find($id);
+        if (!$existing) {
+            return $this->notFoundResponse('User account not found.');
+        }
+
+        $this->userModel->unlockUser($id);
+
+        $safeUser = $this->userModel->getSafeUser($id);
+        return $this->successResponse("User account for {$existing['first_name']} {$existing['last_name']} has been unlocked.", $safeUser);
     }
 }

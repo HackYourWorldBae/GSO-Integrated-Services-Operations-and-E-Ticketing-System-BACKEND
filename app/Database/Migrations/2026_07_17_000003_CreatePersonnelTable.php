@@ -44,11 +44,6 @@ class CreatePersonnelTable extends Migration
                 'constraint' => 100,
                 'null'       => false,
             ],
-            'contact_number' => [
-                'type'       => 'VARCHAR',
-                'constraint' => 20,
-                'null'       => true,
-            ],
             'status' => [
                 'type'       => 'ENUM',
                 'constraint' => ['available', 'working', 'on_leave', 'on_trip'],

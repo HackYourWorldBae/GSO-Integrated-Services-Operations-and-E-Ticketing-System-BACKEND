@@ -1731,7 +1731,7 @@ class TicketController extends BaseController
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
 
         $rows = $db->query("
-            SELECT ta.*, p.name AS personnel_name, p.specialty AS specialty, p.specialty AS profession, p.contact_number AS personnel_contact
+            SELECT ta.*, p.name AS personnel_name, p.specialty AS specialty, p.specialty AS profession, NULL AS personnel_contact
             FROM ticket_assignments ta
             LEFT JOIN personnel p ON p.id = ta.personnel_id
             WHERE ta.ticket_id IN ({$placeholders})

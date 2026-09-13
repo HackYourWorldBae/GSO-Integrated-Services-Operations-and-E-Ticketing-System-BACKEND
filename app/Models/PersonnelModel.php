@@ -24,13 +24,10 @@ class PersonnelModel extends Model
         'unit_id',
         'name',
         'specialty',
-        'contact_number',
         'status',
     ];
 
-    protected $validationRules = [
-        'contact_number' => 'permit_empty|regex_match[/^[0-9]{11}$/]',
-    ];
+    protected $validationRules = [];
 
     /**
      * Get all personnel for a given unit, with their current active assignment.

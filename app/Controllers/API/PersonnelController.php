@@ -295,7 +295,6 @@ class PersonnelController extends BaseController
         $name      = sanitize_string($body['name'] ?? '');
         $specialty = sanitize_string($body['specialty'] ?? '');
         $unitId    = (int) ($body['unit_id'] ?? 0);
-        $contact   = sanitize_string($body['contact_number'] ?? '');
 
         // If 'name' is not provided directly, compose it from name components
         if (empty($name) && !empty($body['first_name']) && !empty($body['last_name'])) {
@@ -318,10 +317,6 @@ class PersonnelController extends BaseController
             return $forbidden;
         }
 
-        if (!empty($contact) && !preg_match('/^[0-9]{11}$/', $contact)) {
-            return $this->errorResponse('contact_number must be exactly 11 digits.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
         $personnelId = generate_uuid();
 
         $this->personnelModel->insert([
@@ -329,7 +324,6 @@ class PersonnelController extends BaseController
             'unit_id'        => $unitId,
             'name'           => $name,
             'specialty'      => $specialty,
-            'contact_number' => $contact !== '' ? $contact : null,
             'status'         => 'available',
         ]);
 
@@ -360,13 +354,6 @@ class PersonnelController extends BaseController
         }
         if (isset($body['specialty'])) {
             $updateData['specialty'] = sanitize_string($body['specialty']);
-        }
-        if (isset($body['contact_number'])) {
-            $contact = sanitize_string($body['contact_number']);
-            if ($contact !== '' && !preg_match('/^[0-9]{11}$/', $contact)) {
-                return $this->errorResponse('contact_number must be exactly 11 digits.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-            }
-            $updateData['contact_number'] = $contact !== '' ? $contact : null;
         }
 
         if (!empty($updateData)) {

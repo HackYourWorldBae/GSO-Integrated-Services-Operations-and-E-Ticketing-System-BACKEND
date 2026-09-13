@@ -218,6 +218,28 @@ class AuthController extends BaseController
             );
         }
 
+        // --- Account Lockout Check (5 failed attempts -> 15 min lock) ---
+        if (!empty($user['lockout_until'])) {
+            $lockoutTime = strtotime($user['lockout_until']);
+            $currentTime = time();
+
+            if ($currentTime < $lockoutTime) {
+                $remainingSeconds = $lockoutTime - $currentTime;
+                $remainingMinutes = (int) ceil($remainingSeconds / 60);
+
+                return $this->errorResponse(
+                    "Account temporarily locked due to 5 consecutive failed login attempts. Please try again in {$remainingMinutes} minute(s).",
+                    [
+                        'is_locked'          => true,
+                        'lockout_until'      => $user['lockout_until'],
+                        'remaining_seconds'  => $remainingSeconds,
+                        'remaining_minutes'  => $remainingMinutes,
+                    ],
+                    ResponseInterface::HTTP_TOO_MANY_REQUESTS
+                );
+            }
+        }
+
         // --- Account Status Checks ---
         if ($user['status'] === 'Rejected') {
             return $this->errorResponse(
@@ -235,13 +257,45 @@ class AuthController extends BaseController
             );
         }
 
-        // --- Password Verification ---
+        // --- Password Verification & Lockout Tracking ---
         if (!password_verify($password, $user['password_hash'])) {
+            // If previous lockout window expired, reset attempts baseline to 0 so this starts a fresh cycle
+            $hasExpiredLockout = (!empty($user['lockout_until']) && time() >= strtotime($user['lockout_until']));
+            $currentAttempts   = $hasExpiredLockout ? 0 : (int) ($user['failed_login_attempts'] ?? 0);
+
+            $lockoutResult = $this->userModel->recordFailedAttempt($user['id'], $currentAttempts, 5, 15);
+
+            if ($lockoutResult['is_locked']) {
+                return $this->errorResponse(
+                    'Account temporarily locked for 15 minutes due to 5 consecutive failed login attempts.',
+                    [
+                        'is_locked'          => true,
+                        'lockout_until'      => $lockoutResult['lockout_until'],
+                        'remaining_seconds'  => $lockoutResult['remaining_seconds'],
+                        'remaining_minutes'  => 15,
+                        'remaining_attempts' => 0,
+                    ],
+                    ResponseInterface::HTTP_TOO_MANY_REQUESTS
+                );
+            }
+
+            $remainingAttempts = $lockoutResult['remaining_attempts'];
+            $attemptPlural     = $remainingAttempts === 1 ? 'attempt' : 'attempts';
+
             return $this->errorResponse(
-                'Invalid credentials. Please check your Email / ID Number and password.',
-                [],
+                "Invalid credentials. You have {$remainingAttempts} {$attemptPlural} remaining before your account is locked for 15 minutes.",
+                [
+                    'is_locked'          => false,
+                    'failed_attempts'    => $lockoutResult['attempts'],
+                    'remaining_attempts' => $remainingAttempts,
+                ],
                 ResponseInterface::HTTP_UNAUTHORIZED
             );
+        }
+
+        // --- Password is Correct: Clear Lockout & Failed Attempts ---
+        if (!empty($user['failed_login_attempts']) || !empty($user['lockout_until'])) {
+            $this->userModel->resetLockout($user['id']);
         }
 
         // --- Generate Unique Session ID & Enforce "One Session Per User" ---

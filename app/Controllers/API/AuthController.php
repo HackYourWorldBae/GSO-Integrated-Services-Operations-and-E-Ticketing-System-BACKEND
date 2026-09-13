@@ -189,6 +189,23 @@ class AuthController extends BaseController
         $identifier = trim((string) ($body['identifier'] ?? ''));
         $password   = (string) ($body['password'] ?? '');
 
+        // ---------------------------------------------------------------------
+        // TEMPORARY: Administrative mock account shortcut for ICT mentor testing.
+        // Automatically appends '@email.com' if only the username is entered.
+        // Mock targets: director, superadmin, fgmu-admin, leau-admin, ssu-admin
+        // TODO: Remove/disable once real institutional administrative credentials are deployed.
+        // ---------------------------------------------------------------------
+        $adminMockUsernames = [
+            'director',
+            'superadmin',
+            'fgmu-admin',
+            'leau-admin',
+            'ssu-admin',
+        ];
+        if (in_array(strtolower($identifier), $adminMockUsernames, true)) {
+            $identifier = strtolower($identifier) . '@email.com';
+        }
+
         // --- Fetch User by Email, Student ID, or Contact Number ---
         $user = $this->userModel->findUserByIdentifier($identifier);
 

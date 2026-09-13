@@ -357,7 +357,9 @@ class DirectorController extends BaseController
                 'unit_price'       => $price,
                 'total_price'      => $tot,
                 'ticket_id'        => $mRow['ticket_id'],
-                'ticket_title'     => $mRow['ticket_title'] ?: ($mRow['service_type'] ?: 'General Maintenance'),
+                'ticket_title'     => $mRow['service_type'] ?: ($mRow['ticket_title'] ?: 'General Maintenance'),
+                'service_type'     => $mRow['service_type'] ?: ($mRow['ticket_title'] ?: 'General Maintenance'),
+                'job_particulars'  => $mRow['ticket_title'] ?: '',
                 'unit_code'        => $uCode,
                 'created_at'       => $mRow['created_at'],
             ];

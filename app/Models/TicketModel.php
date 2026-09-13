@@ -111,6 +111,7 @@ class TicketModel extends Model
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.status', 'pending')
+                    ->where('(tickets.is_under_investigation = 0 OR tickets.is_under_investigation IS NULL)')
                     ->where('tickets.is_archived', 0)
                     ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
@@ -121,11 +122,13 @@ class TicketModel extends Model
      */
     public function getUnderInvestigationQueue(int $unitId): array
     {
-        return $this->where('unit_id', $unitId)
-                    ->where('service_type', 'Incident Report')
-                    ->where('is_under_investigation', 1)
-                    ->where('is_archived', 0)
-                    ->orderBy('submitted_at', 'ASC')
+        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+                    ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->where('tickets.unit_id', $unitId)
+                    ->where('tickets.service_type', 'Incident Report')
+                    ->where('tickets.is_under_investigation', 1)
+                    ->where('tickets.is_archived', 0)
+                    ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
 

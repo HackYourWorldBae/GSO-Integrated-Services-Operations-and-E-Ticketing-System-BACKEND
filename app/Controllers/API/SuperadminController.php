@@ -164,20 +164,67 @@ class SuperadminController extends BaseController
             ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $firstName = trim((string) ($body['first_name'] ?? ''));
+        $lastName  = trim((string) ($body['last_name'] ?? ''));
+        if (!preg_match('/^[\p{L}\s\-\'.]{2,50}$/u', $firstName) || !preg_match('/[\p{L}]/u', $firstName)) {
+            return $this->errorResponse('First name can only contain letters, spaces, hyphens, and apostrophes (2-50 characters).', [
+                'first_name' => ['First name can only contain letters, spaces, hyphens, and apostrophes.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if (!preg_match('/^[\p{L}\s\-\'.]{2,50}$/u', $lastName) || !preg_match('/[\p{L}]/u', $lastName)) {
+            return $this->errorResponse('Last name can only contain letters, spaces, hyphens, and apostrophes (2-50 characters).', [
+                'last_name' => ['Last name can only contain letters, spaces, hyphens, and apostrophes.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Contact number normalization and format validation
+        $contactNumber = null;
+        if (!empty($body['contact_number'])) {
+            $cleanContact = preg_replace('/[^\d+]/', '', (string) $body['contact_number']);
+            if (str_starts_with($cleanContact, '+63')) {
+                $cleanContact = '0' . substr($cleanContact, 3);
+            } elseif (str_starts_with($cleanContact, '63') && strlen($cleanContact) === 12) {
+                $cleanContact = '0' . substr($cleanContact, 2);
+            }
+            if (!preg_match('/^09\d{9}$/', $cleanContact)) {
+                return $this->errorResponse('Contact number must be an 11-digit Philippine mobile number starting with 09 (e.g. 09171234567).', [
+                    'contact_number' => ['Contact number must be an 11-digit Philippine mobile number starting with 09 (e.g. 09171234567).']
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $contactNumber = $cleanContact;
+        }
+
+        // Student / Employee ID validation
+        $studentIdNumber = null;
+        if (!empty($body['student_id_number'])) {
+            $cleanId = trim((string) $body['student_id_number']);
+            if ($body['role'] === 'student' && !preg_match('/^\d{7}$/', $cleanId)) {
+                return $this->errorResponse('Student ID Number must be exactly 7 numeric digits (e.g. 2301219).', [
+                    'student_id_number' => ['Student ID Number must be exactly 7 numeric digits (e.g. 2301219).']
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            if ($body['role'] === 'employee' && !preg_match('/^[A-Za-z0-9\-]{4,15}$/', $cleanId)) {
+                return $this->errorResponse('Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).', [
+                    'student_id_number' => ['Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).']
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $studentIdNumber = $cleanId;
+        }
+
         $userId = generate_uuid();
 
         $unitId = !empty($body['unit_id']) ? (int) $body['unit_id'] : null;
 
         $insertData = [
             'id'                => $userId,
-            'first_name'        => trim($body['first_name']),
-            'last_name'         => trim($body['last_name']),
+            'first_name'        => $firstName,
+            'last_name'         => $lastName,
             'email'             => strtolower(trim($body['email'])),
             'password_hash'     => password_hash($body['password'], PASSWORD_DEFAULT),
             'role'              => $body['role'],
             'unit_id'           => $unitId,
-            'contact_number'    => !empty($body['contact_number']) ? trim($body['contact_number']) : null,
-            'student_id_number' => !empty($body['student_id_number']) ? trim($body['student_id_number']) : null,
+            'contact_number'    => $contactNumber,
+            'student_id_number' => $studentIdNumber,
             'status'            => $body['status'] ?? 'Active',
             'is_verified'       => 1,
         ];

@@ -54,27 +54,83 @@ class AuthController extends BaseController
         $contactNumber   = trim((string) ($this->request->getPost('contact_number') ?? ''));
         $email           = trim((string) ($this->request->getPost('email') ?? ''));
         $password        = (string) ($this->request->getPost('password') ?? '');
+        $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
 
         $errors = [];
-        if (empty($firstName)) $errors['first_name'] = ['First name is required.'];
-        if (empty($lastName))  $errors['last_name']  = ['Last name is required.'];
+
+        // 1. First Name Validation
+        if (empty($firstName)) {
+            $errors['first_name'] = ['First name is required.'];
+        } elseif (mb_strlen($firstName) < 2 || mb_strlen($firstName) > 50) {
+            $errors['first_name'] = ['First name must be between 2 and 50 characters long.'];
+        } elseif (!preg_match('/^[\p{L}\s\-\'.]{2,50}$/u', $firstName) || !preg_match('/[\p{L}]/u', $firstName)) {
+            $errors['first_name'] = ['First name can only contain letters, spaces, hyphens, and apostrophes.'];
+        }
+
+        // 2. Last Name Validation
+        if (empty($lastName)) {
+            $errors['last_name'] = ['Last name is required.'];
+        } elseif (mb_strlen($lastName) < 2 || mb_strlen($lastName) > 50) {
+            $errors['last_name'] = ['Last name must be between 2 and 50 characters long.'];
+        } elseif (!preg_match('/^[\p{L}\s\-\'.]{2,50}$/u', $lastName) || !preg_match('/[\p{L}]/u', $lastName)) {
+            $errors['last_name'] = ['Last name can only contain letters, spaces, hyphens, and apostrophes.'];
+        }
+
+        // 3. Role Validation
         if (!in_array($role, ['student', 'employee'], true)) {
             $errors['role'] = ['Role must be either Student or Employee.'];
         }
+
+        // 4. Institutional ID Number (Strict 7 digits for students)
         if (empty($studentIdNumber)) {
-            $errors['student_id_number'] = ['Employee / Student ID Number is required.'];
+            $errors['student_id_number'] = [$role === 'student' ? 'Student ID Number is required.' : 'Employee ID Number is required.'];
+        } elseif ($role === 'student') {
+            if (!preg_match('/^\d{7}$/', $studentIdNumber)) {
+                $errors['student_id_number'] = ['Student ID Number must be exactly 7 numeric digits (e.g. 2301219).'];
+            }
+        } elseif ($role === 'employee') {
+            if (!preg_match('/^[A-Za-z0-9\-]{4,15}$/', $studentIdNumber)) {
+                $errors['student_id_number'] = ['Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).'];
+            }
         }
-        if (empty($contactNumber)) {
+
+        // 5. Contact Number (Normalize and enforce strict 11 digits starting with 09)
+        $cleanContact = preg_replace('/[^\d+]/', '', $contactNumber);
+        if (str_starts_with($cleanContact, '+63')) {
+            $cleanContact = '0' . substr($cleanContact, 3);
+        } elseif (str_starts_with($cleanContact, '63') && strlen($cleanContact) === 12) {
+            $cleanContact = '0' . substr($cleanContact, 2);
+        }
+
+        if (empty($cleanContact)) {
             $errors['contact_number'] = ['Contact number is required.'];
+        } elseif (!preg_match('/^09\d{9}$/', $cleanContact)) {
+            $errors['contact_number'] = ['Contact number must be an 11-digit Philippine mobile number starting with 09 (e.g. 09171234567).'];
+        } else {
+            $contactNumber = $cleanContact;
         }
-        if (strlen($password) < 8) {
+
+        // 6. Password Validation (Elder-friendly: min 8 chars, letters and numbers, no special symbols required)
+        if (empty($password)) {
+            $errors['password'] = ['Password is required.'];
+        } elseif (strlen($password) < 8) {
             $errors['password'] = ['Password must be at least 8 characters long.'];
+        } elseif (strlen($password) > 64) {
+            $errors['password'] = ['Password must not exceed 64 characters.'];
+        } elseif (!preg_match('/[a-zA-Z]/', $password)) {
+            $errors['password'] = ['Password must contain at least one letter.'];
+        } elseif (!preg_match('/[0-9]/', $password)) {
+            $errors['password'] = ['Password must contain at least one number.'];
+        }
+
+        if (!empty($passwordConfirm) && $password !== $passwordConfirm) {
+            $errors['password_confirm'] = ['Passwords do not match.'];
         }
 
         // Email validation (optional)
         $emailToSave = null;
         if (!empty($email)) {
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            if (strlen($email) > 100 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $errors['email'] = ['Please enter a valid email address.'];
             } else {
                 $existingEmail = $this->userModel->where('email', strtolower($email))->first();
@@ -87,10 +143,18 @@ class AuthController extends BaseController
         }
 
         // Check if student_id_number is already used
-        if (!empty($studentIdNumber)) {
+        if (!empty($studentIdNumber) && empty($errors['student_id_number'])) {
             $existingId = $this->userModel->where('student_id_number', $studentIdNumber)->first();
             if ($existingId) {
                 $errors['student_id_number'] = ['This Employee / Student ID Number is already registered.'];
+            }
+        }
+
+        // Check if contact_number is already used
+        if (!empty($contactNumber) && empty($errors['contact_number'])) {
+            $existingContact = $this->userModel->where('contact_number', $contactNumber)->first();
+            if ($existingContact) {
+                $errors['contact_number'] = ['This contact number is already registered.'];
             }
         }
 

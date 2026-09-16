@@ -271,7 +271,7 @@ class DirectorController extends BaseController
             ORDER BY t.unit_id, MONTH(t.submitted_at)
         ", [$trendYear])->getResultArray();
 
-        // 7. Materials Consumption & Resource Valuation
+        // 7. Materials Consumption & Cost Summary
         $matConds = [];
         $matParams = [];
 

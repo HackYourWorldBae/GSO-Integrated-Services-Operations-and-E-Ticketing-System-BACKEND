@@ -98,10 +98,10 @@ class DispatchController extends BaseController
                     ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
                 );
             }
-            if (empty($body['working_days']) || (int) $body['working_days'] < 1) {
+            if (empty($body['working_days']) || (int) $body['working_days'] < 1 || (int) $body['working_days'] > 31) {
                 return $this->errorResponse(
-                    'Target working days must be specified when dispatching workers to a scheduled project.',
-                    ['working_days' => ['Required for project dispatches.']],
+                    'Target working days must be between 1 and 31 days when dispatching workers to a scheduled project.',
+                    ['working_days' => ['Must be between 1 and 31 days.']],
                     ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
                 );
             }
@@ -127,7 +127,19 @@ class DispatchController extends BaseController
             'complex_21d' => 21,
             default       => 3,
         };
-        $workingDays = !empty($body['working_days']) ? (int) $body['working_days'] : $eodbDays;
+
+        // Strict limit: Working days must be between 1 and 31 days
+        if (isset($body['working_days'])) {
+            $parsedDays = (int) $body['working_days'];
+            if ($parsedDays < 1 || $parsedDays > 31) {
+                return $this->errorResponse(
+                    'Working days must be strictly between 1 and 31 days.',
+                    ['working_days' => ['Working days must be strictly between 1 and 31 days.']],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+        }
+        $workingDays = !empty($body['working_days']) ? min(31, max(1, (int) $body['working_days'])) : $eodbDays;
 
         $baseDate = new \DateTime($implementationDate);
         $targetCompletionDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDate, $workingDays)->format('Y-m-d H:i:s');

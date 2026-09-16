@@ -1565,9 +1565,13 @@ class TicketController extends BaseController
                 if (empty($ticket['requester_contact'])) $ticket['requester_contact'] = $u['requester_contact'];
                 if (empty($ticket['contact_number']))    $ticket['contact_number']    = $u['requester_contact'];
                 $ticket['requester'] = trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? ''));
+                $ticket['requestedBy'] = $ticket['requester'];
+                $ticket['requested_by'] = $ticket['requester'];
                 $ticket['user'] = $u;
             } else if (!empty($ticket['first_name']) || !empty($ticket['last_name'])) {
                 $ticket['requester'] = trim(($ticket['first_name'] ?? '') . ' ' . ($ticket['last_name'] ?? ''));
+                $ticket['requestedBy'] = $ticket['requester'];
+                $ticket['requested_by'] = $ticket['requester'];
                 if (empty($ticket['contact_number']) && !empty($ticket['requester_contact'])) {
                     $ticket['contact_number'] = $ticket['requester_contact'];
                 }
@@ -1591,6 +1595,11 @@ class TicketController extends BaseController
             $ticket['working_days']        = !empty($ticket['project_working_days']) 
                 ? (int) $ticket['project_working_days'] 
                 : (!empty($ticket['assignment']['working_days']) ? (int) $ticket['assignment']['working_days'] : null);
+            $ticket['implementation_date'] = $ticket['assignment']['implementation_date'] 
+                ?? (!empty($ticket['assignments'][0]['implementation_date']) ? $ticket['assignments'][0]['implementation_date'] : null)
+                ?? ($ticket['project_target_date'] ?? null);
+            $ticket['assigned_worker']     = $ticket['assignment']['personnel_name'] ?? null;
+            $ticket['assigned_profession'] = $ticket['assignment']['specialty'] ?? null;
 
             $ticket['extension_days']           = (int) ($ticket['extension_days'] ?? 0);
             $ticket['extended_completion_date'] = $ticket['extended_completion_date'] ?? null;
@@ -1766,6 +1775,12 @@ class TicketController extends BaseController
                         $map[$tId]['specialty'] = $currentSpec !== '' ? $currentSpec . ', ' . $pSpec : $pSpec;
                         $map[$tId]['profession'] = $map[$tId]['specialty'];
                     }
+                }
+                if (empty($map[$tId]['implementation_date']) && !empty($row['implementation_date'])) {
+                    $map[$tId]['implementation_date'] = $row['implementation_date'];
+                }
+                if (empty($map[$tId]['working_days']) && !empty($row['working_days'])) {
+                    $map[$tId]['working_days'] = $row['working_days'];
                 }
             } else {
                 $map[$tId] = $row;

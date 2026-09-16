@@ -861,14 +861,24 @@ class TicketController extends BaseController
         $db->transStart();
 
         // 1. Process Materials if provided (or if empty array sent to explicitly confirm liquidation)
-        $materialsLogged = !empty($ticket['materials_logged']) ? 1 : 0;
+        $isLaborOnly = !empty($body['is_labor_only']) || !empty($ticket['is_labor_only']);
+        $materialsLogged = (!empty($ticket['materials_logged']) || $isLaborOnly) ? 1 : 0;
         $activeAssignment = $db->query(
             "SELECT id FROM ticket_assignments WHERE ticket_id = ? ORDER BY assigned_at DESC LIMIT 1",
             [$ticketId]
         )->getRowArray();
         $assignmentId = $activeAssignment['id'] ?? null;
 
-        if (isset($body['materials']) && is_array($body['materials'])) {
+        if ($isLaborOnly) {
+            // Labor only service: clean up materials if empty sent
+            if (isset($body['materials']) && empty($body['materials'])) {
+                $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+                if ($assignmentId) {
+                    $db->query("DELETE FROM ticket_materials WHERE assignment_id = ?", [$assignmentId]);
+                }
+            }
+            $materialsLogged = 1;
+        } elseif (isset($body['materials']) && is_array($body['materials'])) {
             $materialModel = new \App\Models\TicketMaterialModel();
             
             // Delete existing materials for this ticket to avoid duplicate submission on update
@@ -896,6 +906,7 @@ class TicketController extends BaseController
                     'unit_measurement' => $unit,
                     'unit_price'       => $price,
                     'total_price'      => $total,
+                    'stage'            => 'finalized',
                     'created_at'       => date('Y-m-d H:i:s'),
                 ]);
             }
@@ -910,11 +921,11 @@ class TicketController extends BaseController
         // Determine status and archival state
         $isArchived = 0;
         // FGMU / LEAU
-        if ($hasFeedback && $materialsLogged) {
+        if ($hasFeedback && ($materialsLogged || $isLaborOnly)) {
             $isArchived  = 1;
             $newStatus   = 'closed';
             $statusLabel = 'Closed';
-        } elseif ($materialsLogged) {
+        } elseif ($materialsLogged || $isLaborOnly) {
             $isArchived  = 0;
             $newStatus   = 'resolved';
             $statusLabel = 'Awaiting User Rating';
@@ -929,6 +940,8 @@ class TicketController extends BaseController
             'status_label'     => $statusLabel,
             'current_step'     => 6,
             'materials_logged' => $materialsLogged,
+            'is_labor_only'    => $isLaborOnly ? 1 : 0,
+            'materials_stage'  => 'finalized',
             'is_archived'      => $isArchived,
             'completed_at'     => $ticket['completed_at'] ?? date('Y-m-d H:i:s'),
             'updated_at'       => date('Y-m-d H:i:s'),
@@ -943,22 +956,20 @@ class TicketController extends BaseController
         )->getResultArray();
 
         $personnelModel = new \App\Models\PersonnelModel();
-
-        foreach ($assignments as $a) {
-            if (!empty($a['personnel_id'])) {
-                $curWorker = $personnelModel->find($a['personnel_id']);
-                // Only set back to 'available' if the worker is not currently 'on_leave'
-                if ($curWorker && $curWorker['status'] !== 'on_leave') {
-                    $personnelModel->update($a['personnel_id'], [
-                        'status'     => 'available',
-                        'updated_at' => date('Y-m-d H:i:s'),
-                    ]);
-                }
+        foreach ($assignments as $ass) {
+            if (!empty($ass['personnel_id'])) {
+                $personnelModel->update($ass['personnel_id'], [
+                    'status'     => 'available',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
             }
         }
 
-        $assignmentUpdate = ['completed_at' => date('Y-m-d H:i:s')];
-        if (!empty($body['dispatcher_notes'])) {
+        $assignmentUpdate = [
+            'completed_at' => date('Y-m-d H:i:s'),
+            'status'       => 'completed',
+        ];
+        if (isset($body['dispatcher_notes'])) {
             $assignmentUpdate['dispatcher_notes'] = sanitize_string($body['dispatcher_notes']);
         }
         $db->table('ticket_assignments')
@@ -972,9 +983,13 @@ class TicketController extends BaseController
             return $this->errorResponse('Failed to complete ticket.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        $logMessage = ($materialsLogged && !empty($body['materials']))
-            ? "Job Completed & Materials Logged (" . count($body['materials']) . " items listed)."
-            : "Ticket marked as completed.";
+        if ($isLaborOnly) {
+            $logMessage = "Job Completed (Labor Only Service).";
+        } elseif ($materialsLogged && !empty($body['materials'])) {
+            $logMessage = "Job Completed & Materials Finalized (" . count($body['materials']) . " items listed).";
+        } else {
+            $logMessage = "Ticket marked as completed.";
+        }
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
@@ -990,7 +1005,144 @@ class TicketController extends BaseController
             'status'           => $newStatus,
             'status_label'     => $statusLabel,
             'materials_logged' => $materialsLogged,
+            'is_labor_only'    => $isLaborOnly ? 1 : 0,
+            'materials_stage'  => 'finalized',
             'is_archived'      => $isArchived,
+        ]);
+    }
+
+    /**
+     * Save materials for initial assessment (before job starts) or ongoing adjustments (in progress).
+     *
+     * POST /tickets/:id/materials
+     * Body: {
+     *   materials?: [ { material_name, quantity, unit_measurement, unit_price, total_price } ],
+     *   is_labor_only?: boolean,
+     *   stage?: 'assessment' | 'ongoing',
+     *   notes?: string
+     * }
+     */
+    public function saveMaterials(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $isLaborOnly = !empty($body['is_labor_only']);
+        $rawStage = sanitize_string($body['stage'] ?? '');
+        $stage = in_array($rawStage, ['assessment', 'ongoing'], true)
+            ? $rawStage
+            : ($ticket['status'] === 'processing' ? 'ongoing' : 'assessment');
+        $notes = sanitize_string($body['notes'] ?? '');
+
+        $db = Database::connect();
+        $db->transStart();
+
+        $materialModel = new \App\Models\TicketMaterialModel();
+
+        // Find active assignment if any
+        $activeAssignment = $db->query(
+            "SELECT id FROM ticket_assignments WHERE ticket_id = ? ORDER BY assigned_at DESC LIMIT 1",
+            [$ticketId]
+        )->getRowArray();
+        $assignmentId = $activeAssignment['id'] ?? null;
+
+        // Delete existing materials for this ticket to maintain current active list
+        $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+        if ($assignmentId) {
+            $db->query("DELETE FROM ticket_materials WHERE assignment_id = ?", [$assignmentId]);
+        }
+
+        $savedMaterials = [];
+        $totalCost = 0.0;
+
+        if ($isLaborOnly) {
+            $this->ticketModel->update($ticketId, [
+                'is_labor_only'    => 1,
+                'materials_stage'  => $stage,
+                'materials_logged' => 1,
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ]);
+
+            $logDetail = ($stage === 'assessment')
+                ? "Initial assessment marked as Labor Only service (no materials required)."
+                : "Materials adjusted to Labor Only service." . (!empty($notes) ? " (Notes: {$notes})" : "");
+            $this->logModel->logAction($ticketId, $this->currentUserId(), 'Materials Updated', $logDetail);
+        } else {
+            $rawMaterials = $body['materials'] ?? [];
+            if (is_array($rawMaterials)) {
+                foreach ($rawMaterials as $mat) {
+                    $name = sanitize_string($mat['material_name'] ?? $mat['name'] ?? '');
+                    if (empty($name)) {
+                        continue;
+                    }
+
+                    $qty   = max(0.01, (float) ($mat['quantity'] ?? 1));
+                    $unit  = sanitize_string($mat['unit_measurement'] ?? $mat['unit'] ?? 'pcs');
+                    $price = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
+                    $lineTotal = isset($mat['total_price']) ? (float) $mat['total_price'] : ($qty * $price);
+                    $totalCost += $lineTotal;
+
+                    $insertedId = $materialModel->insert([
+                        'ticket_id'        => $ticketId,
+                        'assignment_id'    => $assignmentId,
+                        'material_name'    => $name,
+                        'quantity'         => $qty,
+                        'unit_measurement' => $unit,
+                        'unit_price'       => $price,
+                        'total_price'      => $lineTotal,
+                        'stage'            => $stage,
+                        'created_at'       => date('Y-m-d H:i:s'),
+                    ], true);
+
+                    $savedMaterials[] = [
+                        'id'               => $insertedId,
+                        'ticket_id'        => $ticketId,
+                        'assignment_id'    => $assignmentId,
+                        'material_name'    => $name,
+                        'quantity'         => $qty,
+                        'unit_measurement' => $unit,
+                        'unit_price'       => $price,
+                        'total_price'      => $lineTotal,
+                        'stage'            => $stage,
+                    ];
+                }
+            }
+
+            $this->ticketModel->update($ticketId, [
+                'is_labor_only'    => 0,
+                'materials_stage'  => $stage,
+                'materials_logged' => !empty($savedMaterials) ? 1 : 0,
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ]);
+
+            $stageLabel = ($stage === 'assessment') ? 'Initial Material Assessment' : 'Materials Adjusted (Ongoing)';
+            $logDetail = "{$stageLabel}: " . count($savedMaterials) . " item(s) recorded. Total: ₱" . number_format($totalCost, 2);
+            if (!empty($notes)) {
+                $logDetail .= " (Notes: {$notes})";
+            }
+            $this->logModel->logAction($ticketId, $this->currentUserId(), 'Materials Updated', $logDetail);
+        }
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Failed to save materials. Please try again.');
+        }
+
+        return $this->successResponse('Materials updated successfully.', [
+            'ticket_id'        => $ticketId,
+            'is_labor_only'    => $isLaborOnly ? 1 : 0,
+            'materials_stage'  => $stage,
+            'materials_logged' => ($isLaborOnly || !empty($savedMaterials)) ? 1 : 0,
+            'total_cost'       => $totalCost,
+            'materials'        => $savedMaterials,
         ]);
     }
 
@@ -1627,7 +1779,11 @@ class TicketController extends BaseController
             $ticket['feedback']            = $feedbacks[$id] ?? null;
             $ticket['materials']           = $materialsMap[$id] ?? [];
             $ticket['total_material_cost'] = array_sum(array_column($ticket['materials'], 'total_price'));
-            $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']);
+            $ticket['is_labor_only']       = !empty($ticket['is_labor_only']) ? 1 : 0;
+            $ticket['materials_stage']     = !empty($ticket['materials_stage']) && $ticket['materials_stage'] !== 'none'
+                ? $ticket['materials_stage']
+                : ($ticket['is_labor_only'] ? 'assessment' : (!empty($ticket['materials']) ? ($ticket['materials'][0]['stage'] ?? 'assessment') : 'none'));
+            $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']) || $ticket['is_labor_only'];
             $ticket['working_days']        = !empty($ticket['assignment']['working_days']) 
                 ? (int) $ticket['assignment']['working_days'] 
                 : (!empty($ticket['project_working_days']) 

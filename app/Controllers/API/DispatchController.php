@@ -194,8 +194,8 @@ class DispatchController extends BaseController
             'dispatched_at'      => $dispatchedAt,
         ], true);
 
-        // --- Update ticket status to processing ---
-        $this->ticketModel->update($ticketId, [
+        // --- Update ticket status to processing & record initial material assessment ---
+        $ticketUpdateData = [
             'status'                 => 'processing',
             'status_label'           => $statusLabel,
             'current_step'           => $isImmediate ? 5 : 4,
@@ -204,7 +204,48 @@ class DispatchController extends BaseController
             'target_completion_date' => $targetCompletionDate,
             'project_working_days'   => $workingDays,
             'updated_at'             => $now,
-        ]);
+        ];
+
+        // Process Initial Material Assessment or Labor-Only designation if submitted with dispatch
+        $isLaborOnly = !empty($body['is_labor_only']);
+        if ($isLaborOnly) {
+            $ticketUpdateData['is_labor_only']    = 1;
+            $ticketUpdateData['materials_stage']  = 'assessment';
+            $ticketUpdateData['materials_logged'] = 1;
+            $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+        } elseif (isset($body['materials']) && is_array($body['materials']) && !empty($body['materials'])) {
+            $ticketUpdateData['is_labor_only']    = 0;
+            $ticketUpdateData['materials_stage']  = 'assessment';
+            $ticketUpdateData['materials_logged'] = 1;
+
+            $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+            $assessmentTotal = 0.0;
+            foreach ($body['materials'] as $mat) {
+                $mName = sanitize_string($mat['material_name'] ?? $mat['name'] ?? '');
+                if (empty($mName)) {
+                    continue;
+                }
+                $mQty       = max(0.01, (float) ($mat['quantity'] ?? 1));
+                $mUnit      = sanitize_string($mat['unit_measurement'] ?? $mat['unit'] ?? 'pcs');
+                $mPrice     = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
+                $mLineTotal = isset($mat['total_price']) ? (float) $mat['total_price'] : ($mQty * $mPrice);
+                $assessmentTotal += $mLineTotal;
+
+                $this->materialModel->insert([
+                    'ticket_id'        => $ticketId,
+                    'assignment_id'    => $assignmentId,
+                    'material_name'    => $mName,
+                    'quantity'         => $mQty,
+                    'unit_measurement' => $mUnit,
+                    'unit_price'       => $mPrice,
+                    'total_price'      => $mLineTotal,
+                    'stage'            => 'assessment',
+                    'created_at'       => $now,
+                ]);
+            }
+        }
+
+        $this->ticketModel->update($ticketId, $ticketUpdateData);
 
         // --- Update worker status ---
         $this->personnelModel->update($personnelId, [

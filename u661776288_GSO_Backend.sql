@@ -442,6 +442,8 @@ CREATE TABLE `tickets` (
   `office_room` varchar(100) DEFAULT NULL,
   `is_archived` tinyint(1) NOT NULL DEFAULT 0,
   `materials_logged` tinyint(1) NOT NULL DEFAULT 0,
+  `is_labor_only` tinyint(1) NOT NULL DEFAULT 0,
+  `materials_stage` varchar(20) NOT NULL DEFAULT 'none',
   `is_under_investigation` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'SSU only: 1 when flagged for active investigation',
   `ssu_notation` text DEFAULT NULL COMMENT 'SSU only: staff recommendation/notation communicated to reporter',
   `submitted_at` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -685,6 +687,7 @@ CREATE TABLE `ticket_materials` (
   `unit_measurement` varchar(50) DEFAULT NULL,
   `unit_price` decimal(10,2) NOT NULL DEFAULT 0.00,
   `total_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `stage` varchar(20) NOT NULL DEFAULT 'assessment',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -18,6 +18,7 @@ class TicketMaterialModel extends Model
         'unit_measurement',
         'unit_price',
         'total_price',
+        'stage',
         'created_at',
     ];
 

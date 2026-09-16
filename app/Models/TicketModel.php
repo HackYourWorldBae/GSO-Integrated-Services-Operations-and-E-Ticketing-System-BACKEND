@@ -33,6 +33,8 @@ class TicketModel extends Model
         'office_room',
         'is_archived',
         'materials_logged',
+        'is_labor_only',
+        'materials_stage',
         'is_under_investigation',
         'ssu_notation',
         'submitted_at',

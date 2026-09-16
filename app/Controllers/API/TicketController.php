@@ -1592,9 +1592,11 @@ class TicketController extends BaseController
             $ticket['materials']           = $materialsMap[$id] ?? [];
             $ticket['total_material_cost'] = array_sum(array_column($ticket['materials'], 'total_price'));
             $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']);
-            $ticket['working_days']        = !empty($ticket['project_working_days']) 
-                ? (int) $ticket['project_working_days'] 
-                : (!empty($ticket['assignment']['working_days']) ? (int) $ticket['assignment']['working_days'] : null);
+            $ticket['working_days']        = !empty($ticket['assignment']['working_days']) 
+                ? (int) $ticket['assignment']['working_days'] 
+                : (!empty($ticket['project_working_days']) 
+                    ? (int) $ticket['project_working_days'] 
+                    : (!empty($ticket['eodb_days']) ? (int) $ticket['eodb_days'] : 1));
             $ticket['implementation_date'] = $ticket['assignment']['implementation_date'] 
                 ?? (!empty($ticket['assignments'][0]['implementation_date']) ? $ticket['assignments'][0]['implementation_date'] : null)
                 ?? ($ticket['project_target_date'] ?? null);
@@ -1776,11 +1778,17 @@ class TicketController extends BaseController
                         $map[$tId]['profession'] = $map[$tId]['specialty'];
                     }
                 }
-                if (empty($map[$tId]['implementation_date']) && !empty($row['implementation_date'])) {
+                if (!empty($row['implementation_date'])) {
                     $map[$tId]['implementation_date'] = $row['implementation_date'];
                 }
-                if (empty($map[$tId]['working_days']) && !empty($row['working_days'])) {
+                if (!empty($row['working_days'])) {
                     $map[$tId]['working_days'] = $row['working_days'];
+                }
+                if (!empty($row['task_notes'])) {
+                    $map[$tId]['task_notes'] = $row['task_notes'];
+                }
+                if (!empty($row['dispatcher_notes'])) {
+                    $map[$tId]['dispatcher_notes'] = $row['dispatcher_notes'];
                 }
             } else {
                 $map[$tId] = $row;
@@ -1946,6 +1954,28 @@ class TicketController extends BaseController
                         'uploaded_at'     => date('Y-m-d H:i:s'),
                     ];
                     
+                    // If uploading a Job Order document (initial or re-generated), remove any older Job Order attachments to prevent duplicates
+                    if (stripos($clientName, 'Job_Order_#') !== false || stripos($clientName, 'Job Request Form') !== false) {
+                        try {
+                            $oldJobOrders = $attachmentModel->where('ticket_id', $ticketId)
+                                ->groupStart()
+                                    ->like('file_name', 'Job_Order_#')
+                                    ->orLike('file_name', 'Job Request Form')
+                                ->groupEnd()
+                                ->findAll();
+
+                            foreach ($oldJobOrders as $oldAtt) {
+                                $oldFilePath = WRITEPATH . 'uploads/' . $oldAtt['file_path'];
+                                if (file_exists($oldFilePath)) {
+                                    @unlink($oldFilePath);
+                                }
+                                $attachmentModel->delete($oldAtt['id']);
+                            }
+                        } catch (\Throwable $cleanErr) {
+                            log_message('warning', 'Could not cleanup old job order attachments: ' . $cleanErr->getMessage());
+                        }
+                    }
+
                     $attachmentModel->insert($record);
                     $record['id'] = $attachmentModel->getInsertID();
                     $uploadedData[] = $record;

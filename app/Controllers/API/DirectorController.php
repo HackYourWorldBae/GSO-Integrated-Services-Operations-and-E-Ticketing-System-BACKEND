@@ -165,18 +165,18 @@ class DirectorController extends BaseController
         // Overall campus-wide feedback ratings for the period
         $overallRatings = $this->feedbackModel->getUnitAverageRatings(null, $filters);
 
-        // 3. Service Categories Breakdown for the Period
+        // 3. Service Categories Breakdown for the Period (Overall & Per Sub-Unit)
         $dateConds = [];
         $dateParams = [];
         if ($period === 'year') {
-            $dateConds[] = "YEAR(submitted_at) = ?";
+            $dateConds[] = "YEAR(t.submitted_at) = ?";
             $dateParams[] = $year;
         } elseif ($period === 'quarter') {
-            $dateConds[] = "YEAR(submitted_at) = ? AND QUARTER(submitted_at) = ?";
+            $dateConds[] = "YEAR(t.submitted_at) = ? AND QUARTER(t.submitted_at) = ?";
             $dateParams[] = $year;
             $dateParams[] = $quarter;
         } elseif ($period === 'month') {
-            $dateConds[] = "YEAR(submitted_at) = ? AND MONTH(submitted_at) = ?";
+            $dateConds[] = "YEAR(t.submitted_at) = ? AND MONTH(t.submitted_at) = ?";
             $dateParams[] = $year;
             $dateParams[] = $month;
         }
@@ -184,25 +184,72 @@ class DirectorController extends BaseController
 
         $serviceRows = $db->query("
             SELECT 
-                COALESCE(NULLIF(service_type, ''), 'General Maintenance') AS service_type,
+                u.code AS unit_code,
+                u.name AS unit_name,
+                COALESCE(NULLIF(t.service_type, ''), 'General Maintenance') AS service_type,
                 COUNT(*) AS count
-            FROM tickets
+            FROM tickets t
+            JOIN units u ON u.id = t.unit_id
             {$whereSql}
-            GROUP BY service_type
+            GROUP BY t.unit_id, t.service_type
             ORDER BY count DESC
-            LIMIT 8
         ", $dateParams)->getResultArray();
 
         $serviceBreakdown = [];
+        $serviceBreakdownByUnit = [
+            'FGMU' => [
+                'unit_code' => 'FGMU',
+                'unit_name' => $unitFullNames['FGMU'] ?? 'Facilities & Grounds Management Unit',
+                'total'     => 0,
+                'services'  => [],
+            ],
+            'LEAU' => [
+                'unit_code' => 'LEAU',
+                'unit_name' => $unitFullNames['LEAU'] ?? 'Landscaping & Environmental Aesthetics Unit',
+                'total'     => 0,
+                'services'  => [],
+            ],
+            'SSU'  => [
+                'unit_code' => 'SSU',
+                'unit_name' => $unitFullNames['SSU'] ?? 'Safety & Security Services Unit',
+                'total'     => 0,
+                'services'  => [],
+            ],
+        ];
+
         foreach ($serviceRows as $row) {
             $c = (int)$row['count'];
             $pct = $totalRequestsAcross > 0 ? round(($c / $totalRequestsAcross) * 100, 1) : 0;
+            $uCode = strtoupper((string)($row['unit_code'] ?? 'FGMU'));
+
             $serviceBreakdown[] = [
-                'name'    => $row['service_type'],
-                'count'   => $c,
-                'percent' => $pct
+                'unit_code' => $uCode,
+                'unit_name' => $row['unit_name'],
+                'name'      => $row['service_type'],
+                'count'     => $c,
+                'percent'   => $pct,
             ];
+
+            if (isset($serviceBreakdownByUnit[$uCode])) {
+                $serviceBreakdownByUnit[$uCode]['total'] += $c;
+                $serviceBreakdownByUnit[$uCode]['services'][] = [
+                    'unit_code' => $uCode,
+                    'name'      => $row['service_type'],
+                    'count'     => $c,
+                    'percent'   => 0,
+                ];
+            }
         }
+
+        // Calculate per-unit percent share for each service
+        foreach ($serviceBreakdownByUnit as $uCode => &$uData) {
+            $uTot = $uData['total'];
+            foreach ($uData['services'] as &$sItem) {
+                $sItem['percent'] = $uTot > 0 ? round(($sItem['count'] / $uTot) * 100, 1) : 0;
+            }
+            unset($sItem);
+        }
+        unset($uData);
 
         // 4. Completion SLA Health for the Period
         $healthConds = [];
@@ -417,8 +464,9 @@ class DirectorController extends BaseController
                 'total_materials_worth' => round($totalMaterialsWorth, 2),
                 'overall_ratings'       => $overallRatings,
             ],
-            'units'               => $units,
-            'service_breakdown'   => $serviceBreakdown,
+            'units'                     => $units,
+            'service_breakdown'         => $serviceBreakdown,
+            'service_breakdown_by_unit' => $serviceBreakdownByUnit,
             'materials_summary'   => $materialsSummary,
             'completion_health'   => [
                 'on_time'            => $onTime,

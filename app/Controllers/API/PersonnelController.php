@@ -407,7 +407,19 @@ class PersonnelController extends BaseController
             return $this->errorResponse("Unknown unit code: {$unitCode}.");
         }
 
-        $categories = $this->categoryModel->getByUnit($unitId);
+        $rawCategories = $this->categoryModel->getByUnit($unitId);
+        $categories = array_map(function ($cat) {
+            $servList = [];
+            if (!empty($cat['supported_services'])) {
+                $decoded = is_array($cat['supported_services']) ? $cat['supported_services'] : json_decode($cat['supported_services'], true);
+                if (is_array($decoded)) {
+                    $servList = array_values(array_filter(array_map('trim', $decoded)));
+                }
+            }
+            $cat['services'] = $servList;
+            $cat['supported_services'] = $servList;
+            return $cat;
+        }, $rawCategories);
 
         return $this->successResponse('Categories retrieved.', [
             'unit'       => strtoupper($unitCode),
@@ -418,13 +430,19 @@ class PersonnelController extends BaseController
     /**
      * Create a new personnel category for a unit.
      * POST /api/v1/personnel/categories
-     * Body: { unit_code: 'FGMU', name: 'Welder' }
+     * Body: { unit_code: 'FGMU', name: 'Welder', services: ['Welding & Tinsmith Works'] }
      */
     public function createCategory(): ResponseInterface
     {
         $body     = $this->request->getJSON(true) ?? [];
         $unitCode = strtoupper(sanitize_string($body['unit_code'] ?? ''));
         $name     = sanitize_string($body['name'] ?? '');
+
+        $rawServices = $body['services'] ?? $body['supported_services'] ?? [];
+        $services = [];
+        if (is_array($rawServices)) {
+            $services = array_values(array_unique(array_filter(array_map('sanitize_string', $rawServices))));
+        }
 
         $unitId = self::UNIT_MAP[$unitCode] ?? null;
         if (!$unitId) {
@@ -450,19 +468,27 @@ class PersonnelController extends BaseController
         }
 
         $id = $this->categoryModel->insert([
-            'unit_id'   => $unitId,
-            'name'      => $name,
-            'is_system' => 0,
+            'unit_id'            => $unitId,
+            'name'               => $name,
+            'is_system'          => 0,
+            'supported_services' => !empty($services) ? json_encode($services) : null,
         ], true);
 
         return $this->successResponse('Category created.', [
-            'category' => ['id' => $id, 'unit_id' => $unitId, 'name' => $name, 'is_system' => 0],
+            'category' => [
+                'id'                 => $id,
+                'unit_id'            => $unitId,
+                'name'               => $name,
+                'is_system'          => 0,
+                'services'           => $services,
+                'supported_services' => $services,
+            ],
         ], ResponseInterface::HTTP_CREATED);
     }
     /**
-     * Update a personnel category name and cascade to personnel.
+     * Update a personnel category name and/or supported services and cascade to personnel.
      * PATCH /api/v1/personnel/categories/:id
-     * Body: { name: 'New Name' }
+     * Body: { name: 'New Name', services: ['Service 1', 'Service 2'] }
      */
     public function updateCategory(string $categoryId): ResponseInterface
     {
@@ -475,38 +501,66 @@ class PersonnelController extends BaseController
             return $forbidden;
         }
 
-        $body = $this->request->getJSON(true) ?? [];
-        $newName = sanitize_string($body['name'] ?? '');
+        $body        = $this->request->getJSON(true) ?? [];
+        $newName     = isset($body['name']) ? sanitize_string($body['name']) : null;
+        $hasServices = array_key_exists('services', $body) || array_key_exists('supported_services', $body);
+        $rawServices = $body['services'] ?? $body['supported_services'] ?? [];
 
-        if (empty($newName)) {
-            return $this->errorResponse('Category name is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        $updateData = [];
+
+        if ($newName !== null) {
+            if (empty($newName)) {
+                return $this->errorResponse('Category name cannot be empty.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            // Check for duplicates
+            $existing = $this->categoryModel
+                ->where('unit_id', $category['unit_id'])
+                ->where('name', $newName)
+                ->where('id !=', $categoryId)
+                ->first();
+
+            if ($existing) {
+                return $this->errorResponse('A category with this name already exists for this unit.', [], ResponseInterface::HTTP_CONFLICT);
+            }
+
+            $updateData['name'] = $newName;
         }
 
-        // Check for duplicates
-        $existing = $this->categoryModel
-            ->where('unit_id', $category['unit_id'])
-            ->where('name', $newName)
-            ->where('id !=', $categoryId)
-            ->first();
-
-        if ($existing) {
-            return $this->errorResponse('A category with this name already exists for this unit.', [], ResponseInterface::HTTP_CONFLICT);
+        if ($hasServices && is_array($rawServices)) {
+            $services = array_values(array_unique(array_filter(array_map('sanitize_string', $rawServices))));
+            $updateData['supported_services'] = !empty($services) ? json_encode($services) : null;
         }
 
-        $oldName = $category['name'];
+        if (empty($updateData)) {
+            return $this->errorResponse('No valid fields provided to update.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
-        $this->categoryModel->update((int) $categoryId, ['name' => $newName]);
+        $this->categoryModel->update((int) $categoryId, $updateData);
 
-        // Cascade update to personnel
-        $db = \Config\Database::connect();
-        $db->table('personnel')
-            ->where('unit_id', $category['unit_id'])
-            ->where('specialty', $oldName)
-            ->update(['specialty' => $newName]);
+        // Cascade update to personnel if name was changed
+        if (isset($updateData['name']) && $updateData['name'] !== $category['name']) {
+            $db = \Config\Database::connect();
+            $db->table('personnel')
+                ->where('unit_id', $category['unit_id'])
+                ->where('specialty', $category['name'])
+                ->update(['specialty' => $updateData['name']]);
+        }
+
+        $fresh = $this->categoryModel->find((int) $categoryId);
+        $decodedServices = [];
+        if (!empty($fresh['supported_services'])) {
+            $d = is_array($fresh['supported_services']) ? $fresh['supported_services'] : json_decode($fresh['supported_services'], true);
+            if (is_array($d)) {
+                $decodedServices = array_values(array_filter(array_map('trim', $d)));
+            }
+        }
+        $fresh['services'] = $decodedServices;
+        $fresh['supported_services'] = $decodedServices;
 
         return $this->successResponse('Category updated.', [
             'category_id' => (int) $categoryId,
-            'new_name'    => $newName
+            'category'    => $fresh,
         ]);
     }
     /**

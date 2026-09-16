@@ -253,6 +253,7 @@ CREATE TABLE `personnel_categories` (
   `unit_id` int(11) UNSIGNED NOT NULL,
   `name` varchar(100) NOT NULL,
   `is_system` tinyint(1) NOT NULL DEFAULT 0,
+  `supported_services` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -260,9 +261,9 @@ CREATE TABLE `personnel_categories` (
 -- Dumping data for table `personnel_categories`
 --
 
-INSERT INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`, `created_at`) VALUES
-(1, 1, 'Carpenter', 0, '2026-09-10 13:39:13'),
-(2, 1, 'Electrician', 0, '2026-09-12 12:37:49');
+INSERT INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`, `supported_services`, `created_at`) VALUES
+(1, 1, 'Carpenter', 0, '["Carpentry & Joinery"]', '2026-09-10 13:39:13'),
+(2, 1, 'Electrician', 0, '["Electrical Work", "Electronics & Communication Works"]', '2026-09-12 12:37:49');
 
 -- --------------------------------------------------------
 

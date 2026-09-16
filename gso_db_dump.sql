@@ -98,24 +98,25 @@ CREATE TABLE `personnel_categories` (
   `unit_id` int(11) UNSIGNED NOT NULL,
   `name` varchar(100) NOT NULL,
   `is_system` tinyint(1) NOT NULL DEFAULT 0,
+  `supported_services` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_category_unit` (`unit_id`,`name`),
   CONSTRAINT `fk_categories_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`) VALUES
-(1, 1, 'Plumber', 1),
-(2, 1, 'Electrician', 1),
-(3, 1, 'Carpenter', 1),
-(4, 1, 'Mason', 1),
-(5, 1, 'Painter', 1),
-(6, 1, 'Welder', 1),
-(7, 1, 'Refrigeration & Aircon Technician', 1),
-(8, 2, 'Landscaper', 1),
-(9, 2, 'Groundskeeper', 1),
-(10, 2, 'Janitor', 1),
-(11, 2, 'Garbage Collector', 1);
+INSERT INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`, `supported_services`) VALUES
+(1, 1, 'Plumber', 1, '["Plumbing & Sanitary Works"]'),
+(2, 1, 'Electrician', 1, '["Electrical Work", "Electronics & Communication Works"]'),
+(3, 1, 'Carpenter', 1, '["Carpentry & Joinery"]'),
+(4, 1, 'Mason', 1, '["Masonry Works", "Concrete Works"]'),
+(5, 1, 'Painter', 1, '["Painting Works"]'),
+(6, 1, 'Welder', 1, '["Welding & Tinsmith Works"]'),
+(7, 1, 'Refrigeration & Aircon Technician', 1, '["Mechanical Works"]'),
+(8, 2, 'Landscaper', 1, '["Planting/ Landscaping", "Borrowing of plants"]'),
+(9, 2, 'Groundskeeper', 1, '["Mowing/ Weeding", "Pruning/ Cutting"]'),
+(10, 2, 'Janitor', 1, '["Cleaning/ Grubbing", "Disinfection"]'),
+(11, 2, 'Garbage Collector', 1, '["Hauling", "Cleaning/ Grubbing"]');
 
 -- ----------------------------------------------------------------------------
 -- 2. CORE TICKETING ENGINE & ATTACHMENTS

@@ -21,6 +21,7 @@ class PersonnelCategoryModel extends Model
         'unit_id',
         'name',
         'is_system',
+        'supported_services',
     ];
 
     /**

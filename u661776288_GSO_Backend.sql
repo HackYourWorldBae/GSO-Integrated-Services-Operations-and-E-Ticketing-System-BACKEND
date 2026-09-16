@@ -238,7 +238,7 @@ CREATE TABLE `personnel` (
   `unit_id` int(11) UNSIGNED NOT NULL,
   `name` varchar(255) NOT NULL,
   `specialty` varchar(100) NOT NULL,
-  `status` enum('available','working','on_leave','on_trip') NOT NULL DEFAULT 'available',
+  `status` enum('available','working','on_leave') NOT NULL DEFAULT 'available',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

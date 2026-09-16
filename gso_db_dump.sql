@@ -78,7 +78,6 @@ INSERT INTO `users` (`id`, `first_name`, `last_name`, `email`, `password_hash`, 
 DROP TABLE IF EXISTS `personnel`;
 CREATE TABLE `personnel` (
   `id` varchar(36) NOT NULL,
-  `user_id` varchar(36) DEFAULT NULL,
   `unit_id` int(11) UNSIGNED NOT NULL,
   `name` varchar(255) NOT NULL,
   `specialty` varchar(100) NOT NULL,
@@ -87,8 +86,7 @@ CREATE TABLE `personnel` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_personnel_unit_status` (`unit_id`,`status`),
-  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_personnel_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `personnel_categories`
@@ -445,12 +443,18 @@ CREATE TABLE `ticket_assignments` (
 DROP TABLE IF EXISTS `ticket_materials`;
 CREATE TABLE `ticket_materials` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `assignment_id` int(11) UNSIGNED NOT NULL,
-  `material_name` varchar(200) NOT NULL,
-  `quantity` int(11) NOT NULL DEFAULT 1,
+  `ticket_id` varchar(60) NOT NULL,
+  `assignment_id` int(11) UNSIGNED DEFAULT NULL,
+  `material_name` varchar(255) NOT NULL,
+  `quantity` decimal(10,2) NOT NULL DEFAULT 1.00,
   `unit_measurement` varchar(50) DEFAULT NULL,
+  `unit_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `total_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
+  KEY `idx_materials_ticket` (`ticket_id`),
   KEY `idx_materials_assignment` (`assignment_id`),
+  CONSTRAINT `fk_materials_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_materials_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `ticket_assignments` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

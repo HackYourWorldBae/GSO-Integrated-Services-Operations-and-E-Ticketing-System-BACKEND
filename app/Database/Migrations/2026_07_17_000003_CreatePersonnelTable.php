@@ -46,7 +46,7 @@ class CreatePersonnelTable extends Migration
             ],
             'status' => [
                 'type'       => 'ENUM',
-                'constraint' => ['available', 'working', 'on_leave', 'on_trip'],
+                'constraint' => ['available', 'working', 'on_leave'],
                 'default'    => 'available',
                 'null'       => false,
             ],

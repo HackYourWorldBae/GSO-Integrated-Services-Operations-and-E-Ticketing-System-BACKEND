@@ -76,7 +76,7 @@ class TicketModel extends Model
         $db = \Config\Database::connect();
 
         return $this->where('user_id', $userId)
-                    ->where('is_archived', 0)
+                    ->where('(is_archived = 0 OR is_archived IS NULL)')
                     ->whereNotIn('status', ['closed', 'completed', 'declined', 'cancelled'])
                     ->where("id NOT IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
                     ->orderBy('submitted_at', 'DESC')
@@ -112,7 +112,7 @@ class TicketModel extends Model
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.status', 'pending')
                     ->where('(tickets.is_under_investigation = 0 OR tickets.is_under_investigation IS NULL)')
-                    ->where('tickets.is_archived', 0)
+                    ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
@@ -127,7 +127,7 @@ class TicketModel extends Model
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.service_type', 'Incident Report')
                     ->where('tickets.is_under_investigation', 1)
-                    ->where('tickets.is_archived', 0)
+                    ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
@@ -141,7 +141,7 @@ class TicketModel extends Model
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->whereIn('tickets.status', ['approved'])
-                    ->where('tickets.is_archived', 0)
+                    ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }
@@ -155,7 +155,7 @@ class TicketModel extends Model
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->whereIn('tickets.status', ['processing', 'resolved'])
-                    ->where('tickets.is_archived', 0)
+                    ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC')
                     ->findAll();
     }

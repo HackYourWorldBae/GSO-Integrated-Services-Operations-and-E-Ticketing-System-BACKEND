@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Libraries\JwtService;
 use App\Models\UserModel;
 use App\Models\UserSessionModel;
+use App\Models\AccountActivityLogModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -23,12 +24,14 @@ class AuthController extends BaseController
 {
     private UserModel $userModel;
     private UserSessionModel $userSessionModel;
+    private AccountActivityLogModel $activityLogModel;
     private JwtService $jwt;
 
     public function __construct()
     {
         $this->userModel        = new UserModel();
         $this->userSessionModel = new UserSessionModel();
+        $this->activityLogModel = new AccountActivityLogModel();
         $this->jwt              = new JwtService();
     }
 
@@ -219,6 +222,15 @@ class AuthController extends BaseController
 
         $createdUser = $this->userModel->getSafeUser($userId);
 
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_REGISTERED',
+            'severity'       => 'info',
+            'actor_id'       => $userId,
+            'target_user_id' => $userId,
+            'details'        => "User self-registered a new {$role} account (ID: {$studentIdNumber}). Pending ID card verification.",
+            'metadata'       => ['role' => $role, 'student_id_number' => $studentIdNumber],
+        ]);
+
         return $this->successResponse(
             'Account created successfully! You can now log in to view your dashboard. Please note that an administrator must verify your ID card before you can submit service requests.',
             ['user' => $createdUser],
@@ -330,6 +342,15 @@ class AuthController extends BaseController
             $lockoutResult = $this->userModel->recordFailedAttempt($user['id'], $currentAttempts, 5, 15);
 
             if ($lockoutResult['is_locked']) {
+                $this->activityLogModel->logEvent([
+                    'event_type'     => 'AUTH_LOCKOUT',
+                    'severity'       => 'critical',
+                    'actor_id'       => null,
+                    'target_user_id' => $user['id'],
+                    'details'        => "Account temporarily locked for 15 minutes due to 5 consecutive failed login attempts.",
+                    'metadata'       => ['lockout_until' => $lockoutResult['lockout_until']],
+                ]);
+
                 return $this->errorResponse(
                     'Account temporarily locked for 15 minutes due to 5 consecutive failed login attempts.',
                     [
@@ -345,6 +366,15 @@ class AuthController extends BaseController
 
             $remainingAttempts = $lockoutResult['remaining_attempts'];
             $attemptPlural     = $remainingAttempts === 1 ? 'attempt' : 'attempts';
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_LOGIN_FAILED',
+                'severity'       => 'warning',
+                'actor_id'       => null,
+                'target_user_id' => $user['id'],
+                'details'        => "Failed login attempt (Incorrect password). Remaining attempts before lockout: {$remainingAttempts}.",
+                'metadata'       => ['failed_attempts' => $lockoutResult['attempts'], 'remaining_attempts' => $remainingAttempts],
+            ]);
 
             return $this->errorResponse(
                 "Invalid credentials. You have {$remainingAttempts} {$attemptPlural} remaining before your account is locked for 15 minutes.",
@@ -378,6 +408,17 @@ class AuthController extends BaseController
 
         $accessToken  = $this->jwt->generateAccessToken($tokenPayload);
         $refreshToken = $this->jwt->generateRefreshToken($tokenPayload);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'AUTH_LOGIN_SUCCESS',
+            'severity'       => 'info',
+            'actor_id'       => $user['id'],
+            'target_user_id' => $user['id'],
+            'details'        => "User successfully authenticated. Single active session registered.",
+            'metadata'       => ['role' => $user['role'], 'session_id' => $sessionId],
+            'ip_address'     => $ipAddress,
+            'user_agent'     => $userAgent,
+        ]);
 
         // --- Issue HttpOnly Secure Cookie ---
         $expiresIn = $this->jwt->getExpiresIn();
@@ -415,6 +456,13 @@ class AuthController extends BaseController
         $userId = $this->currentUserId();
         if ($userId) {
             $this->userSessionModel->destroyUserSession($userId);
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_LOGOUT',
+                'severity'       => 'info',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => "User voluntarily logged out. Active session invalidated.",
+            ]);
         }
 
         // Clear the HttpOnly session cookie
@@ -517,6 +565,15 @@ class AuthController extends BaseController
 
         $this->userModel->update($userId, $updateData);
 
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_UPDATED',
+            'severity'       => 'info',
+            'actor_id'       => $userId,
+            'target_user_id' => $userId,
+            'details'        => "User updated own profile fields: " . implode(', ', array_keys($updateData)) . ".",
+            'metadata'       => array_keys($updateData),
+        ]);
+
         $user = $this->userModel->getSafeUser($userId);
 
         return $this->successResponse('Profile updated successfully.', ['user' => $user]);
@@ -555,6 +612,14 @@ class AuthController extends BaseController
 
         $this->userModel->update($userId, [
             'password_hash' => password_hash($newPassword, PASSWORD_BCRYPT),
+        ]);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_PASSWORD_CHANGED',
+            'severity'       => 'notice',
+            'actor_id'       => $userId,
+            'target_user_id' => $userId,
+            'details'        => "User changed own account password.",
         ]);
 
         return $this->successResponse('Password changed successfully.');

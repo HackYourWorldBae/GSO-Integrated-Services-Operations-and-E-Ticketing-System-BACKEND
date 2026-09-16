@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\UserModel;
 use App\Models\TicketModel;
 use App\Models\UnitModel;
+use App\Models\AccountActivityLogModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -21,17 +22,20 @@ use Config\Database;
  *  GET    /api/v1/superadmin/users/(:segment)   - Single user account details
  *  PUT    /api/v1/superadmin/users/(:segment)   - Update account details/role/status/password
  *  DELETE /api/v1/superadmin/users/(:segment)   - Deactivate or delete user account
- *  GET    /api/v1/superadmin/audit-logs         - System-wide security and action log explorer
+ *  GET    /api/v1/superadmin/audit-logs         - System-wide business process and ticket log explorer
+ *  GET    /api/v1/superadmin/account-activity-logs - Privacy-compliant user account & authentication activity explorer
  */
 class SuperadminController extends BaseController
 {
     private UserModel $userModel;
     private TicketModel $ticketModel;
+    private AccountActivityLogModel $activityLogModel;
 
     public function __construct()
     {
-        $this->userModel   = new UserModel();
-        $this->ticketModel = new TicketModel();
+        $this->userModel        = new UserModel();
+        $this->ticketModel      = new TicketModel();
+        $this->activityLogModel = new AccountActivityLogModel();
     }
 
     /**
@@ -231,6 +235,16 @@ class SuperadminController extends BaseController
 
         if ($this->userModel->skipValidation(true)->insert($insertData)) {
             $createdUser = $this->userModel->getSafeUser($userId);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_CREATED',
+                'severity'       => 'notice',
+                'actor_id'       => $this->currentUserId(),
+                'target_user_id' => $userId,
+                'details'        => "Superadmin provisioned account for {$firstName} {$lastName} ({$createdUser['email']}) with role {$body['role']}.",
+                'metadata'       => ['role' => $body['role'], 'status' => $body['status'] ?? 'Active'],
+            ]);
+
             return $this->successResponse('User created successfully.', $createdUser, ResponseInterface::HTTP_CREATED);
         }
 
@@ -309,6 +323,16 @@ class SuperadminController extends BaseController
 
         if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
             $safeUser = $this->userModel->getSafeUser($id);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_UPDATED',
+                'severity'       => 'notice',
+                'actor_id'       => $currentUserId,
+                'target_user_id' => $id,
+                'details'        => "Superadmin modified account details for {$existing['first_name']} {$existing['last_name']}: " . implode(', ', array_keys($updateData)) . ".",
+                'metadata'       => array_keys($updateData),
+            ]);
+
             return $this->successResponse('User account updated successfully.', $safeUser);
         }
 
@@ -351,6 +375,16 @@ class SuperadminController extends BaseController
             }
 
             $safeUser = $this->userModel->getSafeUser($id);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_STATUS_CHANGED',
+                'severity'       => in_array($newStatus, ['Suspended', 'Deactivated', 'Rejected'], true) ? 'warning' : 'notice',
+                'actor_id'       => $currentUserId,
+                'target_user_id' => $id,
+                'details'        => "Superadmin changed account status of {$existing['first_name']} {$existing['last_name']} from {$existing['status']} to {$newStatus}.",
+                'metadata'       => ['previous_status' => $existing['status'], 'new_status' => $newStatus],
+            ]);
+
             return $this->successResponse("User account status successfully updated to {$newStatus}.", $safeUser);
         }
 
@@ -389,6 +423,15 @@ class SuperadminController extends BaseController
         $sessionModel = new \App\Models\UserSessionModel();
         $sessionModel->where('user_id', $id)->delete();
 
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_DELETED',
+            'severity'       => 'critical',
+            'actor_id'       => $currentUserId,
+            'target_user_id' => $id,
+            'details'        => "Superadmin permanently deleted user account {$existing['first_name']} {$existing['last_name']} ({$existing['email']}).",
+            'metadata'       => ['role' => $existing['role']],
+        ]);
+
         $this->userModel->delete($id);
         return $this->successResponse('User account permanently deleted successfully.');
     }
@@ -416,6 +459,16 @@ class SuperadminController extends BaseController
         }
 
         $safeUser = $this->userModel->getSafeUser($id);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_VERIFIED',
+            'severity'       => 'info',
+            'actor_id'       => $this->currentUserId(),
+            'target_user_id' => $id,
+            'details'        => "Superadmin verified identity and approved request access for {$existing['first_name']} {$existing['last_name']} ({$existing['role']}).",
+            'metadata'       => ['role' => $existing['role']],
+        ]);
+
         return $this->successResponse('User account identity successfully verified and request submission unlocked.', $safeUser);
     }
 
@@ -445,6 +498,16 @@ class SuperadminController extends BaseController
         }
 
         $safeUser = $this->userModel->getSafeUser($id);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'ACCOUNT_VERIFICATION_REJECTED',
+            'severity'       => 'warning',
+            'actor_id'       => $this->currentUserId(),
+            'target_user_id' => $id,
+            'details'        => "Superadmin rejected identity verification for {$existing['first_name']} {$existing['last_name']}. Reason: {$reason}",
+            'metadata'       => ['reason' => $reason],
+        ]);
+
         return $this->successResponse('User account verification was rejected.', [
             'user'   => $safeUser,
             'reason' => $reason
@@ -584,6 +647,14 @@ class SuperadminController extends BaseController
         $rolePermissionModel = new \App\Models\RolePermissionModel();
         $rolePermissionModel->saveMatrix($matrix);
 
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'RBAC_UPDATED',
+            'severity'       => 'notice',
+            'actor_id'       => $this->currentUserId(),
+            'target_user_id' => null,
+            'details'        => "Superadmin updated dynamic Role & Capability Access Control Matrix.",
+        ]);
+
         return $this->successResponse('RBAC capability matrix updated successfully.', $rolePermissionModel->getFullMatrix());
     }
 
@@ -599,7 +670,48 @@ class SuperadminController extends BaseController
 
         $this->userModel->unlockUser($id);
 
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'AUTH_UNLOCK',
+            'severity'       => 'notice',
+            'actor_id'       => $this->currentUserId(),
+            'target_user_id' => $id,
+            'details'        => "Superadmin manually unlocked account for {$existing['first_name']} {$existing['last_name']}, clearing failed login lockout.",
+        ]);
+
         $safeUser = $this->userModel->getSafeUser($id);
         return $this->successResponse("User account for {$existing['first_name']} {$existing['last_name']} has been unlocked.", $safeUser);
     }
+
+    /**
+     * Explore system-wide account activity & authentication security logs.
+     * In strict compliance with the Philippine Data Privacy Act of 2012 (RA 10173).
+     */
+    public function accountActivityLogs(): ResponseInterface
+    {
+        $search    = $this->request->getGet('search');
+        $severity  = $this->request->getGet('severity');
+        $eventType = $this->request->getGet('event_type');
+        $category  = $this->request->getGet('category');
+        $dateFrom  = $this->request->getGet('date_from');
+        $dateTo    = $this->request->getGet('date_to');
+        $limit     = min(100, max(5, (int) ($this->request->getGet('limit') ?? 25)));
+        $offset    = max(0, (int) ($this->request->getGet('offset') ?? 0));
+
+        $filters = array_filter([
+            'search'     => $search,
+            'severity'   => $severity,
+            'event_type' => $eventType,
+            'category'   => $category,
+            'date_from'  => $dateFrom,
+            'date_to'    => $dateTo,
+        ]);
+
+        $result = $this->activityLogModel->getFilteredLogs($filters, $limit, $offset);
+
+        return $this->successResponse('Account activity logs retrieved successfully.', [
+            'logs'  => $result['logs'],
+            'total' => $result['total'],
+        ]);
+    }
 }
+

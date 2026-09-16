@@ -131,6 +131,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->match(['patch', 'post', 'put'], 'superadmin/users/(:segment)/status', 'SuperadminController::updateStatus/$1', ['filter' => 'role:superadmin']);
         $routes->post('superadmin/users/(:segment)/unlock', 'SuperadminController::unlockUser/$1', ['filter' => 'role:superadmin']);
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/account-activity-logs',  'SuperadminController::accountActivityLogs', ['filter' => 'role:superadmin']);
 
         // -- Notifications --
         $routes->get('notifications',             'NotificationController::index');

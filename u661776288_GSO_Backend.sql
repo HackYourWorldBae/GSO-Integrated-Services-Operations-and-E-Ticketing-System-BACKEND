@@ -894,6 +894,26 @@ INSERT INTO `user_sessions` (`id`, `user_id`, `session_id`, `ip_address`, `user_
 ('cbfb4910-ee5b-4124-a676-4df79a2a62bc', '3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', '8e7e64a447df5e0a0c544ead96bd83c2', '120.29.89.75', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36', '2026-09-13 08:08:04', '2026-09-13 08:50:50'),
 ('d63d60b2-f0a2-413d-877a-a144dfba4a23', '0a48e0d5-3482-453c-a6cd-d0f34fc2357c', '801b44b1b0e0c27f77172f12f1e87492', '136.158.88.82', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36', '2026-09-13 11:09:43', '2026-09-13 11:19:31');
 
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `account_activity_logs`
+--
+
+CREATE TABLE `account_activity_logs` (
+  `id` int(11) UNSIGNED NOT NULL,
+  `actor_id` varchar(36) DEFAULT NULL,
+  `target_user_id` varchar(36) DEFAULT NULL,
+  `event_type` varchar(80) NOT NULL,
+  `severity` enum('INFO','NOTICE','WARNING','CRITICAL') NOT NULL DEFAULT 'INFO',
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` varchar(255) DEFAULT NULL,
+  `device_summary` varchar(150) DEFAULT NULL,
+  `details` text DEFAULT NULL,
+  `metadata` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`metadata`)),
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 --
 -- Indexes for dumped tables
 --
@@ -1101,8 +1121,25 @@ ALTER TABLE `user_sessions`
   ADD KEY `idx_user_sessions_sid` (`session_id`);
 
 --
+-- Indexes for table `account_activity_logs`
+--
+ALTER TABLE `account_activity_logs`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_account_activity_actor` (`actor_id`),
+  ADD KEY `idx_account_activity_target` (`target_user_id`),
+  ADD KEY `idx_account_activity_event` (`event_type`),
+  ADD KEY `idx_account_activity_severity` (`severity`),
+  ADD KEY `idx_account_activity_created` (`created_at`);
+
+--
 -- AUTO_INCREMENT for dumped tables
 --
+
+--
+-- AUTO_INCREMENT for table `account_activity_logs`
+--
+ALTER TABLE `account_activity_logs`
+  MODIFY `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `feedback_delay_reasons`
@@ -1311,6 +1348,13 @@ ALTER TABLE `users`
 --
 ALTER TABLE `user_sessions`
   ADD CONSTRAINT `fk_user_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Constraints for table `account_activity_logs`
+--
+ALTER TABLE `account_activity_logs`
+  ADD CONSTRAINT `fk_account_activity_actor` FOREIGN KEY (`actor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_account_activity_target` FOREIGN KEY (`target_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

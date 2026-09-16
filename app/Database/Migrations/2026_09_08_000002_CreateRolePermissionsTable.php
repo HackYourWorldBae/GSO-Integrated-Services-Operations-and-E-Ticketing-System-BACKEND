@@ -83,19 +83,6 @@ class CreateRolePermissionsTable extends Migration
             ['role' => 'admin',      'feature_key' => 'users.provision',        'is_enabled' => 0],
             ['role' => 'admin',      'feature_key' => 'system.matrix_control',  'is_enabled' => 0],
 
-            // Dispatcher
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.create',         'is_enabled' => 0],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.view_all',       'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.approve_decline','is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.dispatch',       'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.assign_worker',  'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.complete_work',  'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'tickets.verify_close',   'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'personnel.manage',       'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'reports.view',           'is_enabled' => 1],
-            ['role' => 'dispatcher', 'feature_key' => 'users.provision',        'is_enabled' => 0],
-            ['role' => 'dispatcher', 'feature_key' => 'system.matrix_control',  'is_enabled' => 0],
-
             // Director
             ['role' => 'director',   'feature_key' => 'tickets.create',         'is_enabled' => 1],
             ['role' => 'director',   'feature_key' => 'tickets.view_all',       'is_enabled' => 1],
@@ -108,19 +95,6 @@ class CreateRolePermissionsTable extends Migration
             ['role' => 'director',   'feature_key' => 'reports.view',           'is_enabled' => 1],
             ['role' => 'director',   'feature_key' => 'users.provision',        'is_enabled' => 0],
             ['role' => 'director',   'feature_key' => 'system.matrix_control',  'is_enabled' => 0],
-
-            // Worker
-            ['role' => 'worker',     'feature_key' => 'tickets.create',         'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'tickets.view_all',       'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'tickets.approve_decline','is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'tickets.dispatch',       'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'tickets.assign_worker',  'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'tickets.complete_work',  'is_enabled' => 1],
-            ['role' => 'worker',     'feature_key' => 'tickets.verify_close',   'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'personnel.manage',       'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'reports.view',           'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'users.provision',        'is_enabled' => 0],
-            ['role' => 'worker',     'feature_key' => 'system.matrix_control',  'is_enabled' => 0],
 
             // Employee
             ['role' => 'employee',   'feature_key' => 'tickets.create',         'is_enabled' => 1],

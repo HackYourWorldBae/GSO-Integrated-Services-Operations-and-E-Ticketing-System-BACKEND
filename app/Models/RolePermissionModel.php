@@ -100,9 +100,7 @@ class RolePermissionModel extends Model
     public const SYSTEM_ROLES = [
         'superadmin',
         'admin',      // Unit Head
-        'dispatcher',
         'director',
-        'worker',
         'employee',
         'student',
     ];
@@ -116,15 +114,7 @@ class RolePermissionModel extends Model
             return true;
         }
 
-        $row = $this->where('role', $role)
-                    ->where('feature_key', $featureKey)
-                    ->first();
-
-        if ($row) {
-            return (bool) $row['is_enabled'];
-        }
-
-        // Fallback default: Unit Head (admin) inherits dispatcher features
+        // Unit Head (admin) has full operational, dispatch, triage, and reporting capabilities
         if ($role === 'admin' && in_array($featureKey, [
             'tickets.create', 'tickets.view_all', 'tickets.approve_decline',
             'tickets.dispatch', 'tickets.assign_worker', 'tickets.complete_work',
@@ -133,28 +123,14 @@ class RolePermissionModel extends Model
             return true;
         }
 
-        // Fallback default: Dispatcher
-        if ($role === 'dispatcher' && in_array($featureKey, [
-            'tickets.view_all', 'tickets.dispatch', 'tickets.assign_worker', 'tickets.complete_work'
-        ], true)) {
-            return true;
-        }
-
-        // Fallback default: Director
+        // Director has university-wide oversight and analytics
         if ($role === 'director' && in_array($featureKey, [
             'tickets.view_all', 'reports.view'
         ], true)) {
             return true;
         }
 
-        // Fallback default: Worker
-        if ($role === 'worker' && in_array($featureKey, [
-            'tickets.complete_work'
-        ], true)) {
-            return true;
-        }
-
-        // Fallback default: Requestor (employee / student)
+        // Requestors (employee / student) can create tickets and rate completions
         if (in_array($role, ['employee', 'student'], true) && in_array($featureKey, [
             'tickets.create', 'tickets.rate'
         ], true)) {
@@ -173,48 +149,26 @@ class RolePermissionModel extends Model
             return array_column(self::SYSTEM_FEATURES, 'key');
         }
 
-        $rows = $this->where('role', $role)->findAll();
-        if (empty($rows)) {
-            // Return defaults
-            $enabled = [];
-            foreach (self::SYSTEM_FEATURES as $feat) {
-                if ($this->hasPermission($role, $feat['key'])) {
-                    $enabled[] = $feat['key'];
-                }
-            }
-            return $enabled;
-        }
-
         $enabled = [];
-        foreach ($rows as $r) {
-            if (!empty($r['is_enabled'])) {
-                $enabled[] = $r['feature_key'];
+        foreach (self::SYSTEM_FEATURES as $feat) {
+            if ($this->hasPermission($role, $feat['key'])) {
+                $enabled[] = $feat['key'];
             }
         }
         return $enabled;
     }
 
     /**
-     * Get full matrix of roles x features for Superadmin UI.
+     * Get full matrix of roles x features for Superadmin UI or reporting.
      */
     public function getFullMatrix(): array
     {
-        $allRows = $this->findAll();
-        $lookup = [];
-        foreach ($allRows as $row) {
-            $lookup[$row['role']][$row['feature_key']] = (bool) $row['is_enabled'];
-        }
-
         $matrix = [];
         foreach (self::SYSTEM_FEATURES as $feat) {
             $key = $feat['key'];
             $rolesState = [];
             foreach (self::SYSTEM_ROLES as $role) {
-                if (isset($lookup[$role][$key])) {
-                    $rolesState[$role] = $lookup[$role][$key];
-                } else {
-                    $rolesState[$role] = $this->hasPermission($role, $key);
-                }
+                $rolesState[$role] = $this->hasPermission($role, $key);
             }
             $matrix[] = [
                 'key'         => $feat['key'],
@@ -233,45 +187,11 @@ class RolePermissionModel extends Model
     }
 
     /**
-     * Bulk save matrix settings.
-     *
-     * @param array $matrix [ ['role' => string, 'feature_key' => string, 'is_enabled' => bool], ... ]
+     * Bulk save matrix settings (Stubbed since dynamic matrix is removed).
      */
     public function saveMatrix(array $matrix): bool
     {
-        helper('sanitize');
-        $now = date('Y-m-d H:i:s');
-        foreach ($matrix as $item) {
-            $role    = sanitize_string($item['role'] ?? '');
-            $feature = sanitize_string($item['feature_key'] ?? '');
-            $enabled = !empty($item['is_enabled']) ? 1 : 0;
-
-            if (empty($role) || empty($feature)) {
-                continue;
-            }
-
-            // Do not allow revoking superadmin matrix control
-            if ($role === 'superadmin') {
-                $enabled = 1;
-            }
-
-            $existing = $this->where('role', $role)->where('feature_key', $feature)->first();
-            if ($existing) {
-                $this->update($existing['id'], [
-                    'is_enabled' => $enabled,
-                    'updated_at' => $now,
-                ]);
-            } else {
-                $this->insert([
-                    'role'        => $role,
-                    'feature_key' => $feature,
-                    'is_enabled'  => $enabled,
-                    'created_at'  => $now,
-                    'updated_at'  => $now,
-                ]);
-            }
-        }
-
         return true;
     }
 }
+

@@ -23,17 +23,6 @@ SET time_zone = "+00:00";
 
 -- --------------------------------------------------------
 
---
--- Table structure for table `ci_sessions`
---
-
-CREATE TABLE `ci_sessions` (
-  `id` varchar(128) NOT NULL,
-  `ip_address` varchar(45) NOT NULL,
-  `timestamp` int(10) UNSIGNED NOT NULL DEFAULT 0,
-  `data` blob NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- --------------------------------------------------------
 
 --
@@ -277,101 +266,7 @@ INSERT INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`, `creat
 
 -- --------------------------------------------------------
 
---
--- Table structure for table `role_permissions`
---
-
-CREATE TABLE `role_permissions` (
-  `id` int(11) UNSIGNED NOT NULL,
-  `role` varchar(50) NOT NULL,
-  `feature_key` varchar(100) NOT NULL,
-  `is_enabled` tinyint(1) NOT NULL DEFAULT 1,
-  `created_at` datetime DEFAULT NULL,
-  `updated_at` datetime DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Dumping data for table `role_permissions`
---
-
-INSERT INTO `role_permissions` (`id`, `role`, `feature_key`, `is_enabled`, `created_at`, `updated_at`) VALUES
-(1, 'superadmin', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(2, 'superadmin', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(3, 'superadmin', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(4, 'superadmin', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(5, 'superadmin', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(6, 'superadmin', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(7, 'superadmin', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(8, 'superadmin', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(9, 'superadmin', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(10, 'superadmin', 'users.provision', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(11, 'superadmin', 'system.matrix_control', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(12, 'admin', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(13, 'admin', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(14, 'admin', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(15, 'admin', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(16, 'admin', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(17, 'admin', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(18, 'admin', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(19, 'admin', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(20, 'admin', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(21, 'admin', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(22, 'admin', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(23, 'dispatcher', 'tickets.create', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(24, 'dispatcher', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(25, 'dispatcher', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(26, 'dispatcher', 'tickets.dispatch', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(27, 'dispatcher', 'tickets.assign_worker', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(28, 'dispatcher', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(29, 'dispatcher', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(30, 'dispatcher', 'personnel.manage', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(31, 'dispatcher', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(32, 'dispatcher', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(33, 'dispatcher', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(34, 'director', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(35, 'director', 'tickets.view_all', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(36, 'director', 'tickets.approve_decline', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(37, 'director', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(38, 'director', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(39, 'director', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(40, 'director', 'tickets.verify_close', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(41, 'director', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(42, 'director', 'reports.view', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(43, 'director', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(44, 'director', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(45, 'worker', 'tickets.create', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(46, 'worker', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(47, 'worker', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(48, 'worker', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(49, 'worker', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(50, 'worker', 'tickets.complete_work', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(51, 'worker', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(52, 'worker', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(53, 'worker', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(54, 'worker', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(55, 'worker', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(56, 'employee', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(57, 'employee', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(58, 'employee', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(59, 'employee', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(60, 'employee', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(61, 'employee', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(62, 'employee', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(63, 'employee', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(64, 'employee', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(65, 'employee', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(66, 'employee', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(67, 'student', 'tickets.create', 1, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(68, 'student', 'tickets.view_all', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(69, 'student', 'tickets.approve_decline', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(70, 'student', 'tickets.dispatch', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(71, 'student', 'tickets.assign_worker', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(72, 'student', 'tickets.complete_work', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(73, 'student', 'tickets.verify_close', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(74, 'student', 'personnel.manage', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(75, 'student', 'reports.view', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(76, 'student', 'users.provision', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00'),
-(77, 'student', 'system.matrix_control', 0, '2026-09-08 00:00:00', '2026-09-08 00:00:00');
+-- --------------------------------------------------------
 
 -- --------------------------------------------------------
 
@@ -838,9 +733,11 @@ CREATE TABLE `users` (
   `email` varchar(255) DEFAULT NULL,
   `password_hash` text NOT NULL,
   `contact_number` varchar(30) DEFAULT NULL,
-  `role` enum('student','employee','admin','dispatcher','director','worker','superadmin') NOT NULL DEFAULT 'student',
+  `role` enum('student','employee','admin','director','superadmin') NOT NULL DEFAULT 'student',
   `unit_id` int(11) UNSIGNED DEFAULT NULL,
   `student_id_number` varchar(50) DEFAULT NULL,
+  `student_type` varchar(50) DEFAULT NULL,
+  `organization_name` varchar(150) DEFAULT NULL,
   `id_card_image` text DEFAULT NULL,
   `avatar_path` varchar(255) DEFAULT NULL,
   `status` enum('Active','Pending','Rejected','Suspended','Deactivated') NOT NULL DEFAULT 'Active',
@@ -919,12 +816,6 @@ CREATE TABLE `account_activity_logs` (
 --
 
 --
--- Indexes for table `ci_sessions`
---
-ALTER TABLE `ci_sessions`
-  ADD PRIMARY KEY (`id`);
-
---
 -- Indexes for table `feedback_delay_reasons`
 --
 ALTER TABLE `feedback_delay_reasons`
@@ -976,13 +867,6 @@ ALTER TABLE `personnel_categories`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `uq_category_unit` (`unit_id`,`name`),
   ADD KEY `idx_categories_unit` (`unit_id`);
-
---
--- Indexes for table `role_permissions`
---
-ALTER TABLE `role_permissions`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `unique_role_feature` (`role`,`feature_key`);
 
 --
 -- Indexes for table `ssu_incident_details`
@@ -1170,12 +1054,6 @@ ALTER TABLE `otp_codes`
 --
 ALTER TABLE `personnel_categories`
   MODIFY `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
-
---
--- AUTO_INCREMENT for table `role_permissions`
---
-ALTER TABLE `role_permissions`
-  MODIFY `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=78;
 
 --
 -- AUTO_INCREMENT for table `ssu_incident_issues`

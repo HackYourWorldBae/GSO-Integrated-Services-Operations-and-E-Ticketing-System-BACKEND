@@ -200,7 +200,7 @@ class FeedbackController extends BaseController
 
         $this->logModel->logAction($ticketId, $userId, 'Feedback Submitted', "Rating: {$completionStatus}");
 
-        $admins = $db->query("SELECT id FROM users WHERE role IN ('admin', 'dispatcher') AND unit_id = ?", [$ticket['unit_id']])->getResultArray();
+        $admins = $db->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = ?", [$ticket['unit_id']])->getResultArray();
         foreach($admins as $admin) {
             $this->notificationModel->createNotification(
                 $admin['id'], 

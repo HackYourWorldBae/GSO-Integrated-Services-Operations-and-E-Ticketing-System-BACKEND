@@ -49,22 +49,8 @@ class RoleGuardFilter implements FilterInterface
 
         if (!in_array($currentRole, $arguments, true)) {
             // Check dynamic capability matrix for cross-role delegations
-            $hasDynamicAccess = false;
-
-            // Unit Head 'admin' accessing dispatcher endpoints
-            if ($currentRole === 'admin' && in_array('dispatcher', $arguments, true)) {
-                $hasDynamicAccess = $permissionModel->hasPermission('admin', 'tickets.dispatch')
-                                 || $permissionModel->hasPermission('admin', 'tickets.assign_worker');
-            }
-
-            // Dispatcher accessing admin endpoints (e.g. personnel management, ticket queue/approval)
-            if ($currentRole === 'dispatcher' && in_array('admin', $arguments, true)) {
-                $hasDynamicAccess = $permissionModel->hasPermission('dispatcher', 'personnel.manage')
-                                 || $permissionModel->hasPermission('dispatcher', 'tickets.approve_decline');
-            }
-
-            // Admin or Dispatcher accessing Director analytics
-            if (in_array($currentRole, ['admin', 'dispatcher'], true) && in_array('director', $arguments, true)) {
+            // Admin accessing Director analytics
+            if ($currentRole === 'admin' && in_array('director', $arguments, true)) {
                 $hasDynamicAccess = $permissionModel->hasPermission($currentRole, 'reports.view');
             }
 

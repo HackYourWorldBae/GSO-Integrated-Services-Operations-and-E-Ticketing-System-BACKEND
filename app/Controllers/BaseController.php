@@ -130,7 +130,7 @@ abstract class BaseController extends Controller
      */
     protected function isStaffRole(): bool
     {
-        return in_array($this->currentUserRole(), ['admin', 'dispatcher', 'director', 'worker'], true);
+        return in_array($this->currentUserRole(), ['admin', 'director', 'superadmin'], true);
     }
 
     /**
@@ -177,8 +177,8 @@ abstract class BaseController extends Controller
             return null;
         }
 
-        // Admins and Dispatchers must match their assigned unit_id
-        if (in_array($userRole, ['admin', 'dispatcher'], true)) {
+        // Unit Admins must match their assigned unit_id
+        if ($userRole === 'admin') {
             if ($userUnitId === null || $userUnitId !== $targetUnitId) {
                 $msg = !empty($customMessage) 
                     ? $customMessage 

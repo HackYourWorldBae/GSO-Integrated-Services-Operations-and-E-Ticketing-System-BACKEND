@@ -324,7 +324,7 @@ class TicketController extends BaseController
         }
 
         // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
-        if ($this->isStaffRole() && in_array($role, ['admin', 'dispatcher'], true)) {
+        if ($this->isStaffRole() && $role === 'admin') {
             if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
                 return $forbidden;
             }
@@ -1042,6 +1042,42 @@ class TicketController extends BaseController
             return $this->errorResponse('Request body is empty.');
         }
 
+        // Student Account Role Authorization Guard (RSO / SSG accounts)
+        if ($user['role'] === 'student') {
+            // 1. Block FGMU completely for students
+            if (!empty($body['fgmu']['services'])) {
+                return $this->errorResponse(
+                    'Student accounts are not authorized to submit Facilities Management (FGMU) service requests. These requests must be submitted by university faculty or staff.',
+                    ['unauthorized_unit' => 'FGMU'],
+                    ResponseInterface::HTTP_FORBIDDEN
+                );
+            }
+
+            // 2. Validate LEAU services: only allowed 4 services
+            if (!empty($body['leau']['services'])) {
+                $allowedLeauServices = [
+                    'borrowing of tools/ equipment',
+                    'borrowing of tools/equipment',
+                    'borrowing of plants',
+                    'hauling',
+                    'stage & hall decoration',
+                    'stage and hall decoration',
+                ];
+
+                foreach ($body['leau']['services'] as $srv) {
+                    $rawService = trim((string)($srv['service'] ?? ''));
+                    $normalizedService = strtolower(preg_replace('/\s+/', ' ', $rawService));
+                    if (!in_array($normalizedService, $allowedLeauServices, true)) {
+                        return $this->errorResponse(
+                            "Student organization accounts (RSO/SSG) are not authorized to request '{$rawService}'. Authorized services are: Borrowing of Tools/Equipment, Borrowing of Plants, Hauling, and Stage & Hall Decoration.",
+                            ['unauthorized_service' => $rawService],
+                            ResponseInterface::HTTP_FORBIDDEN
+                        );
+                    }
+                }
+            }
+        }
+
         $db             = Database::connect();
         $createdTickets = [];
 
@@ -1247,7 +1283,7 @@ class TicketController extends BaseController
         foreach ($createdTickets as $tId) {
             $t = $this->ticketModel->find($tId);
             if ($t) {
-                $admins = $db->query("SELECT id FROM users WHERE role IN ('admin', 'dispatcher') AND unit_id = ?", [$t['unit_id']])->getResultArray();
+                $admins = $db->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = ?", [$t['unit_id']])->getResultArray();
                 foreach($admins as $admin) {
                     $this->notificationModel->createNotification(
                         $admin['id'], 
@@ -1447,7 +1483,7 @@ class TicketController extends BaseController
         }
 
         // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
-        if ($this->isStaffRole() && in_array($role, ['admin', 'dispatcher'], true)) {
+        if ($this->isStaffRole() && $role === 'admin') {
             if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
                 return $forbidden;
             }
@@ -1819,7 +1855,7 @@ class TicketController extends BaseController
         // Security check: only ticket owner or admins can upload
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director'])) {
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->forbiddenResponse('You do not have permission to upload files to this ticket.');
         }
 
@@ -2019,7 +2055,7 @@ class TicketController extends BaseController
         // Security check
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'superadmin'])) {
+        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->response->setStatusCode(403)->setBody('Forbidden.');
         }
 
@@ -2131,7 +2167,7 @@ class TicketController extends BaseController
 
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'dispatcher', 'director', 'worker', 'superadmin'], true)) {
+        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->response->setStatusCode(403)->setBody('Forbidden.');
         }
 
@@ -2173,7 +2209,7 @@ class TicketController extends BaseController
 
         $userId = $this->currentUserId();
         $role   = $this->currentUserRole();
-        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'dispatcher', 'director', 'superadmin'], true)) {
+        if ((string)$ticket['user_id'] !== (string)$userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->forbiddenResponse('You do not have permission to verify and close this ticket.');
         }
 

@@ -58,8 +58,8 @@ class DispatchController extends BaseController
     public function assign(): ResponseInterface
     {
         $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'dispatcher', 'superadmin'], true)) {
-            return $this->errorResponse('Unauthorized. Only Unit Heads and dispatchers may assign personnel.', [], ResponseInterface::HTTP_FORBIDDEN);
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only Unit Heads may assign personnel.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];

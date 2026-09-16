@@ -115,7 +115,7 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                                 ->join('units', 'units.id = users.unit_id', 'left')
                                 ->where('users.id', $id)
                                 ->first();
@@ -147,7 +147,7 @@ class SuperadminController extends BaseController
             'email'             => 'required|valid_email|is_unique[users.email]',
             'password'          => 'required|min_length[6]',
             'confirm_password'  => 'permit_empty|matches[password]',
-            'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
+            'role'              => 'required|in_list[student,employee,admin,director,superadmin]',
             'status'            => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
             'unit_id'           => 'permit_empty',
             'contact_number'    => 'permit_empty|max_length[30]',
@@ -270,7 +270,7 @@ class SuperadminController extends BaseController
             'first_name'     => 'permit_empty|max_length[100]',
             'last_name'      => 'permit_empty|max_length[100]',
             'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
-            'role'           => 'permit_empty|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
+            'role'           => 'permit_empty|in_list[student,employee,admin,director,superadmin]',
             'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Deactivated]',
             'contact_number' => 'permit_empty|max_length[30]',
             'unit_id'        => 'permit_empty',

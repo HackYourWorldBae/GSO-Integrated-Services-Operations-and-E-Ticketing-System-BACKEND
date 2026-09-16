@@ -12,19 +12,14 @@ class Session extends BaseConfig
      * --------------------------------------------------------------------------
      * Session Driver
      * --------------------------------------------------------------------------
+     * The session storage driver to use.
      *
-     * Switched from FileHandler to DatabaseHandler to eliminate PHP's exclusive
-     * per-session file lock. The file handler blocks concurrent requests from the
-     * same user (e.g. multiple browser tabs), causing dashboards to appear broken.
-     *
-     * DatabaseHandler uses row-level locking in MySQL, allowing many concurrent
-     * sessions to coexist without blocking each other.
-     *
-     * NOTE: Requires the `ci_sessions` table (see migration 2026_08_04_000001).
+     * Default FileHandler is used. Authentication and active sessions are managed
+     * via stateless JWT tokens and the `user_sessions` table.
      *
      * @var class-string<BaseHandler>
      */
-    public string $driver = DatabaseHandler::class;
+    public string $driver = FileHandler::class;
 
     /**
      * --------------------------------------------------------------------------
@@ -51,13 +46,9 @@ class Session extends BaseConfig
      * --------------------------------------------------------------------------
      *
      * The location to save sessions to and is driver dependent.
-     *
-     * For the 'database' driver, it's the table name where sessions are stored.
-     * The `ci_sessions` table is created by migration 2026_08_04_000001.
-     *
-     * IMPORTANT: You are REQUIRED to set a valid save path!
+     * For FileHandler, leave empty to use the default WRITEPATH/session.
      */
-    public string $savePath = 'ci_sessions';
+    public string $savePath = '';
 
     /**
      * --------------------------------------------------------------------------

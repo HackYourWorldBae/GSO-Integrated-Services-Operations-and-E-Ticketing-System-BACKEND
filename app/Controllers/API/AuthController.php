@@ -58,6 +58,8 @@ class AuthController extends BaseController
         $email           = trim((string) ($this->request->getPost('email') ?? ''));
         $password        = (string) ($this->request->getPost('password') ?? '');
         $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
+        $studentType     = trim((string) ($this->request->getPost('student_type') ?? ''));
+        $organizationName = trim((string) ($this->request->getPost('organization_name') ?? ''));
 
         $errors = [];
 
@@ -82,6 +84,28 @@ class AuthController extends BaseController
         // 3. Role Validation
         if (!in_array($role, ['student', 'employee'], true)) {
             $errors['role'] = ['Role must be either Student or Employee.'];
+        }
+
+        // 3.1 Student Classification Validation (RSO or SSG only)
+        if ($role === 'student') {
+            if (!in_array($studentType, ['rso', 'ssg'], true)) {
+                $errors['student_type'] = ['Student accounts are exclusively for authorized representatives of Recognized Student Organizations (RSO) or the Supreme Student Government (SSG).'];
+            } elseif ($studentType === 'rso') {
+                if (empty($organizationName)) {
+                    $errors['organization_name'] = ['Please specify the Recognized Student Organization (RSO) name.'];
+                } elseif (mb_strlen($organizationName) < 2 || mb_strlen($organizationName) > 150) {
+                    $errors['organization_name'] = ['Organization name must be between 2 and 150 characters long.'];
+                }
+            } elseif ($studentType === 'ssg') {
+                if (empty($organizationName)) {
+                    $errors['organization_name'] = ['Please specify your SSG committee or officer position.'];
+                } elseif (mb_strlen($organizationName) < 2 || mb_strlen($organizationName) > 150) {
+                    $errors['organization_name'] = ['SSG committee or position must be between 2 and 150 characters long.'];
+                }
+            }
+        } else {
+            $studentType = null;
+            $organizationName = null;
         }
 
         // 4. Institutional ID Number (Strict 7 digits for students)
@@ -208,6 +232,8 @@ class AuthController extends BaseController
             'password_hash'     => password_hash($password, PASSWORD_DEFAULT),
             'contact_number'    => $contactNumber,
             'student_id_number' => $studentIdNumber,
+            'student_type'      => $studentType,
+            'organization_name' => $organizationName,
             'role'              => $role,
             'unit_id'           => null,
             'id_card_image'     => $idCardRelativePath,
@@ -222,13 +248,22 @@ class AuthController extends BaseController
 
         $createdUser = $this->userModel->getSafeUser($userId);
 
+        $activityDetails = $role === 'student'
+            ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, ID: {$studentIdNumber}). Pending ID card verification."
+            : "User self-registered a new {$role} account (ID: {$studentIdNumber}). Pending ID card verification.";
+
         $this->activityLogModel->logEvent([
             'event_type'     => 'ACCOUNT_REGISTERED',
             'severity'       => 'info',
             'actor_id'       => $userId,
             'target_user_id' => $userId,
-            'details'        => "User self-registered a new {$role} account (ID: {$studentIdNumber}). Pending ID card verification.",
-            'metadata'       => ['role' => $role, 'student_id_number' => $studentIdNumber],
+            'details'        => $activityDetails,
+            'metadata'       => [
+                'role'              => $role,
+                'student_id_number' => $studentIdNumber,
+                'student_type'      => $studentType,
+                'organization_name' => $organizationName,
+            ],
         ]);
 
         return $this->successResponse(

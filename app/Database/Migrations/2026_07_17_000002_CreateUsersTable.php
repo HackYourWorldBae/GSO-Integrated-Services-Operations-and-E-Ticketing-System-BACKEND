@@ -7,8 +7,8 @@ use CodeIgniter\Database\Migration;
 /**
  * Migration: Create Users Table
  *
- * Unified user table covering all six roles:
- *   student, employee, admin, dispatcher, director, worker
+ * Unified user table covering system roles:
+ *   student, employee, admin, director, superadmin
  *
  * - `id`                : UUID (VARCHAR 36) — no auto-increment
  * - `unit_id`           : FK to units — NULL for students; set for unit staff
@@ -54,7 +54,7 @@ class CreateUsersTable extends Migration
             ],
             'role' => [
                 'type'       => 'ENUM',
-                'constraint' => ['student', 'employee', 'admin', 'dispatcher', 'director', 'worker', 'superadmin'],
+                'constraint' => ['student', 'employee', 'admin', 'director', 'superadmin'],
                 'default'    => 'student',
                 'null'       => false,
             ],
@@ -68,6 +68,18 @@ class CreateUsersTable extends Migration
             'student_id_number' => [
                 'type'       => 'VARCHAR',
                 'constraint' => 50,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'student_type' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 50,
+                'null'       => true,
+                'default'    => null,
+            ],
+            'organization_name' => [
+                'type'       => 'VARCHAR',
+                'constraint' => 150,
                 'null'       => true,
                 'default'    => null,
             ],

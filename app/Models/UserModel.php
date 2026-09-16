@@ -8,7 +8,7 @@ use CodeIgniter\Model;
  * UserModel
  *
  * Handles all authentication and profile queries for the unified `users` table.
- * Covers students, employees, admins, dispatchers, directors, and workers.
+ * Covers students, employees, admins, directors, and superadmins.
  */
 class UserModel extends Model
 {
@@ -30,6 +30,8 @@ class UserModel extends Model
         'password_hash',
         'contact_number',
         'student_id_number',
+        'student_type',
+        'organization_name',
         'role',
         'unit_id',
         'id_card_image',
@@ -48,7 +50,7 @@ class UserModel extends Model
         'last_name'         => 'required|max_length[100]',
         'email'             => 'permit_empty|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
         'password_hash'     => 'required|min_length[8]',
-        'role'              => 'required|in_list[student,employee,admin,dispatcher,director,worker,superadmin]',
+        'role'              => 'required|in_list[student,employee,admin,director,superadmin]',
     ];
 
     protected $validationMessages = [
@@ -132,7 +134,7 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                         ->join('units', 'units.id = users.unit_id', 'left');
 
         if (!empty($search)) {
@@ -308,7 +310,7 @@ class UserModel extends Model
         $suspendedUsers = $this->where('status', 'Suspended')->countAllResults();
 
         // Role breakdown
-        $roles = ['superadmin', 'admin', 'dispatcher', 'director', 'worker', 'employee', 'student'];
+        $roles = ['superadmin', 'admin', 'director', 'employee', 'student'];
         $roleBreakdown = [];
         foreach ($roles as $r) {
             $roleBreakdown[$r] = $this->where('role', $r)->countAllResults();

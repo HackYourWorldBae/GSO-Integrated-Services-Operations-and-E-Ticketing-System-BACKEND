@@ -168,7 +168,12 @@ class TicketQueueController extends BaseController
                         }
                         // Stamp dispatched_at if not yet set
                         if (empty($assignment['dispatched_at'])) {
-                            $dispatchedTime = !empty($assignment['assigned_at']) ? $assignment['assigned_at'] : $now;
+                            $implDate = $ticket['assignment']['implementation_date'] ?? null;
+                            if ($implDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($implDate))) {
+                                $dispatchedTime = trim($implDate) . ' 08:00:00';
+                            } else {
+                                $dispatchedTime = $now;
+                            }
                             $assignmentModel->update($assignment['id'], [
                                 'dispatched_at' => $dispatchedTime,
                             ]);

@@ -269,11 +269,13 @@ class TicketActionController extends BaseController
 
         $isUnderInvestigation = (bool) $ticket['is_under_investigation'];
 
+        // If the ticket is not yet under investigation, preserve 'pending' status so it
+        // remains visible in the Submitted queue. Only use 'processing' when already flagged.
         $this->ticketModel->update($ticketId, [
             'ssu_notation' => $notation,
-            'status'       => 'processing',
-            'status_label' => $isUnderInvestigation ? 'Under Investigation' : 'Notation Added',
-            'current_step' => 3,
+            'status'       => $isUnderInvestigation ? 'processing' : 'pending',
+            'status_label' => $isUnderInvestigation ? 'Under Investigation' : 'Pending Review (Notated)',
+            'current_step' => $isUnderInvestigation ? 3 : 2,
             'reviewed_at'  => date('Y-m-d H:i:s'),
             'reviewed_by'  => $this->currentUserId(),
             'updated_at'   => date('Y-m-d H:i:s'),

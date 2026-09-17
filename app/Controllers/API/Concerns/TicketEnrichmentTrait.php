@@ -200,9 +200,9 @@ trait TicketEnrichmentTrait
 
             // Compute business working hours (skipping weekends & holidays)
             $startTimeStr = $ticket['assignment']['dispatched_at'] 
-                ?? $ticket['assignment']['assigned_at'] 
                 ?? $ticket['project_actual_start'] 
                 ?? $ticket['assignment']['implementation_date'] 
+                ?? $ticket['assignment']['assigned_at'] 
                 ?? null;
 
             if ($startTimeStr && in_array($ticket['status'], ['processing', 'resolved', 'closed'], true)) {

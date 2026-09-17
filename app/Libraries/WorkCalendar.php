@@ -177,11 +177,11 @@ class WorkCalendar
         $current = clone $startDate;
 
         while ($current <= $endDate) {
-            if (self::isWorkingDay($current)) {
-                $dayYmd = $current->format('Y-m-d');
-                $isStartDay = ($dayYmd === $start->format('Y-m-d'));
-                $isEndDay   = ($dayYmd === $end->format('Y-m-d'));
+            $dayYmd = $current->format('Y-m-d');
+            $isStartDay = ($dayYmd === $start->format('Y-m-d'));
+            $isEndDay   = ($dayYmd === $end->format('Y-m-d'));
 
+            if (self::isWorkingDay($current) || $isStartDay) {
                 if (!$isStartDay && !$isEndDay) {
                     // Full intermediate working day
                     $totalHours += self::STANDARD_DAILY_HOURS;
@@ -190,8 +190,9 @@ class WorkCalendar
                     $dayStart = (new DateTime($dayYmd))->setTime(self::WORK_START_HOUR, 0, 0);
                     $dayEnd   = (new DateTime($dayYmd))->setTime(self::WORK_END_HOUR, 0, 0);
 
-                    $windowStart = $isStartDay ? max($start, $dayStart) : $dayStart;
-                    $windowEnd   = $isEndDay   ? min($end, $dayEnd)     : $dayEnd;
+                    // On start day, count from actual start timestamp so early starts are not discarded
+                    $windowStart = $isStartDay ? $start : $dayStart;
+                    $windowEnd   = $isEndDay   ? min($end, $dayEnd) : $dayEnd;
 
                     if ($windowStart < $windowEnd) {
                         $seconds = $windowEnd->getTimestamp() - $windowStart->getTimestamp();
@@ -208,7 +209,7 @@ class WorkCalendar
                             $hours = max(0.0, $hours - $lunchOverlapHours);
                         }
 
-                        $totalHours += min(self::STANDARD_DAILY_HOURS, $hours);
+                        $totalHours += $hours;
                     }
                 }
             }

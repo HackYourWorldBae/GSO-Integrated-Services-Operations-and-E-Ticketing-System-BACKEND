@@ -39,6 +39,15 @@ abstract class BaseController extends Controller
     {
         parent::initController($request, $response, $logger);
         helper('sanitize');
+
+        try {
+            $db = \Config\Database::connect();
+            if ($db && $db->connID) {
+                $db->query("SET time_zone = '+08:00'");
+            }
+        } catch (\Throwable $e) {
+            // Non-blocking fallback if connection cannot set timezone immediately
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -102,7 +102,7 @@ class DirectorController extends BaseController
             $reportTitle = "Annual Performance & Operations Report";
             $reportType = "Annual";
         } else {
-            $periodLabel = "All-Time Historical Operations";
+            $periodLabel = "All-Time";
             $reportTitle = "Comprehensive Operations & Performance Report";
             $reportType = "All-Time";
         }

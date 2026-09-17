@@ -1965,23 +1965,27 @@ class TicketController extends BaseController
                 || (($ticket['service_type'] ?? '') === 'Incident Report')
                 || (($ticket['title'] ?? '') === 'Incident Report');
 
-            $ticket['working_days']        = $isIncidentReport ? null : (!empty($ticket['assignment']['working_days']) 
+            $isUnscheduled = $isIncidentReport 
+                || in_array($ticket['status'], ['pending', 'declined', 'cancelled'], true)
+                || (empty($ticket['assignment']['working_days']) && empty($ticket['project_working_days']));
+
+            $ticket['working_days']        = $isUnscheduled ? null : (!empty($ticket['assignment']['working_days']) 
                 ? (int) $ticket['assignment']['working_days'] 
                 : (!empty($ticket['project_working_days']) 
                     ? (int) $ticket['project_working_days'] 
-                    : (!empty($ticket['eodb_days']) ? (int) $ticket['eodb_days'] : null)));
-            $ticket['implementation_date'] = $isIncidentReport ? null : ($ticket['assignment']['implementation_date'] 
+                    : null));
+            $ticket['implementation_date'] = $isUnscheduled ? null : ($ticket['assignment']['implementation_date'] 
                 ?? (!empty($ticket['assignments'][0]['implementation_date']) ? $ticket['assignments'][0]['implementation_date'] : null)
                 ?? ($ticket['project_target_date'] ?? null));
-            $ticket['assigned_worker']     = $isIncidentReport ? null : ($ticket['assignment']['personnel_name'] ?? null);
-            $ticket['assigned_profession'] = $isIncidentReport ? null : ($ticket['assignment']['specialty'] ?? null);
+            $ticket['assigned_worker']     = $isUnscheduled ? null : ($ticket['assignment']['personnel_name'] ?? null);
+            $ticket['assigned_profession'] = $isUnscheduled ? null : ($ticket['assignment']['specialty'] ?? null);
 
-            $ticket['extension_days']           = $isIncidentReport ? 0 : (int) ($ticket['extension_days'] ?? 0);
-            $ticket['extended_completion_date'] = $isIncidentReport ? null : ($ticket['extended_completion_date'] ?? null);
-            $ticket['extension_reason']         = $isIncidentReport ? null : ($ticket['extension_reason'] ?? null);
-            $ticket['overtime_hours']           = $isIncidentReport ? 0.0 : (float) ($ticket['overtime_hours'] ?? 0.0);
-            $ticket['is_extended']              = !$isIncidentReport && (($ticket['extension_days'] > 0) || !empty($ticket['extended_completion_date']));
-            $ticket['effective_target_date']    = $isIncidentReport ? null : (!empty($ticket['extended_completion_date'])
+            $ticket['extension_days']           = $isUnscheduled ? 0 : (int) ($ticket['extension_days'] ?? 0);
+            $ticket['extended_completion_date'] = $isUnscheduled ? null : ($ticket['extended_completion_date'] ?? null);
+            $ticket['extension_reason']         = $isUnscheduled ? null : ($ticket['extension_reason'] ?? null);
+            $ticket['overtime_hours']           = $isUnscheduled ? 0.0 : (float) ($ticket['overtime_hours'] ?? 0.0);
+            $ticket['is_extended']              = !$isUnscheduled && (($ticket['extension_days'] > 0) || !empty($ticket['extended_completion_date']));
+            $ticket['effective_target_date']    = $isUnscheduled ? null : (!empty($ticket['extended_completion_date'])
                 ? $ticket['extended_completion_date']
                 : (!empty($ticket['assignment']['implementation_date'])
                     ? $ticket['assignment']['implementation_date']
@@ -1992,9 +1996,9 @@ class TicketController extends BaseController
             $ticket['verification_status']        = $ticket['verification_status'] ?? 'pending_report';
             $ticket['verified_by_user_id']        = $ticket['verified_by_user_id'] ?? null;
             $ticket['verified_at']                = $ticket['verified_at'] ?? null;
-            $ticket['eodb_tier']                  = $isIncidentReport ? null : ($ticket['eodb_tier'] ?? null);
-            $ticket['eodb_days']                  = (!$isIncidentReport && !empty($ticket['eodb_days'])) ? (int) $ticket['eodb_days'] : null;
-            $ticket['target_completion_date']     = $isIncidentReport ? null : ($ticket['target_completion_date'] ?? null);
+            $ticket['eodb_tier']                  = $isUnscheduled ? null : ($ticket['eodb_tier'] ?? null);
+            $ticket['eodb_days']                  = ($isUnscheduled || empty($ticket['eodb_days'])) ? null : (int) $ticket['eodb_days'];
+            $ticket['target_completion_date']     = $isUnscheduled ? null : ($ticket['target_completion_date'] ?? null);
             $ticket['is_emergency']               = (int) ($ticket['is_emergency'] ?? 0);
             $ticket['is_vip']                     = (int) ($ticket['is_vip'] ?? 0);
 

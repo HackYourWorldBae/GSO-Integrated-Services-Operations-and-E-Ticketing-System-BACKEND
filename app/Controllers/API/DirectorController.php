@@ -287,22 +287,35 @@ class DirectorController extends BaseController
         $healthWhereSql = !empty($healthConds) ? "WHERE " . implode(" AND ", $healthConds) : "";
 
         $completionHealthRows = $db->query("
-            SELECT tf.completion_status, COUNT(*) AS count
+            SELECT 
+                CASE 
+                    WHEN tf.completion_status = 'early' THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    ELSE tf.completion_status 
+                END AS completion_status,
+                COUNT(*) AS count
             FROM ticket_feedbacks tf
             JOIN tickets t ON t.id = tf.ticket_id
             {$healthWhereSql}
-            GROUP BY tf.completion_status
+            GROUP BY 
+                CASE 
+                    WHEN tf.completion_status = 'early' THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    ELSE tf.completion_status 
+                END
         ", $healthParams)->getResultArray();
 
+        $earlyFinished = 0;
         $onTime = 0;
         $beyondTime = 0;
         $notCompleted = 0;
         foreach ($completionHealthRows as $r) {
+            if ($r['completion_status'] === 'early') $earlyFinished = (int)$r['count'];
             if ($r['completion_status'] === 'on-time') $onTime = (int)$r['count'];
             if ($r['completion_status'] === 'beyond-time') $beyondTime = (int)$r['count'];
             if ($r['completion_status'] === 'not-completed') $notCompleted = (int)$r['count'];
         }
-        $healthTotal = $onTime + $beyondTime + $notCompleted;
+        $healthTotal = $earlyFinished + $onTime + $beyondTime + $notCompleted;
 
         // 5. Top Delay Reasons
         $delayRows = $db->query("
@@ -321,6 +334,44 @@ class DirectorController extends BaseController
             'reason' => $r['reason_label'],
             'count'  => (int)$r['count']
         ], $delayRows);
+
+        // 5.5. Approval Delay Reasons (executive level)
+        $appDelayConds = ["t.approval_delay_reason IS NOT NULL", "TRIM(t.approval_delay_reason) != ''"];
+        $appDelayParams = [];
+        if ($period === 'year') {
+            $appDelayConds[] = "YEAR(COALESCE(t.approval_delayed_at, t.submitted_at)) = ?";
+            $appDelayParams[] = $year;
+        } elseif ($period === 'quarter') {
+            $appDelayConds[] = "YEAR(COALESCE(t.approval_delayed_at, t.submitted_at)) = ? AND QUARTER(COALESCE(t.approval_delayed_at, t.submitted_at)) = ?";
+            $appDelayParams[] = $year;
+            $appDelayParams[] = $quarter;
+        } elseif ($period === 'month') {
+            $appDelayConds[] = "YEAR(COALESCE(t.approval_delayed_at, t.submitted_at)) = ? AND MONTH(COALESCE(t.approval_delayed_at, t.submitted_at)) = ?";
+            $appDelayParams[] = $year;
+            $appDelayParams[] = $month;
+        } elseif ($period === 'day') {
+            $appDelayConds[] = "DATE(COALESCE(t.approval_delayed_at, t.submitted_at)) = ?";
+            $appDelayParams[] = $targetDate;
+        }
+        if ($unitFilter !== 'ALL' && isset(self::UNIT_MAP[$unitFilter])) {
+            $appDelayConds[] = "t.unit_id = ?";
+            $appDelayParams[] = self::UNIT_MAP[$unitFilter];
+        }
+        $appDelayWhereSql = "WHERE " . implode(" AND ", $appDelayConds);
+
+        $appDelayRows = $db->query("
+            SELECT TRIM(t.approval_delay_reason) AS reason, COUNT(*) AS count
+            FROM tickets t
+            {$appDelayWhereSql}
+            GROUP BY TRIM(t.approval_delay_reason)
+            ORDER BY count DESC
+            LIMIT 10
+        ", $appDelayParams)->getResultArray();
+
+        $approvalDelayReasons = array_map(fn($r) => [
+            'reason' => $r['reason'],
+            'count'  => (int)$r['count']
+        ], $appDelayRows);
 
         // 6. Annual Trend (tickets per unit per month for the selected year)
         $trendYear = $year ?: $currentYear;
@@ -491,16 +542,19 @@ class DirectorController extends BaseController
             'service_breakdown_by_unit' => $serviceBreakdownByUnit,
             'materials_summary'   => $materialsSummary,
             'completion_health'   => [
-                'on_time'            => $onTime,
-                'beyond_time'        => $beyondTime,
-                'not_completed'      => $notCompleted,
-                'total'              => $healthTotal,
-                'on_time_percent'    => $healthTotal > 0 ? round(($onTime / $healthTotal) * 100) : 0,
-                'beyond_time_percent'=> $healthTotal > 0 ? round(($beyondTime / $healthTotal) * 100) : 0,
-                'not_completed_percent'=> $healthTotal > 0 ? round(($notCompleted / $healthTotal) * 100) : 0,
+                'early_finished'        => $earlyFinished,
+                'on_time'               => $onTime,
+                'beyond_time'           => $beyondTime,
+                'not_completed'         => $notCompleted,
+                'total'                 => $healthTotal,
+                'early_finished_percent'=> $healthTotal > 0 ? round(($earlyFinished / $healthTotal) * 100) : 0,
+                'on_time_percent'       => $healthTotal > 0 ? round(($onTime / $healthTotal) * 100) : 0,
+                'beyond_time_percent'   => $healthTotal > 0 ? round(($beyondTime / $healthTotal) * 100) : 0,
+                'not_completed_percent' => $healthTotal > 0 ? round(($notCompleted / $healthTotal) * 100) : 0,
             ],
-            'delay_reasons'       => $delayReasons,
-            'trends'              => $trend,
+            'delay_reasons'           => $delayReasons,
+            'approval_delay_reasons'  => $approvalDelayReasons,
+            'trends'                  => $trend,
             'director_name'       => $directorName,
             'generated_at'        => date('F j, Y, g:i A'),
             'generated_iso'       => date('c'),

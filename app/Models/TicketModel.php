@@ -503,13 +503,24 @@ class TicketModel extends Model
         }
         $stats['feedback_averages'] = $averages;
 
-        // 2. Completion Health
+        // 2. Completion Health (includes early finished detection)
         $completion = $db->query("
-            SELECT tf.completion_status, COUNT(*) as count 
+            SELECT 
+                CASE 
+                    WHEN tf.completion_status = 'early' THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    ELSE tf.completion_status 
+                END AS completion_status,
+                COUNT(*) as count 
             FROM ticket_feedbacks tf 
             JOIN tickets t ON t.id = tf.ticket_id 
             $whereUnit 
-            GROUP BY tf.completion_status
+            GROUP BY 
+                CASE 
+                    WHEN tf.completion_status = 'early' THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    ELSE tf.completion_status 
+                END
         ")->getResultArray();
         $stats['completion_health'] = $completion;
 
@@ -536,6 +547,22 @@ class TicketModel extends Model
             GROUP BY r.reason_code
         ")->getResultArray();
         $stats['non_completion'] = $nonCompletion;
+
+        // 4.5. Approval Delay Reasons (Pre-Work Deferred / Delayed Approvals)
+        $appDelayWhere = $unitId 
+            ? "WHERE t.unit_id = " . (int)$unitId . " AND t.approval_delay_reason IS NOT NULL AND TRIM(t.approval_delay_reason) != ''" 
+            : "WHERE t.approval_delay_reason IS NOT NULL AND TRIM(t.approval_delay_reason) != ''";
+
+        $approvalDelayReasons = $db->query("
+            SELECT 
+                TRIM(t.approval_delay_reason) AS reason_text, 
+                COUNT(*) AS count 
+            FROM tickets t 
+            $appDelayWhere 
+            GROUP BY TRIM(t.approval_delay_reason)
+            ORDER BY count DESC
+        ")->getResultArray();
+        $stats['approval_delay_reasons'] = $approvalDelayReasons;
 
         // 5. Service Request Frequency
         $freq = [];

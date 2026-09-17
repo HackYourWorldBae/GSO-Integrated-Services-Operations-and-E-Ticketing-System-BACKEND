@@ -39,7 +39,7 @@ class FeedbackController extends BaseController
      *
      * Body: {
      *   ticket_id: string,
-     *   completion_status: 'on-time' | 'beyond-time' | 'not-completed',
+     *   completion_status: 'early' | 'on-time' | 'beyond-time' | 'not-completed',
      *   courtesy_rating: 1-5,
      *   quality_rating: 1-5,
      *   efficiency_rating: 1-5,
@@ -84,7 +84,7 @@ class FeedbackController extends BaseController
         $ratingFields     = ['quality_rating', 'efficiency_rating', 'timeliness_rating'];
         $completionStatus = sanitize_string($body['completion_status'] ?? 'on-time');
 
-        $validCompletionStatuses = ['on-time', 'beyond-time', 'not-completed'];
+        $validCompletionStatuses = ['early', 'on-time', 'beyond-time', 'not-completed'];
         if (!in_array($completionStatus, $validCompletionStatuses, true)) {
             return $this->errorResponse('Invalid completion_status value.');
         }

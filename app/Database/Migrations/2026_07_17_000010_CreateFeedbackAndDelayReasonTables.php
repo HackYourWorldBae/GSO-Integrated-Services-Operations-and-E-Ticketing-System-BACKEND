@@ -50,7 +50,7 @@ class CreateFeedbackAndDelayReasonTables extends Migration
             ],
             'completion_status' => [
                 'type'       => 'ENUM',
-                'constraint' => ['on-time', 'beyond-time', 'not-completed'],
+                'constraint' => ['early', 'on-time', 'beyond-time', 'not-completed'],
                 'null'       => false,
             ],
             'courtesy_rating' => [

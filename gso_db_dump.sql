@@ -387,7 +387,7 @@ CREATE TABLE `ticket_feedbacks` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL UNIQUE,
   `user_id` varchar(36) NOT NULL,
-  `completion_status` enum('on-time','beyond-time','not-completed') NOT NULL,
+  `completion_status` enum('early','on-time','beyond-time','not-completed') NOT NULL,
   `courtesy_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
   `quality_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
   `efficiency_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,

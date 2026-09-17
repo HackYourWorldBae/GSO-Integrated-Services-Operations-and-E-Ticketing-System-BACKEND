@@ -7,6 +7,7 @@ use App\Models\TicketModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
+use Config\Database;
 
 /**
  * TicketActionController - Handles administrative ticket lifecycle actions and state transitions.

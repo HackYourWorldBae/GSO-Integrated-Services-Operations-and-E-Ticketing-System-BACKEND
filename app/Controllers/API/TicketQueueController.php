@@ -4,6 +4,7 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
+use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;

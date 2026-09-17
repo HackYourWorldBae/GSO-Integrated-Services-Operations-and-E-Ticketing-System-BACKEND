@@ -4,9 +4,13 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
+use App\Models\FgmuTicketDetailModel;
+use App\Models\LeauTicketDetailModel;
+use App\Models\SsuIncidentDetailModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
+use Config\Database;
 
 /**
  * TicketController - Handles requestor ticket intake and personal request queries.

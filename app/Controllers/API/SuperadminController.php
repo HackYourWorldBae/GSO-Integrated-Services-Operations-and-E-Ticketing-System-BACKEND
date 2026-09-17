@@ -115,7 +115,7 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.college, users.id_card_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
                                 ->join('units', 'units.id = users.unit_id', 'left')
                                 ->where('users.id', $id)
                                 ->first();
@@ -229,6 +229,9 @@ class SuperadminController extends BaseController
             'unit_id'           => $unitId,
             'contact_number'    => $contactNumber,
             'student_id_number' => $studentIdNumber,
+            'student_type'      => !empty($body['student_type']) ? trim((string) $body['student_type']) : null,
+            'organization_name' => !empty($body['organization_name']) ? trim((string) $body['organization_name']) : null,
+            'college'           => !empty($body['college']) ? trim((string) $body['college']) : null,
             'status'            => $body['status'] ?? 'Active',
             'is_verified'       => 1,
         ];
@@ -308,7 +311,10 @@ class SuperadminController extends BaseController
         if (isset($body['email']))          $updateData['email']          = strtolower(trim($body['email']));
         if (isset($body['role']))           $updateData['role']           = $body['role'];
         if (isset($body['status']))         $updateData['status']         = $body['status'];
-        if (isset($body['contact_number'])) $updateData['contact_number'] = $body['contact_number'];
+        if (isset($body['contact_number']))    $updateData['contact_number']    = $body['contact_number'];
+        if (isset($body['student_type']))      $updateData['student_type']      = trim((string) $body['student_type']);
+        if (isset($body['organization_name'])) $updateData['organization_name'] = trim((string) $body['organization_name']);
+        if (isset($body['college']))           $updateData['college']           = trim((string) $body['college']);
         if (array_key_exists('unit_id', $body)) {
             $updateData['unit_id'] = !empty($body['unit_id']) ? (int) $body['unit_id'] : null;
         }

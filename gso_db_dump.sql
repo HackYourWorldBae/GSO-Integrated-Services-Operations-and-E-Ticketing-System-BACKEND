@@ -51,6 +51,7 @@ CREATE TABLE `users` (
   `student_id_number` varchar(50) DEFAULT NULL,
   `student_type` varchar(50) DEFAULT NULL,
   `organization_name` varchar(150) DEFAULT NULL,
+  `college` varchar(150) DEFAULT NULL,
   `id_card_image` text DEFAULT NULL,
   `avatar_path` varchar(255) DEFAULT NULL,
   `status` enum('Active','Pending','Rejected','Suspended','Deactivated') NOT NULL DEFAULT 'Active',

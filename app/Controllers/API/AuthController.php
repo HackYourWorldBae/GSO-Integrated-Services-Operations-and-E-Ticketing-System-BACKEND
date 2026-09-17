@@ -60,6 +60,7 @@ class AuthController extends BaseController
         $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
         $studentType     = strtolower(trim((string) ($this->request->getPost('student_type') ?? '')));
         $organizationName = trim((string) ($this->request->getPost('organization_name') ?? ''));
+        $college          = trim((string) ($this->request->getPost('college') ?? ''));
 
         $errors = [];
 
@@ -103,9 +104,15 @@ class AuthController extends BaseController
                     $errors['organization_name'] = ['SSG committee or position must be between 2 and 150 characters long.'];
                 }
             }
+            if (empty($college)) {
+                $errors['college'] = ['Please select the college or academic unit you belong to.'];
+            } elseif (mb_strlen($college) > 150) {
+                $errors['college'] = ['College name must not exceed 150 characters.'];
+            }
         } else {
             $studentType = null;
             $organizationName = null;
+            $college = null;
         }
 
         // 4. Institutional ID Number (Strict 7 digits for students)
@@ -234,6 +241,7 @@ class AuthController extends BaseController
             'student_id_number' => $studentIdNumber,
             'student_type'      => $studentType,
             'organization_name' => $organizationName,
+            'college'           => $college,
             'role'              => $role,
             'unit_id'           => null,
             'id_card_image'     => $idCardRelativePath,
@@ -249,7 +257,7 @@ class AuthController extends BaseController
         $createdUser = $this->userModel->getSafeUser($userId);
 
         $activityDetails = $role === 'student'
-            ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, ID: {$studentIdNumber}). Pending ID card verification."
+            ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, College: {$college}, ID: {$studentIdNumber}). Pending ID card verification."
             : "User self-registered a new {$role} account (ID: {$studentIdNumber}). Pending ID card verification.";
 
         $this->activityLogModel->logEvent([
@@ -263,6 +271,7 @@ class AuthController extends BaseController
                 'student_id_number' => $studentIdNumber,
                 'student_type'      => $studentType,
                 'organization_name' => $organizationName,
+                'college'           => $college,
             ],
         ]);
 

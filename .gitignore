@@ -127,5 +127,5 @@ _modules/*
 /phpunit*.xml
 writable/gcp-credentials.json
 
-#ddl
-bsu_gso_db_dump.sql
+# Database dumps & DDL files
+*.sql

@@ -57,7 +57,7 @@ class TicketAttachmentController extends BaseController
         // Security check: only ticket owner or admins can upload
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
+        if ((string) $ticket['user_id'] !== (string) $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->forbiddenResponse('You do not have permission to upload files to this ticket.');
         }
 
@@ -81,6 +81,7 @@ class TicketAttachmentController extends BaseController
         $attachments = array_values(array_filter($rawAttachments, fn($f) => ($f instanceof \CodeIgniter\HTTP\Files\UploadedFile) && $f->getError() !== UPLOAD_ERR_NO_FILE));
 
         if (empty($attachments)) {
+            log_message('error', '[TicketAttachmentController::uploadAttachment] No files received for ticket ' . $ticketId . '. Files keys: ' . implode(',', array_keys($this->request->getFiles())));
             return $this->errorResponse('No files uploaded. Use "attachments[]" key in your form-data.');
         }
 
@@ -97,9 +98,9 @@ class TicketAttachmentController extends BaseController
             @mkdir($uploadPath, 0775, true);
         }
 
-        $allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx'];
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx'];
         $allowedMimes = [
-            'image/jpeg', 'image/png', 'image/jpg',
+            'image/jpeg', 'image/png', 'image/jpg', 'image/webp',
             'application/pdf', 
             'application/msword', 
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -228,6 +229,7 @@ class TicketAttachmentController extends BaseController
         }
 
         if (empty($uploadedData) && !empty($errors)) {
+            log_message('error', '[TicketAttachmentController::uploadAttachment] Upload failed for ticket ' . $ticketId . ': ' . implode(' | ', $errors));
             return $this->errorResponse('File upload failed.', $errors);
         }
 
@@ -257,7 +259,7 @@ class TicketAttachmentController extends BaseController
         // Security check
         $userId = $this->currentUserId();
         $role = $this->currentUserRole();
-        if ($ticket['user_id'] !== $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
+        if ((string) $ticket['user_id'] !== (string) $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->response->setStatusCode(403)->setBody('Forbidden.');
         }
 

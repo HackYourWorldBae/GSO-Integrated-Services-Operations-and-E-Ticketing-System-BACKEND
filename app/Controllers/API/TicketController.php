@@ -62,6 +62,26 @@ class TicketController extends BaseController
         $tickets = $this->ticketModel->getActiveByUser($userId);
         $tickets = $this->enrichTickets($tickets);
 
+        // Strip internal staff documents (Job Order, Slips, Reports) from requester view
+        foreach ($tickets as &$ticket) {
+            if (!empty($ticket['attachments'])) {
+                $ticket['attachments'] = array_values(array_filter($ticket['attachments'], function ($att) {
+                    $name = strtolower(str_replace(['-', '_'], ' ', (string) ($att['file_name'] ?? '')));
+                    return (
+                        strpos($name, 'job order') === false &&
+                        strpos($name, 'job request form') === false &&
+                        strpos($name, 'joborder') === false &&
+                        strpos($name, 'work order') === false &&
+                        strpos($name, 'receipt slip') === false &&
+                        strpos($name, 'material slip') === false &&
+                        strpos($name, 'materials slip') === false &&
+                        strpos($name, 'accomplishment') === false
+                    );
+                }));
+            }
+        }
+        unset($ticket);
+
         return $this->successResponse('Active tickets retrieved.', ['tickets' => $tickets]);
     }
 
@@ -73,6 +93,26 @@ class TicketController extends BaseController
         $userId  = $this->currentUserId();
         $tickets = $this->ticketModel->getArchivedByUser($userId);
         $tickets = $this->enrichTickets($tickets);
+
+        // Strip internal staff documents (Job Order, Slips, Reports) from requester view
+        foreach ($tickets as &$ticket) {
+            if (!empty($ticket['attachments'])) {
+                $ticket['attachments'] = array_values(array_filter($ticket['attachments'], function ($att) {
+                    $name = strtolower(str_replace(['-', '_'], ' ', (string) ($att['file_name'] ?? '')));
+                    return (
+                        strpos($name, 'job order') === false &&
+                        strpos($name, 'job request form') === false &&
+                        strpos($name, 'joborder') === false &&
+                        strpos($name, 'work order') === false &&
+                        strpos($name, 'receipt slip') === false &&
+                        strpos($name, 'material slip') === false &&
+                        strpos($name, 'materials slip') === false &&
+                        strpos($name, 'accomplishment') === false
+                    );
+                }));
+            }
+        }
+        unset($ticket);
 
         return $this->successResponse('Completed tickets retrieved.', ['tickets' => $tickets]);
     }

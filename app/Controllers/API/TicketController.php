@@ -812,8 +812,17 @@ class TicketController extends BaseController
             return $this->errorResponse("Only pending tickets can have their approval delayed. Current status: {$ticket['status']}.");
         }
 
-        $body   = $this->request->getJSON(true) ?? [];
-        $reason = sanitize_string($body['reason'] ?? '');
+        $body    = $this->request->getJSON(true) ?? [];
+        $rawPost = $this->request->getRawInput() ?? [];
+        $reason  = sanitize_string(
+            $body['reason'] 
+            ?? $body['delay_reason'] 
+            ?? $rawPost['reason'] 
+            ?? $rawPost['delay_reason'] 
+            ?? $this->request->getPost('reason') 
+            ?? $this->request->getPost('delay_reason') 
+            ?? ''
+        );
 
         if (empty($reason)) {
             return $this->errorResponse('A delay reason is required (e.g. Awaiting procurement of materials).', [

@@ -286,8 +286,11 @@ class TicketModel extends Model
 
         // Period filter resolution
         $period = strtolower((string)($filters['period'] ?? 'all'));
-        if (!in_array($period, ['all', 'year', 'quarter', 'month'])) {
+        if (!in_array($period, ['all', 'year', 'quarter', 'month', 'day', 'daily'])) {
             $period = 'all';
+        }
+        if ($period === 'daily') {
+            $period = 'day';
         }
 
         $yearRaw = $filters['year'] ?? null;
@@ -298,6 +301,9 @@ class TicketModel extends Model
 
         $monthRaw = $filters['month'] ?? null;
         $month = ($monthRaw !== null && is_numeric($monthRaw)) ? (int)$monthRaw : (int)date('n');
+
+        $dateRaw = $filters['date'] ?? null;
+        $targetDate = ($dateRaw && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateRaw)) ? $dateRaw : date('Y-m-d');
 
         $filteredTotal = (int)($allTimeRow['all_time_total'] ?? 0);
         $filteredResolved = (int)($allTimeRow['all_time_resolved'] ?? 0);
@@ -324,6 +330,12 @@ class TicketModel extends Model
                 $decCond = "status = 'declined' AND YEAR(COALESCE(reviewed_at, updated_at, submitted_at)) = {$year} AND MONTH(COALESCE(reviewed_at, updated_at, submitted_at)) = {$month}";
                 $mName = date('F', mktime(0, 0, 0, $month, 10));
                 $filterLabel = "{$mName} {$year}";
+            } elseif ($period === 'day') {
+                $subCond = "DATE(submitted_at) = '{$targetDate}'";
+                $resCond = "status IN ('resolved', 'closed') AND DATE(COALESCE(completed_at, submitted_at)) = '{$targetDate}'";
+                $decCond = "status = 'declined' AND DATE(COALESCE(reviewed_at, updated_at, submitted_at)) = '{$targetDate}'";
+                $isToday = ($targetDate === date('Y-m-d'));
+                $filterLabel = $isToday ? "Today (" . date('M j, Y') . ")" : date('F j, Y', strtotime($targetDate));
             }
 
             $filterSql = "
@@ -338,10 +350,90 @@ class TicketModel extends Model
             $filteredDeclined = (int)($fRow['f_declined'] ?? 0);
         }
 
+        // Today's Real-time Daily KPIs (always returned regardless of selected filter)
+        $whereUnitForToday = $unitId !== null ? "unit_id = " . (int)$unitId . " AND " : "";
+        $todaySql = "
+            SELECT
+                (SELECT COUNT(*) FROM tickets WHERE {$whereUnitForToday} DATE(submitted_at) = CURDATE()) AS daily_total,
+                (SELECT COUNT(*) FROM tickets WHERE {$whereUnitForToday} status IN ('resolved', 'closed') AND DATE(COALESCE(completed_at, submitted_at)) = CURDATE()) AS daily_resolved,
+                (SELECT COUNT(*) FROM tickets WHERE {$whereUnitForToday} status = 'declined' AND DATE(COALESCE(reviewed_at, updated_at, submitted_at)) = CURDATE()) AS daily_declined
+        ";
+        $todayRow = $db->query($todaySql)->getRowArray() ?? [];
+        $dailyTotal = (int)($todayRow['daily_total'] ?? 0);
+        $dailyResolved = (int)($todayRow['daily_resolved'] ?? 0);
+        $dailyDeclined = (int)($todayRow['daily_declined'] ?? 0);
+
+        // 7-Day Activity Breakdown (recent trend of daily requests vs completed jobs)
+        $recentDays = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $d = date('Y-m-d', strtotime("-{$i} days"));
+            $recentDays[$d] = [
+                'date'            => $d,
+                'day_name'        => date('D', strtotime($d)),
+                'label'           => ($i === 0) ? 'Today' : date('M j', strtotime($d)),
+                'is_today'        => ($i === 0),
+                'total_requests'  => 0,
+                'completed_jobs'  => 0,
+                'declined'        => 0,
+                'completion_rate' => 0,
+            ];
+        }
+
+        $startDate = date('Y-m-d', strtotime('-6 days'));
+        $dailySubmissions = $db->query("
+            SELECT DATE(submitted_at) AS d, COUNT(*) AS count
+            FROM tickets
+            WHERE {$whereUnitForToday} DATE(submitted_at) >= '{$startDate}'
+            GROUP BY DATE(submitted_at)
+        ")->getResultArray();
+        foreach ($dailySubmissions as $row) {
+            if (isset($recentDays[$row['d']])) {
+                $recentDays[$row['d']]['total_requests'] = (int)$row['count'];
+            }
+        }
+
+        $dailyCompletions = $db->query("
+            SELECT DATE(COALESCE(completed_at, submitted_at)) AS d, COUNT(*) AS count
+            FROM tickets
+            WHERE {$whereUnitForToday} status IN ('resolved', 'closed') 
+              AND DATE(COALESCE(completed_at, submitted_at)) >= '{$startDate}'
+            GROUP BY DATE(COALESCE(completed_at, submitted_at))
+        ")->getResultArray();
+        foreach ($dailyCompletions as $row) {
+            if (isset($recentDays[$row['d']])) {
+                $recentDays[$row['d']]['completed_jobs'] = (int)$row['count'];
+            }
+        }
+
+        $dailyDeclines = $db->query("
+            SELECT DATE(COALESCE(reviewed_at, updated_at, submitted_at)) AS d, COUNT(*) AS count
+            FROM tickets
+            WHERE {$whereUnitForToday} status = 'declined' 
+              AND DATE(COALESCE(reviewed_at, updated_at, submitted_at)) >= '{$startDate}'
+            GROUP BY DATE(COALESCE(reviewed_at, updated_at, submitted_at))
+        ")->getResultArray();
+        foreach ($dailyDeclines as $row) {
+            if (isset($recentDays[$row['d']])) {
+                $recentDays[$row['d']]['declined'] = (int)$row['count'];
+            }
+        }
+
+        foreach ($recentDays as &$dayItem) {
+            $req = $dayItem['total_requests'];
+            $comp = $dayItem['completed_jobs'];
+            $dayItem['completion_rate'] = $req > 0 ? min(100, round(($comp / $req) * 100)) : ($comp > 0 ? 100 : 0);
+        }
+        unset($dayItem);
+        $dailyBreakdown = array_values($recentDays);
+
         return [
             'total'             => $filteredTotal,
             'resolved'          => $filteredResolved,
             'declined'          => $filteredDeclined,
+            'daily_total'       => $dailyTotal,
+            'daily_resolved'    => $dailyResolved,
+            'daily_declined'    => $dailyDeclined,
+            'daily_breakdown'   => $dailyBreakdown,
             'all_time_total'    => (int)($allTimeRow['all_time_total'] ?? 0),
             'all_time_resolved' => (int)($allTimeRow['all_time_resolved'] ?? 0),
             'all_time_declined' => (int)($allTimeRow['all_time_declined'] ?? 0),
@@ -356,6 +448,7 @@ class TicketModel extends Model
                 'year'    => $year,
                 'quarter' => $quarter,
                 'month'   => $month,
+                'date'    => $targetDate,
                 'label'   => $filterLabel,
             ],
             'available_years'   => $availableYears,

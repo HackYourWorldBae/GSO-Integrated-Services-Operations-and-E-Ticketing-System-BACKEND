@@ -277,6 +277,7 @@ class TicketController extends BaseController
             'year'    => $this->request->getGet('year'),
             'quarter' => $this->request->getGet('quarter'),
             'month'   => $this->request->getGet('month'),
+            'date'    => $this->request->getGet('date'),
         ];
 
         if (strtoupper($unitCode) === 'ALL') {

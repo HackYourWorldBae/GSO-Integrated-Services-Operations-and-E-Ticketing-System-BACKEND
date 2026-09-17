@@ -40,8 +40,11 @@ class DirectorController extends BaseController
 
         // 1. Period & Timeframe Filters
         $period = strtolower((string)($this->request->getGet('period') ?? 'all'));
-        if (!in_array($period, ['all', 'year', 'quarter', 'month'])) {
+        if (!in_array($period, ['all', 'year', 'quarter', 'month', 'day', 'daily'])) {
             $period = 'all';
+        }
+        if ($period === 'daily') {
+            $period = 'day';
         }
 
         $currentYear = (int)date('Y');
@@ -57,6 +60,9 @@ class DirectorController extends BaseController
         $monthRaw = $this->request->getGet('month');
         $month = ($monthRaw !== null && is_numeric($monthRaw)) ? (int)$monthRaw : $currentMonth;
 
+        $dateRaw = $this->request->getGet('date');
+        $targetDate = ($dateRaw && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateRaw)) ? $dateRaw : date('Y-m-d');
+
         $unitFilter = strtoupper((string)($this->request->getGet('unit') ?? 'ALL'));
 
         $filters = [
@@ -64,6 +70,7 @@ class DirectorController extends BaseController
             'year'    => $year,
             'quarter' => $quarter,
             'month'   => $month,
+            'date'    => $targetDate,
         ];
 
         // Format human-friendly period label and document report title
@@ -77,7 +84,12 @@ class DirectorController extends BaseController
             3 => 'Q3 (Jul - Sep)', 4 => 'Q4 (Oct - Dec)'
         ];
 
-        if ($period === 'month') {
+        if ($period === 'day') {
+            $isToday = ($targetDate === date('Y-m-d'));
+            $periodLabel = $isToday ? "Today (" . date('M j, Y') . ")" : date('F j, Y', strtotime($targetDate));
+            $reportTitle = "Daily Operations & Performance Report";
+            $reportType = "Daily";
+        } elseif ($period === 'month') {
             $periodLabel = ($monthNames[$month] ?? "Month {$month}") . " {$year}";
             $reportTitle = "Monthly Performance & Operations Report";
             $reportType = "Monthly";
@@ -179,6 +191,9 @@ class DirectorController extends BaseController
             $dateConds[] = "YEAR(t.submitted_at) = ? AND MONTH(t.submitted_at) = ?";
             $dateParams[] = $year;
             $dateParams[] = $month;
+        } elseif ($period === 'day') {
+            $dateConds[] = "DATE(t.submitted_at) = ?";
+            $dateParams[] = $targetDate;
         }
         $whereSql = !empty($dateConds) ? "WHERE " . implode(" AND ", $dateConds) : "";
 
@@ -265,6 +280,9 @@ class DirectorController extends BaseController
             $healthConds[] = "YEAR(COALESCE(tf.created_at, t.completed_at, t.submitted_at)) = ? AND MONTH(COALESCE(tf.created_at, t.completed_at, t.submitted_at)) = ?";
             $healthParams[] = $year;
             $healthParams[] = $month;
+        } elseif ($period === 'day') {
+            $healthConds[] = "DATE(COALESCE(tf.created_at, t.completed_at, t.submitted_at)) = ?";
+            $healthParams[] = $targetDate;
         }
         $healthWhereSql = !empty($healthConds) ? "WHERE " . implode(" AND ", $healthConds) : "";
 
@@ -333,6 +351,9 @@ class DirectorController extends BaseController
             $matConds[] = "YEAR(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ? AND MONTH(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ?";
             $matParams[] = $year;
             $matParams[] = $month;
+        } elseif ($period === 'day') {
+            $matConds[] = "DATE(COALESCE(tm.created_at, t.completed_at, t.submitted_at)) = ?";
+            $matParams[] = $targetDate;
         }
 
         if ($unitFilter !== 'ALL' && isset(self::UNIT_MAP[$unitFilter])) {
@@ -446,6 +467,7 @@ class DirectorController extends BaseController
                 'year'         => $year,
                 'quarter'      => $quarter,
                 'month'        => $month,
+                'date'         => $targetDate,
                 'unit'         => $unitFilter,
                 'label'        => $periodLabel,
                 'report_title' => $reportTitle,

@@ -145,7 +145,7 @@ class FeedbackController extends BaseController
             $status      = 'closed';
             $statusLabel = 'Closed';
         } else {
-            // FGMU & LEAU: automatically close after dispatcher marked job done & inputted materials
+            // FGMU & LEAU: automatically close after admin marked job done & inputted materials
             if ($materialsLogged || $ticket['status'] === 'resolved' || (int) ($ticket['current_step'] ?? 0) >= 6) {
                 $isArchived  = 1;
                 $status      = 'closed';

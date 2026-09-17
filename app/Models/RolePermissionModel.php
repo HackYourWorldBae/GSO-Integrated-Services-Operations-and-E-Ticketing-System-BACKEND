@@ -8,6 +8,13 @@ use CodeIgniter\Model;
  * RolePermissionModel
  *
  * Manages the dynamic access control matrix between system roles and features.
+ *
+ * NOTE (maintainability): the backing `role_permissions` table is retired —
+ * the matrix below is intentionally hardcoded (see migration
+ * 2026_09_16_000003). hasPermission()/getPermissionsForRole()/getFullMatrix()
+ * perform pure in-memory checks and never query the database, so all callers
+ * (RoleGuardFilter, BaseController::assertPermission, AuthController, UserModel)
+ * remain safe. Kept as a model for a single RBAC source of truth.
  */
 class RolePermissionModel extends Model
 {
@@ -51,7 +58,7 @@ class RolePermissionModel extends Model
             'key'         => 'tickets.dispatch',
             'name'        => 'Unit Dispatch Access',
             'category'    => 'Dispatching',
-            'description' => 'Access the unit dispatcher workbench and assignment queue.',
+            'description' => 'Access the unit admin workbench and assignment queue.',
         ],
         [
             'key'         => 'tickets.assign_worker',

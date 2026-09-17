@@ -55,62 +55,62 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('tickets/my-requests',       'TicketController::myRequests');
         $routes->get('tickets/completed',         'TicketController::completedRequests');
         $routes->patch('tickets/(:segment)/cancel','TicketController::cancel/$1');
-        $routes->get('tickets/(:segment)',        'TicketController::show/$1');
-        $routes->get('tickets/(:segment)/logs',   'TicketController::logs/$1');
-        
-        // -- Ticket Attachments & Verification --
-        $routes->post('tickets/(:segment)/attachments',     'TicketController::uploadAttachment/$1');
-        $routes->get('attachments/(:num)',                  'TicketController::downloadAttachment/$1');
-        $routes->post('tickets/(:segment)/accomplishment',  'TicketController::uploadAccomplishment/$1', ['filter' => 'role:admin,dispatcher,worker']);
-        $routes->get('tickets/(:segment)/accomplishment',   'TicketController::downloadAccomplishment/$1');
-        $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketController::verifyAndClose/$1', ['filter' => 'role:admin,dispatcher,director,user,superadmin']);
-        $routes->patch('tickets/(:segment)/eodb',           'TicketController::updateEodb/$1',           ['filter' => 'role:admin,dispatcher']);
+        $routes->get('tickets/(:segment)',        'TicketQueueController::show/$1');
+        $routes->get('tickets/(:segment)/logs',   'TicketQueueController::logs/$1');
 
-        // -- Ticket Queues (Per Unit — Admin, Dispatcher, Director, Superadmin) --
-        $routes->get('tickets/queue/(:segment)',          'TicketController::pendingQueue/$1',   ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->get('tickets/delayed-approval/(:segment)','TicketController::delayedApprovalQueue/$1', ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->get('tickets/dispatch/(:segment)',       'TicketController::dispatchQueue/$1',  ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->get('tickets/active/(:segment)',         'TicketController::activeTickets/$1',  ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->get('tickets/archives/(:segment)',       'TicketController::archives/$1',       ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->get('tickets/stats/(:segment)',          'TicketController::unitStats/$1',      ['filter' => 'role:admin,dispatcher,director,superadmin']);
+        // -- Ticket Attachments & Verification --
+        $routes->post('tickets/(:segment)/attachments',     'TicketAttachmentController::uploadAttachment/$1');
+        $routes->get('attachments/(:num)',                  'TicketAttachmentController::downloadAttachment/$1');
+        $routes->post('tickets/(:segment)/accomplishment',  'TicketAttachmentController::uploadAccomplishment/$1', ['filter' => 'role:admin,worker']);
+        $routes->get('tickets/(:segment)/accomplishment',   'TicketAttachmentController::downloadAccomplishment/$1');
+        $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketActionController::verifyAndClose/$1', ['filter' => 'role:admin,director,user,superadmin']);
+        $routes->patch('tickets/(:segment)/eodb',           'TicketActionController::updateEodb/$1',           ['filter' => 'role:admin']);
+
+        // -- Ticket Queues (Per Unit — Admin, Director, Superadmin) --
+        $routes->get('tickets/queue/(:segment)',          'TicketQueueController::pendingQueue/$1',   ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('tickets/delayed-approval/(:segment)','TicketQueueController::delayedApprovalQueue/$1', ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('tickets/dispatch/(:segment)',       'TicketQueueController::dispatchQueue/$1',  ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('tickets/active/(:segment)',         'TicketQueueController::activeTickets/$1',  ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('tickets/archives/(:segment)',       'TicketQueueController::archives/$1',       ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('tickets/stats/(:segment)',          'TicketQueueController::unitStats/$1',      ['filter' => 'role:admin,director,superadmin']);
 
         // -- Ticket Actions (Admin & Director Roles) --
-        $routes->patch('tickets/(:segment)/approve',        'TicketController::approve/$1',               ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/delay-approval', 'TicketController::delayApproval/$1',        ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/resume-approval','TicketController::resumeApproval/$1',       ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/decline',        'TicketController::decline/$1',               ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/complete',       'TicketController::complete/$1',              ['filter' => 'role:admin,dispatcher,worker,director']);
-        $routes->post('tickets/(:segment)/materials',       'TicketController::saveMaterials/$1',         ['filter' => 'role:admin,dispatcher,worker,director']);
-        $routes->patch('tickets/(:segment)/extend',         'TicketController::extendTicket/$1',          ['filter' => 'role:admin,dispatcher,director']);
+        $routes->patch('tickets/(:segment)/approve',        'TicketActionController::approve/$1',               ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/delay-approval', 'TicketActionController::delayApproval/$1',        ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/resume-approval','TicketActionController::resumeApproval/$1',       ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/decline',        'TicketActionController::decline/$1',               ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/complete',       'TicketActionController::complete/$1',              ['filter' => 'role:admin,worker,director']);
+        $routes->post('tickets/(:segment)/materials',       'TicketActionController::saveMaterials/$1',         ['filter' => 'role:admin,worker,director']);
+        $routes->patch('tickets/(:segment)/extend',         'TicketActionController::extendTicket/$1',          ['filter' => 'role:admin,director']);
 
         // -- SSU Incident Report Workflow (Admin & Director Roles) --
-        $routes->get('tickets/investigating/(:segment)',    'TicketController::investigatingQueue/$1',    ['filter' => 'role:admin,dispatcher,director,superadmin']);
-        $routes->patch('tickets/(:segment)/investigate',   'TicketController::setUnderInvestigation/$1', ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/uninvestigate', 'TicketController::unsetUnderInvestigation/$1', ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/notation',      'TicketController::addNotation/$1',           ['filter' => 'role:admin,director']);
-        $routes->patch('tickets/(:segment)/resolve',       'TicketController::resolveIncident/$1',       ['filter' => 'role:admin,director']);
+        $routes->get('tickets/investigating/(:segment)',    'TicketQueueController::investigatingQueue/$1',    ['filter' => 'role:admin,director,superadmin']);
+        $routes->patch('tickets/(:segment)/investigate',   'TicketActionController::setUnderInvestigation/$1', ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/uninvestigate', 'TicketActionController::unsetUnderInvestigation/$1', ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/notation',      'TicketActionController::addNotation/$1',           ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/resolve',       'TicketActionController::resolveIncident/$1',       ['filter' => 'role:admin,director']);
 
         // -- Scheduled Projects Management (FGMU & LEAU Admins) --
         $routes->post('projects',              'TicketController::createProject',   ['filter' => 'role:admin']);
         $routes->patch('projects/(:segment)',  'TicketController::updateProject/$1',['filter' => 'role:admin']);
 
-        // -- Dispatch (Admin & Dispatcher — Unit Head inherits dispatcher capabilities) --
-        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin,dispatcher']);
-        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:admin,dispatcher,worker']);
-        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin,dispatcher']);
-        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin,dispatcher']);
+        // -- Dispatch (Admin/Unit Head only) --
+        $routes->post('dispatch/assign',                         'DispatchController::assign',                  ['filter' => 'role:admin']);
+        $routes->post('dispatch/start',                          'DispatchController::startJob',                ['filter' => 'role:admin,worker']);
+        $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin']);
+        $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin']);
 
         // -- Personnel Categories (Admin) --
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
-        $routes->get('personnel/categories/(:segment)',    'PersonnelController::categories/$1',      ['filter' => 'role:admin,dispatcher,director']);
+        $routes->get('personnel/categories/(:segment)',    'PersonnelController::categories/$1',      ['filter' => 'role:admin,director']);
         $routes->post('personnel/categories',             'PersonnelController::createCategory',     ['filter' => 'role:admin']);
         $routes->patch('personnel/categories/(:num)',     'PersonnelController::updateCategory/$1',  ['filter' => 'role:admin']);
         $routes->delete('personnel/categories/(:num)',    'PersonnelController::deleteCategory/$1',  ['filter' => 'role:admin']);
 
-        // -- Personnel (Admin & Dispatcher) --
-        $routes->get('personnel/(:segment)',             'PersonnelController::byUnit/$1',      ['filter' => 'role:admin,dispatcher,director']);
-        $routes->get('personnel/(:segment)/available',  'PersonnelController::available/$1',   ['filter' => 'role:admin,dispatcher']);
-        $routes->patch('personnel/(:segment)/status',   'PersonnelController::updateStatus/$1',['filter' => 'role:admin,dispatcher']);
+        // -- Personnel (Admin) --
+        $routes->get('personnel/(:segment)',             'PersonnelController::byUnit/$1',      ['filter' => 'role:admin,director']);
+        $routes->get('personnel/(:segment)/available',  'PersonnelController::available/$1',   ['filter' => 'role:admin']);
+        $routes->patch('personnel/(:segment)/status',   'PersonnelController::updateStatus/$1',['filter' => 'role:admin']);
         $routes->post('personnel',                       'PersonnelController::create',         ['filter' => 'role:admin']);
         $routes->put('personnel/(:segment)',             'PersonnelController::update/$1',      ['filter' => 'role:admin']);
         $routes->delete('personnel/(:segment)',          'PersonnelController::delete/$1',      ['filter' => 'role:admin']);

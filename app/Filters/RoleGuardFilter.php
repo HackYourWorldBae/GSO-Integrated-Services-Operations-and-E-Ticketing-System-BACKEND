@@ -12,7 +12,7 @@ use Config\Services;
  * RoleGuardFilter - Enforces role-based access control on protected routes.
  *
  * Usage in Routes.php:
- *   $routes->get('/admin/...', '...', ['filter' => 'role:admin,dispatcher']);
+ *   $routes->get('/admin/...', '...', ['filter' => 'role:admin']);
  *
  * Must be applied AFTER JwtAuthFilter, which populates RequestContext with the
  * decoded JWT payload via RequestContext::setJwtPayload().
@@ -21,7 +21,7 @@ class RoleGuardFilter implements FilterInterface
 {
     public function before(RequestInterface $request, $arguments = null): mixed
     {
-        // $arguments holds the allowed roles: ['admin', 'dispatcher'] etc.
+        // $arguments holds the allowed roles: ['admin'] etc.
         if (empty($arguments)) {
             return null; // No role restriction specified, allow through.
         }
@@ -88,7 +88,7 @@ class RoleGuardFilter implements FilterInterface
                         ]);
                 }
             } elseif ($method === 'get') {
-                // Viewing the personnel roster is permitted for operational roles (admin, dispatcher, director)
+                // Viewing the personnel roster is permitted for operational roles (admin, director)
                 // or if dynamic capabilities (tickets.dispatch, tickets.assign_worker, personnel.manage) are granted.
                 $canView = in_array($currentRole, ['admin', 'director', 'superadmin'], true)
                     || $permissionModel->hasPermission($currentRole, 'personnel.manage')

@@ -12,6 +12,7 @@
     "require": {
         "php": "^8.2",
         "codeigniter4/framework": "^4.7",
+        "firebase/php-jwt": "^7.0",
         "google/cloud-vision": "^2.1"
     },
     "require-dev": {

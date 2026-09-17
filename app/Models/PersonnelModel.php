@@ -114,7 +114,7 @@ class PersonnelModel extends Model
     }
 
     /**
-     * Get all available workers in a unit (for dispatcher assignment dropdowns).
+     * Get all available workers in a unit (for admin assignment dropdowns).
      * Excludes only staff who are currently on leave or inactive/retired.
      */
     public function getAvailableByUnit(int $unitId): array

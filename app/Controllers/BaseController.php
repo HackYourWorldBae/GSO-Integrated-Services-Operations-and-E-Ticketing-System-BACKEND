@@ -156,7 +156,7 @@ abstract class BaseController extends Controller
     /**
      * Enforces tenant/unit scoping.
      * Directors have university-wide jurisdiction.
-     * Admins and dispatchers are scoped strictly to their assigned unit_id.
+     * Admins are scoped strictly to their assigned unit_id.
      *
      * @param int|string $targetUnit Unit ID or Unit Code (e.g. 'FGMU', 1)
      * @param string $customMessage Optional custom error message
@@ -177,8 +177,8 @@ abstract class BaseController extends Controller
             return null;
         }
 
-        // Unit Admins and Dispatchers must match their assigned unit_id
-        if (in_array($userRole, ['admin', 'dispatcher'], true)) {
+        // Unit Admins must match their assigned unit_id
+        if (in_array($userRole, ['admin'], true)) {
             if ($userUnitId === null || $userUnitId !== $targetUnitId) {
                 $msg = !empty($customMessage) 
                     ? $customMessage 

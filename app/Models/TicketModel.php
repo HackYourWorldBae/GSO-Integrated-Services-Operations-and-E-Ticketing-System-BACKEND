@@ -77,16 +77,21 @@ class TicketModel extends Model
      * Get all active (not archived / pending action) tickets for a specific user/requestor.
      * Strictly mutually exclusive with getArchivedByUser.
      */
-    public function getActiveByUser(string $userId): array
+    public function getActiveByUser(string $userId, ?int $limit = null, ?int $offset = null): array
     {
         $db = \Config\Database::connect();
 
-        return $this->where('user_id', $userId)
+        $builder = $this->where('user_id', $userId)
                     ->where('(is_archived = 0 OR is_archived IS NULL)')
                     ->whereNotIn('status', ['closed', 'completed', 'declined', 'cancelled'])
                     ->where("id NOT IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
-                    ->orderBy('submitted_at', 'DESC')
-                    ->findAll();
+                    ->orderBy('submitted_at', 'DESC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
@@ -94,99 +99,129 @@ class TicketModel extends Model
      * Includes any ticket that is fully closed/archived, has a terminal status,
      * or has feedback submitted by the user.
      */
-    public function getArchivedByUser(string $userId): array
+    public function getArchivedByUser(string $userId, ?int $limit = null, ?int $offset = null): array
     {
         $db = \Config\Database::connect();
 
-        return $this->where('user_id', $userId)
+        $builder = $this->where('user_id', $userId)
                     ->groupStart()
                         ->where('is_archived', 1)
                         ->orWhereIn('status', ['closed', 'completed', 'declined', 'cancelled'])
                         ->orWhere("id IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = {$db->escape($userId)})")
                     ->groupEnd()
-                    ->orderBy('submitted_at', 'DESC')
-                    ->findAll();
+                    ->orderBy('submitted_at', 'DESC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
      * Get the pending ticket queue for a specific unit (admin dashboard).
      */
-    public function getPendingQueue(int $unitId): array
+    public function getPendingQueue(int $unitId, ?int $limit = null, ?int $offset = null): array
     {
-        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.status', 'pending')
                     ->where('(tickets.is_approval_delayed = 0 OR tickets.is_approval_delayed IS NULL)')
                     ->where('(tickets.is_under_investigation = 0 OR tickets.is_under_investigation IS NULL)')
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
-                    ->orderBy('tickets.submitted_at', 'ASC')
-                    ->findAll();
+                    ->orderBy('tickets.submitted_at', 'ASC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
      * Get tickets delayed for approval (e.g., awaiting procurement of materials) for a unit.
      */
-    public function getApprovalDelayedQueue(int $unitId): array
+    public function getApprovalDelayedQueue(int $unitId, ?int $limit = null, ?int $offset = null): array
     {
-        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact, staff.first_name as delayed_by_first_name, staff.last_name as delayed_by_last_name')
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact, staff.first_name as delayed_by_first_name, staff.last_name as delayed_by_last_name')
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->join('users as staff', 'staff.id = tickets.approval_delayed_by', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.status', 'pending')
                     ->where('tickets.is_approval_delayed', 1)
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
-                    ->orderBy('tickets.approval_delayed_at', 'DESC')
-                    ->findAll();
+                    ->orderBy('tickets.approval_delayed_at', 'DESC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
      * Get SSU Incident Report tickets currently under investigation (not yet archived).
      */
-    public function getUnderInvestigationQueue(int $unitId): array
+    public function getUnderInvestigationQueue(int $unitId, ?int $limit = null, ?int $offset = null): array
     {
-        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.service_type', 'Incident Report')
                     ->where('tickets.is_under_investigation', 1)
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
-                    ->orderBy('tickets.submitted_at', 'ASC')
-                    ->findAll();
+                    ->orderBy('tickets.submitted_at', 'ASC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
-     * Get approved/scheduled tickets (dispatcher queue) for a unit.
+     * Get approved/scheduled tickets (admin dispatch queue) for a unit.
      */
-    public function getDispatchQueue(int $unitId): array
+    public function getDispatchQueue(int $unitId, ?int $limit = null, ?int $offset = null): array
     {
-        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->whereIn('tickets.status', ['approved'])
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
-                    ->orderBy('tickets.submitted_at', 'ASC')
-                    ->findAll();
+                    ->orderBy('tickets.submitted_at', 'ASC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
      * Get actively in-progress tickets for a unit.
      */
-    public function getActiveTickets(int $unitId): array
+    public function getActiveTickets(int $unitId, ?int $limit = null, ?int $offset = null): array
     {
-        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
+        $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->whereIn('tickets.status', ['processing', 'resolved'])
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
-                    ->orderBy('tickets.submitted_at', 'ASC')
-                    ->findAll();
+                    ->orderBy('tickets.submitted_at', 'ASC');
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
+        }
+
+        return $builder->findAll();
     }
 
     /**
      * Get completed/archived tickets for a unit (admin archive).
      */
-    public function getArchivedByUnit(int $unitId, array $filters = []): array
+    public function getArchivedByUnit(int $unitId, array $filters = [], ?int $limit = null, ?int $offset = null): array
     {
         $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                         ->join('users', 'users.id = tickets.user_id', 'left')
@@ -208,6 +243,10 @@ class TicketModel extends Model
 
         if (!empty($filters['date_to'])) {
             $builder->where('tickets.submitted_at <=', $filters['date_to'] . ' 23:59:59');
+        }
+
+        if ($limit !== null) {
+            $builder->limit($limit, $offset ?? 0);
         }
 
         return $builder->findAll();

@@ -14,6 +14,17 @@ final class ExampleDatabaseTest extends CIUnitTestCase
 
     protected $seed = ExampleSeeder::class;
 
+    protected function setUp(): void
+    {
+        // Scaffold database examples need pdo_sqlite; skip loudly when the
+        // driver is absent instead of failing on environment, not on code.
+        if (!extension_loaded('pdo_sqlite')) {
+            $this->markTestSkipped('pdo_sqlite is not loaded in this PHP runtime.');
+        }
+
+        parent::setUp();
+    }
+
     public function testModelFindAll(): void
     {
         $model = new ExampleModel();

@@ -14,7 +14,7 @@ use CodeIgniter\HTTP\ResponseInterface;
 /**
  * DispatchController
  *
- * Handles dispatcher operations: assigning personnel to approved tickets,
+ * Handles admin dispatch operations: assigning personnel to approved tickets,
  * updating assignment schedules and notes, logging materials, and tracking workers.
  *
  * Endpoints:
@@ -251,7 +251,7 @@ class DispatchController extends BaseController
             'updated_at' => $now,
         ]);
 
-        // --- If the ticket is a project, persist the dispatcher-set scheduling fields ---
+        // --- If the ticket is a project, persist the admin-set scheduling fields ---
         if (!empty($ticket['is_project'])) {
             $projectUpdate = [
                 'updated_at'              => date('Y-m-d H:i:s'),
@@ -382,7 +382,7 @@ class DispatchController extends BaseController
     }
 
     /**
-     * Start a job (Dispatcher).
+     * Start a job (Admin).
      * Updates the assignment to working, sets ticket step to 4 or 5, and changes personnel statuses.
      *
      * Body: { ticket_id }
@@ -390,8 +390,8 @@ class DispatchController extends BaseController
     public function startJob(): ResponseInterface
     {
         $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'dispatcher', 'worker', 'superadmin'], true)) {
-            return $this->errorResponse('Unauthorized. Only dispatchers, Unit Heads, or field workers may start a job.', [], ResponseInterface::HTTP_FORBIDDEN);
+        if (!in_array($role, ['admin', 'worker', 'superadmin'], true)) {
+            return $this->errorResponse('Unauthorized. Only Unit Heads or field workers may start a job.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -437,7 +437,7 @@ class DispatchController extends BaseController
             ]);
         }
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Dispatcher actively started the job.");
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Job Started', "Admin actively started the job.");
 
         return $this->successResponse('Job started successfully.');
     }

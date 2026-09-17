@@ -14,8 +14,8 @@ use CodeIgniter\HTTP\ResponseInterface;
  * Manages unit field staff (workers, personnel, etc.).
  *
  * Endpoints:
- *  GET   /api/v1/personnel/:unitCode              - Full roster for a unit (admin/dispatcher view)
- *  GET   /api/v1/personnel/:unitCode/available    - Available workers only (for dispatcher dropdowns)
+ *  GET   /api/v1/personnel/:unitCode              - Full roster for a unit (admin view)
+ *  GET   /api/v1/personnel/:unitCode/available    - Available workers only (for admin assignment dropdowns)
  *  PATCH /api/v1/personnel/:id/status             - Toggle worker availability / leave status
  *  POST  /api/v1/personnel                        - Create a new personnel record
  *  PUT   /api/v1/personnel/:id                    - Update personnel info
@@ -69,7 +69,7 @@ class PersonnelController extends BaseController
     }
 
     /**
-     * Get only available workers for a unit (used in dispatcher assignment dropdowns).
+     * Get only available workers for a unit (used in admin assignment dropdowns).
      */
     public function available(string $unitCode): ResponseInterface
     {

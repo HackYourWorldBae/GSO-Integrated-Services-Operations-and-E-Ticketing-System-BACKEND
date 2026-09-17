@@ -5,7 +5,6 @@ namespace App\Controllers\API;
 use App\Controllers\BaseController;
 use App\Models\UserModel;
 use App\Models\TicketModel;
-use App\Models\UnitModel;
 use App\Models\AccountActivityLogModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;

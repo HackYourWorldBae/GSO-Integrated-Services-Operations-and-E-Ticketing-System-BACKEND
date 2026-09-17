@@ -4,22 +4,27 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
-use App\Models\FgmuTicketDetailModel;
-use App\Models\LeauTicketDetailModel;
-use App\Models\SsuIncidentDetailModel;
-use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
-use Config\Database;
 
 /**
- * TicketActionController - ticket state transitions.
+ * TicketActionController - Handles administrative ticket lifecycle actions and state transitions.
  *
- * Methods moved verbatim from TicketController (bodies untouched):
- *  approve, setUnderInvestigation, unsetUnderInvestigation, addNotation,
- *  resolveIncident, decline, delayApproval, resumeApproval, extendTicket,
- *  complete, saveMaterials, verifyAndClose, updateEodb.
+ * Scopes:
+ * - PATCH /api/v1/tickets/{id}/approve
+ * - PATCH /api/v1/tickets/{id}/delay-approval
+ * - PATCH /api/v1/tickets/{id}/resume-approval
+ * - PATCH /api/v1/tickets/{id}/decline
+ * - PATCH /api/v1/tickets/{id}/complete
+ * - POST  /api/v1/tickets/{id}/materials
+ * - PATCH /api/v1/tickets/{id}/extend
+ * - PATCH /api/v1/tickets/{id}/investigate
+ * - PATCH /api/v1/tickets/{id}/uninvestigate
+ * - PATCH /api/v1/tickets/{id}/notation
+ * - PATCH /api/v1/tickets/{id}/resolve
+ * - POST/PATCH /api/v1/tickets/{id}/verify-close
+ * - PATCH /api/v1/tickets/{id}/eodb
  */
 class TicketActionController extends BaseController
 {

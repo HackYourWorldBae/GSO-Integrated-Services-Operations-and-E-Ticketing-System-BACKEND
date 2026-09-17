@@ -4,22 +4,23 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
-use App\Models\FgmuTicketDetailModel;
-use App\Models\LeauTicketDetailModel;
-use App\Models\SsuIncidentDetailModel;
-use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
-use Config\Database;
 
 /**
- * TicketQueueController - read-only queues & single-ticket views.
+ * TicketQueueController - Handles read-only ticket queue queries, unit metrics, and ticket detail views.
  *
- * Methods moved verbatim from TicketController (bodies untouched):
- *  pendingQueue, delayedApprovalQueue, dispatchQueue, activeTickets, archives,
- *  investigatingQueue, unitStats, show, logs.
- * Shared enrichment via Concerns\TicketEnrichmentTrait.
+ * Scopes:
+ * - GET /api/v1/tickets/queue/{unit}
+ * - GET /api/v1/tickets/delayed-approval/{unit}
+ * - GET /api/v1/tickets/dispatch/{unit}
+ * - GET /api/v1/tickets/active/{unit}
+ * - GET /api/v1/tickets/archives/{unit}
+ * - GET /api/v1/tickets/investigating/{unit}
+ * - GET /api/v1/tickets/stats/{unit}
+ * - GET /api/v1/tickets/{id}
+ * - GET /api/v1/tickets/{id}/logs
  */
 class TicketQueueController extends BaseController
 {

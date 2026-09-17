@@ -4,24 +4,19 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
-use App\Models\FgmuTicketDetailModel;
-use App\Models\LeauTicketDetailModel;
-use App\Models\SsuIncidentDetailModel;
-use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use CodeIgniter\HTTP\ResponseInterface;
-use Config\Database;
 
 /**
- * TicketController - intake & requestor scope.
+ * TicketController - Handles requestor ticket intake and personal request queries.
  *
- * Retained (moved verbatim, bodies untouched):
- *  POST  /api/v1/tickets/intake, GET my-requests/completed, PATCH :id/cancel,
- *  POST/PATCH /projects*, GET projects*, GET projects/archives.
- * Relocated companions: TicketQueueController (queues/reads),
- *  TicketActionController (state transitions), TicketAttachmentController (files).
- * Shared enrichment lives in Concerns\TicketEnrichmentTrait.
+ * Scopes:
+ * - POST /api/v1/tickets/intake
+ * - GET  /api/v1/tickets/my-requests
+ * - GET  /api/v1/tickets/completed
+ * - PATCH /api/v1/tickets/{id}/cancel
+ * - GET/POST/PATCH /api/v1/projects*
  */
 class TicketController extends BaseController
 {
@@ -48,6 +43,8 @@ class TicketController extends BaseController
     // -------------------------------------------------------------------------
     // Requestor Dashboard
     // -------------------------------------------------------------------------
+    // Requestor Dashboard
+    // -------------------------------------------------------------------------
 
     /**
      * Get active (non-archived) tickets for the currently authenticated user.
@@ -57,26 +54,7 @@ class TicketController extends BaseController
         $userId  = $this->currentUserId();
         $tickets = $this->ticketModel->getActiveByUser($userId);
         $tickets = $this->enrichTickets($tickets);
-
-        // Strip internal staff documents (Job Order, Slips, Reports) from requester view
-        foreach ($tickets as &$ticket) {
-            if (!empty($ticket['attachments'])) {
-                $ticket['attachments'] = array_values(array_filter($ticket['attachments'], function ($att) {
-                    $name = strtolower(str_replace(['-', '_'], ' ', (string) ($att['file_name'] ?? '')));
-                    return (
-                        strpos($name, 'job order') === false &&
-                        strpos($name, 'job request form') === false &&
-                        strpos($name, 'joborder') === false &&
-                        strpos($name, 'work order') === false &&
-                        strpos($name, 'receipt slip') === false &&
-                        strpos($name, 'material slip') === false &&
-                        strpos($name, 'materials slip') === false &&
-                        strpos($name, 'accomplishment') === false
-                    );
-                }));
-            }
-        }
-        unset($ticket);
+        $this->filterRequesterAttachments($tickets);
 
         return $this->successResponse('Active tickets retrieved.', ['tickets' => $tickets]);
     }
@@ -89,28 +67,41 @@ class TicketController extends BaseController
         $userId  = $this->currentUserId();
         $tickets = $this->ticketModel->getArchivedByUser($userId);
         $tickets = $this->enrichTickets($tickets);
-
-        // Strip internal staff documents (Job Order, Slips, Reports) from requester view
-        foreach ($tickets as &$ticket) {
-            if (!empty($ticket['attachments'])) {
-                $ticket['attachments'] = array_values(array_filter($ticket['attachments'], function ($att) {
-                    $name = strtolower(str_replace(['-', '_'], ' ', (string) ($att['file_name'] ?? '')));
-                    return (
-                        strpos($name, 'job order') === false &&
-                        strpos($name, 'job request form') === false &&
-                        strpos($name, 'joborder') === false &&
-                        strpos($name, 'work order') === false &&
-                        strpos($name, 'receipt slip') === false &&
-                        strpos($name, 'material slip') === false &&
-                        strpos($name, 'materials slip') === false &&
-                        strpos($name, 'accomplishment') === false
-                    );
-                }));
-            }
-        }
-        unset($ticket);
+        $this->filterRequesterAttachments($tickets);
 
         return $this->successResponse('Completed tickets retrieved.', ['tickets' => $tickets]);
+    }
+
+    /**
+     * Strip internal staff documents (Job Order forms, material slips, accomplishment reports)
+     * from the requester's ticket attachments view to ensure sensitive operational details
+     * remain staff-facing only.
+     *
+     * @param array<int, array<string, mixed>> $tickets
+     */
+    private function filterRequesterAttachments(array &$tickets): void
+    {
+        $restrictedKeywords = [
+            'job order', 'job request form', 'joborder', 'work order',
+            'receipt slip', 'material slip', 'materials slip', 'accomplishment'
+        ];
+
+        foreach ($tickets as &$ticket) {
+            if (empty($ticket['attachments'])) {
+                continue;
+            }
+
+            $ticket['attachments'] = array_values(array_filter($ticket['attachments'], function ($att) use ($restrictedKeywords) {
+                $name = strtolower(str_replace(['-', '_'], ' ', (string) ($att['file_name'] ?? '')));
+                foreach ($restrictedKeywords as $keyword) {
+                    if (strpos($name, $keyword) !== false) {
+                        return false;
+                    }
+                }
+                return true;
+            }));
+        }
+        unset($ticket);
     }
 
     /**

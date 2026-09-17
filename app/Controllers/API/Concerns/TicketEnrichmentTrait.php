@@ -47,7 +47,7 @@ trait TicketEnrichmentTrait
         $usersMap = [];
         if (!empty($userIds)) {
             $userRows = $db->table('users')
-                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, contact_number as requester_contact')
+                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, student_type, organization_name, college, contact_number as requester_contact')
                            ->whereIn('id', $userIds)
                            ->get()
                            ->getResultArray();
@@ -121,6 +121,9 @@ trait TicketEnrichmentTrait
                 if (empty($ticket['student_id_number'])) $ticket['student_id_number'] = $u['student_id_number'];
                 if (empty($ticket['requester_contact'])) $ticket['requester_contact'] = $u['requester_contact'];
                 if (empty($ticket['contact_number']))    $ticket['contact_number']    = $u['requester_contact'];
+                if (empty($ticket['student_type']))      $ticket['student_type']      = $u['student_type'] ?? null;
+                if (empty($ticket['organization_name'])) $ticket['organization_name'] = $u['organization_name'] ?? null;
+                if (empty($ticket['college']))           $ticket['college']           = $u['college'] ?? null;
                 $ticket['requester'] = trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? ''));
                 $ticket['requestedBy'] = $ticket['requester'];
                 $ticket['requested_by'] = $ticket['requester'];

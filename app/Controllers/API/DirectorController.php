@@ -206,7 +206,7 @@ class DirectorController extends BaseController
             FROM tickets t
             JOIN units u ON u.id = t.unit_id
             {$whereSql}
-            GROUP BY t.unit_id, t.service_type
+            GROUP BY t.unit_id, u.code, u.name, t.service_type
             ORDER BY count DESC
         ", $dateParams)->getResultArray();
 
@@ -290,7 +290,7 @@ class DirectorController extends BaseController
             SELECT 
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
-                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
                     ELSE tf.completion_status 
                 END AS completion_status,
                 COUNT(*) AS count
@@ -300,7 +300,7 @@ class DirectorController extends BaseController
             GROUP BY 
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
-                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
                     ELSE tf.completion_status 
                 END
         ", $healthParams)->getResultArray();
@@ -325,7 +325,7 @@ class DirectorController extends BaseController
             JOIN tickets t ON t.id = tf.ticket_id
             JOIN feedback_delay_reasons fdr ON fdr.id = tfdi.delay_reason_id
             {$healthWhereSql}
-            GROUP BY tfdi.delay_reason_id
+            GROUP BY tfdi.delay_reason_id, fdr.reason_label
             ORDER BY count DESC
             LIMIT 5
         ", $healthParams)->getResultArray();
@@ -383,7 +383,7 @@ class DirectorController extends BaseController
             FROM tickets t
             JOIN units u ON u.id = t.unit_id
             WHERE YEAR(t.submitted_at) = ?
-            GROUP BY t.unit_id, MONTH(t.submitted_at)
+            GROUP BY t.unit_id, u.code, MONTH(t.submitted_at)
             ORDER BY t.unit_id, MONTH(t.submitted_at)
         ", [$trendYear])->getResultArray();
 
@@ -583,7 +583,7 @@ class DirectorController extends BaseController
             JOIN tickets t ON t.id = tf.ticket_id
             JOIN feedback_delay_reasons fdr ON fdr.id = tfdi.delay_reason_id
             WHERE t.unit_id = ?
-            GROUP BY tfdi.delay_reason_id
+            GROUP BY tfdi.delay_reason_id, fdr.reason_label
             ORDER BY count DESC
             LIMIT 5
         ", [$unitId])->getResultArray();

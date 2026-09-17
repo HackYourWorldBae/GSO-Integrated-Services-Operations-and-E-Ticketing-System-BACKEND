@@ -177,8 +177,8 @@ abstract class BaseController extends Controller
             return null;
         }
 
-        // Unit Admins must match their assigned unit_id
-        if ($userRole === 'admin') {
+        // Unit Admins and Dispatchers must match their assigned unit_id
+        if (in_array($userRole, ['admin', 'dispatcher'], true)) {
             if ($userUnitId === null || $userUnitId !== $targetUnitId) {
                 $msg = !empty($customMessage) 
                     ? $customMessage 

@@ -337,8 +337,8 @@ class TicketController extends BaseController
         ];
 
         if (strtoupper($unitCode) === 'ALL') {
-            if ($this->currentUserRole() !== 'director') {
-                return $this->forbiddenResponse('Only the director role can access global statistics.');
+            if (!in_array($this->currentUserRole(), ['director', 'superadmin'], true)) {
+                return $this->forbiddenResponse('Only the director or superadmin role can access global statistics.');
             }
             $stats = $this->ticketModel->getAdvancedStatsByUnit(null, $filters);
             return $this->successResponse('Global statistics retrieved.', ['stats' => $stats]);

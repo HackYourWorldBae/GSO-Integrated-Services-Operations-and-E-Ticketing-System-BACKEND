@@ -508,7 +508,7 @@ class TicketModel extends Model
             SELECT 
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
-                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
                     ELSE tf.completion_status 
                 END AS completion_status,
                 COUNT(*) as count 
@@ -518,7 +518,7 @@ class TicketModel extends Model
             GROUP BY 
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
-                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND t.effective_target_date IS NOT NULL AND DATE(t.completed_at) < DATE(t.effective_target_date) THEN 'early'
+                    WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
                     ELSE tf.completion_status 
                 END
         ")->getResultArray();

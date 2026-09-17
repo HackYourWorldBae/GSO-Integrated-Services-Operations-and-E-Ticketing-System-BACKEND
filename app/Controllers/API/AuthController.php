@@ -58,7 +58,7 @@ class AuthController extends BaseController
         $email           = trim((string) ($this->request->getPost('email') ?? ''));
         $password        = (string) ($this->request->getPost('password') ?? '');
         $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
-        $studentType     = trim((string) ($this->request->getPost('student_type') ?? ''));
+        $studentType     = strtolower(trim((string) ($this->request->getPost('student_type') ?? '')));
         $organizationName = trim((string) ($this->request->getPost('organization_name') ?? ''));
 
         $errors = [];

@@ -134,6 +134,10 @@ CREATE TABLE `tickets` (
   `status` enum('pending','approved','processing','resolved','closed','declined','cancelled') NOT NULL DEFAULT 'pending',
   `status_label` varchar(100) NOT NULL DEFAULT 'Pending Approval',
   `is_emergency` tinyint(1) NOT NULL DEFAULT 0,
+  `is_approval_delayed` tinyint(1) NOT NULL DEFAULT 0,
+  `approval_delay_reason` text DEFAULT NULL,
+  `approval_delayed_at` datetime DEFAULT NULL,
+  `approval_delayed_by` varchar(36) DEFAULT NULL,
   `verification_status` enum('pending_report','pending_verification','verified_closed') NOT NULL DEFAULT 'pending_report',
   `accomplishment_report_path` varchar(255) DEFAULT NULL,
   `accomplishment_notes` text DEFAULT NULL,
@@ -174,11 +178,13 @@ CREATE TABLE `tickets` (
   KEY `idx_tickets_user` (`user_id`),
   KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   KEY `idx_tickets_archived` (`is_archived`),
+  KEY `idx_tickets_approval_delayed` (`is_approval_delayed`),
   KEY `idx_tickets_submitted` (`submitted_at`),
   CONSTRAINT `fk_tickets_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tickets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tickets_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_tickets_verified_by` FOREIGN KEY (`verified_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_tickets_verified_by` FOREIGN KEY (`verified_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_tickets_delayed_by` FOREIGN KEY (`approval_delayed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `ticket_attachments`

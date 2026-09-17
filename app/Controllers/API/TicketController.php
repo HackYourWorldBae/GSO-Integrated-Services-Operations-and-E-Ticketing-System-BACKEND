@@ -161,6 +161,22 @@ class TicketController extends BaseController
     }
 
     /**
+     * Get tickets delayed for approval (e.g., awaiting procurement of materials) for a given unit.
+     */
+    public function delayedApprovalQueue(string $unitCode): ResponseInterface
+    {
+        if ($forbidden = $this->assertUnitAccess($unitCode)) {
+            return $forbidden;
+        }
+
+        $unitId = $this->resolveUnitId($unitCode);
+        $tickets = $this->ticketModel->getApprovalDelayedQueue($unitId);
+        $tickets = $this->enrichTickets($tickets);
+
+        return $this->successResponse('Delayed approval queue retrieved.', ['tickets' => $tickets, 'count' => count($tickets)]);
+    }
+
+    /**
      * Get approved tickets awaiting dispatch for a given unit.
      */
     public function dispatchQueue(string $unitCode): ResponseInterface
@@ -379,12 +395,14 @@ class TicketController extends BaseController
         $isEmergency = isset($body['is_emergency']) ? (!empty($body['is_emergency']) ? 1 : 0) : null;
 
         $updateData = [
-            'status'       => $newStatus,
-            'status_label' => $statusLabel,
-            'current_step' => $currentStep,
-            'reviewed_at'  => date('Y-m-d H:i:s'),
-            'reviewed_by'  => $this->currentUserId(),
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'status'                => $newStatus,
+            'status_label'          => $statusLabel,
+            'is_approval_delayed'   => 0,
+            'approval_delay_reason' => null,
+            'current_step'          => $currentStep,
+            'reviewed_at'           => date('Y-m-d H:i:s'),
+            'reviewed_by'           => $this->currentUserId(),
+            'updated_at'            => date('Y-m-d H:i:s'),
         ];
 
         if ($isEmergency !== null) {
@@ -709,14 +727,15 @@ class TicketController extends BaseController
         }
 
         $this->ticketModel->update($ticketId, [
-            'status'        => 'declined',
-            'status_label'  => 'Declined',
-            'decline_reason'=> $reason,
-            'is_archived'   => 1,
-            'current_step'  => 2,
-            'reviewed_at'   => date('Y-m-d H:i:s'),
-            'reviewed_by'   => $this->currentUserId(),
-            'updated_at'    => date('Y-m-d H:i:s'),
+            'status'              => 'declined',
+            'status_label'        => 'Declined',
+            'is_approval_delayed' => 0,
+            'decline_reason'      => $reason,
+            'is_archived'         => 1,
+            'current_step'        => 2,
+            'reviewed_at'         => date('Y-m-d H:i:s'),
+            'reviewed_by'         => $this->currentUserId(),
+            'updated_at'          => date('Y-m-d H:i:s'),
         ]);
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Declined', "Ticket declined. Reason: {$reason}");
@@ -729,6 +748,122 @@ class TicketController extends BaseController
         );
 
         return $this->successResponse('Ticket declined.', ['ticket_id' => $ticketId, 'status' => 'declined']);
+    }
+
+    /**
+     * Move a pending ticket from general approval queue to "Approval Delayed" state.
+     * Used when awaiting materials procurement, administrative clearance, or site assessment.
+     *
+     * PATCH /tickets/:id/delay-approval
+     */
+    public function delayApproval(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Only pending tickets can have their approval delayed. Current status: {$ticket['status']}.");
+        }
+
+        $body   = $this->request->getJSON(true) ?? [];
+        $reason = sanitize_string($body['reason'] ?? '');
+
+        if (empty($reason)) {
+            return $this->errorResponse('A delay reason is required (e.g. Awaiting procurement of materials).', [
+                'reason' => ['Required.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $now    = date('Y-m-d H:i:s');
+        $userId = $this->currentUserId();
+
+        $this->ticketModel->update($ticketId, [
+            'is_approval_delayed'   => 1,
+            'approval_delay_reason' => $reason,
+            'approval_delayed_at'   => $now,
+            'approval_delayed_by'   => $userId,
+            'status_label'          => 'Approval Delayed',
+            'updated_at'            => $now,
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Approval Delayed',
+            "Ticket approval delayed. Reason: {$reason}"
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Ticket #{$ticketId} Approval Delayed",
+            "Your ticket for {$ticket['service_type']} has been delayed for approval: {$reason}"
+        );
+
+        return $this->successResponse('Ticket approval delayed successfully.', [
+            'ticket_id'             => $ticketId,
+            'is_approval_delayed'   => 1,
+            'approval_delay_reason' => $reason,
+            'status_label'          => 'Approval Delayed'
+        ]);
+    }
+
+    /**
+     * Resume ticket approval workflow, returning the ticket to the general pending approval queue.
+     *
+     * PATCH /tickets/:id/resume-approval
+     */
+    public function resumeApproval(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        if (empty($ticket['is_approval_delayed'])) {
+            return $this->errorResponse('This ticket is not currently in an approval delayed state.');
+        }
+
+        $now    = date('Y-m-d H:i:s');
+        $userId = $this->currentUserId();
+
+        $this->ticketModel->update($ticketId, [
+            'is_approval_delayed'   => 0,
+            'status_label'          => 'Pending Approval',
+            'updated_at'            => $now,
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Approval Resumed',
+            'Ticket returned to general pending approval queue.'
+        );
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Ticket #{$ticketId} Approval Resumed",
+            "Your ticket for {$ticket['service_type']} has been returned to the active approval queue."
+        );
+
+        return $this->successResponse('Ticket returned to general pending approval queue.', [
+            'ticket_id'           => $ticketId,
+            'is_approval_delayed' => 0,
+            'status_label'        => 'Pending Approval'
+        ]);
     }
 
     /**

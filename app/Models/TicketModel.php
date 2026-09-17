@@ -26,6 +26,10 @@ class TicketModel extends Model
         'description',
         'status',
         'status_label',
+        'is_approval_delayed',
+        'approval_delay_reason',
+        'approval_delayed_at',
+        'approval_delayed_by',
         'is_emergency',
         'decline_reason',
         'current_step',
@@ -113,9 +117,26 @@ class TicketModel extends Model
                     ->join('users', 'users.id = tickets.user_id', 'left')
                     ->where('tickets.unit_id', $unitId)
                     ->where('tickets.status', 'pending')
+                    ->where('(tickets.is_approval_delayed = 0 OR tickets.is_approval_delayed IS NULL)')
                     ->where('(tickets.is_under_investigation = 0 OR tickets.is_under_investigation IS NULL)')
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC')
+                    ->findAll();
+    }
+
+    /**
+     * Get tickets delayed for approval (e.g., awaiting procurement of materials) for a unit.
+     */
+    public function getApprovalDelayedQueue(int $unitId): array
+    {
+        return $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact, staff.first_name as delayed_by_first_name, staff.last_name as delayed_by_last_name')
+                    ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->join('users as staff', 'staff.id = tickets.approval_delayed_by', 'left')
+                    ->where('tickets.unit_id', $unitId)
+                    ->where('tickets.status', 'pending')
+                    ->where('tickets.is_approval_delayed', 1)
+                    ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
+                    ->orderBy('tickets.approval_delayed_at', 'DESC')
                     ->findAll();
     }
 
@@ -258,7 +279,8 @@ class TicketModel extends Model
         $allTimeSql = "
             SELECT
                 COUNT(*) AS all_time_total,
-                SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN status = 'pending' AND (is_approval_delayed = 0 OR is_approval_delayed IS NULL) THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN status = 'pending' AND is_approval_delayed = 1 THEN 1 ELSE 0 END) AS approval_delayed,
                 SUM(CASE WHEN status = 'approved'   THEN 1 ELSE 0 END) AS approved,
                 SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
                 SUM(CASE WHEN status = 'processing' AND (status_label LIKE '%Dispatch%' OR status_label LIKE '%Schedul%' OR status_label LIKE '%Waiting%') THEN 1 ELSE 0 END) AS scheduled,
@@ -438,6 +460,7 @@ class TicketModel extends Model
             'all_time_resolved' => (int)($allTimeRow['all_time_resolved'] ?? 0),
             'all_time_declined' => (int)($allTimeRow['all_time_declined'] ?? 0),
             'pending'           => (int)($allTimeRow['pending'] ?? 0),
+            'approval_delayed'  => (int)($allTimeRow['approval_delayed'] ?? 0),
             'approved'          => (int)($allTimeRow['approved'] ?? 0),
             'processing'        => (int)($allTimeRow['processing'] ?? 0),
             'scheduled'         => (int)($allTimeRow['scheduled'] ?? 0),

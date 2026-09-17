@@ -68,6 +68,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
 
         // -- Ticket Queues (Per Unit — Admin, Dispatcher, Director, Superadmin) --
         $routes->get('tickets/queue/(:segment)',          'TicketController::pendingQueue/$1',   ['filter' => 'role:admin,dispatcher,director,superadmin']);
+        $routes->get('tickets/delayed-approval/(:segment)','TicketController::delayedApprovalQueue/$1', ['filter' => 'role:admin,dispatcher,director,superadmin']);
         $routes->get('tickets/dispatch/(:segment)',       'TicketController::dispatchQueue/$1',  ['filter' => 'role:admin,dispatcher,director,superadmin']);
         $routes->get('tickets/active/(:segment)',         'TicketController::activeTickets/$1',  ['filter' => 'role:admin,dispatcher,director,superadmin']);
         $routes->get('tickets/archives/(:segment)',       'TicketController::archives/$1',       ['filter' => 'role:admin,dispatcher,director,superadmin']);
@@ -75,6 +76,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
 
         // -- Ticket Actions (Admin & Director Roles) --
         $routes->patch('tickets/(:segment)/approve',        'TicketController::approve/$1',               ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/delay-approval', 'TicketController::delayApproval/$1',        ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/resume-approval','TicketController::resumeApproval/$1',       ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/decline',        'TicketController::decline/$1',               ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/complete',       'TicketController::complete/$1',              ['filter' => 'role:admin,dispatcher,worker,director']);
         $routes->post('tickets/(:segment)/materials',       'TicketController::saveMaterials/$1',         ['filter' => 'role:admin,dispatcher,worker,director']);

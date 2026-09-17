@@ -428,6 +428,10 @@ CREATE TABLE `tickets` (
   `status` enum('pending','approved','processing','resolved','closed','declined','cancelled') NOT NULL DEFAULT 'pending',
   `status_label` varchar(100) NOT NULL DEFAULT 'Pending Approval',
   `is_emergency` tinyint(1) NOT NULL DEFAULT 0,
+  `is_approval_delayed` tinyint(1) NOT NULL DEFAULT 0,
+  `approval_delay_reason` text DEFAULT NULL,
+  `approval_delayed_at` datetime DEFAULT NULL,
+  `approval_delayed_by` varchar(36) DEFAULT NULL,
   `verification_status` enum('pending_report','pending_verification','verified_closed') NOT NULL DEFAULT 'pending_report',
   `accomplishment_report_path` varchar(255) DEFAULT NULL,
   `accomplishment_notes` text DEFAULT NULL,
@@ -927,9 +931,11 @@ ALTER TABLE `tickets`
   ADD PRIMARY KEY (`id`),
   ADD KEY `fk_tickets_reviewer` (`reviewed_by`),
   ADD KEY `idx_tickets_verified_by` (`verified_by_user_id`),
+  ADD KEY `fk_tickets_delayed_by` (`approval_delayed_by`),
   ADD KEY `idx_tickets_user` (`user_id`),
   ADD KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   ADD KEY `idx_tickets_archived` (`is_archived`),
+  ADD KEY `idx_tickets_approval_delayed` (`is_approval_delayed`),
   ADD KEY `idx_tickets_investigating` (`unit_id`,`is_under_investigation`,`is_archived`),
   ADD KEY `idx_tickets_submitted` (`submitted_at`);
 
@@ -1172,6 +1178,7 @@ ALTER TABLE `ssu_incident_type_items`
 -- Constraints for table `tickets`
 --
 ALTER TABLE `tickets`
+  ADD CONSTRAINT `fk_tickets_delayed_by` FOREIGN KEY (`approval_delayed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_tickets_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL,
   ADD CONSTRAINT `fk_tickets_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_tickets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,

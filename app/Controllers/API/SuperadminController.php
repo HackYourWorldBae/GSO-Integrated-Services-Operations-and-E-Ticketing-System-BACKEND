@@ -622,43 +622,6 @@ class SuperadminController extends BaseController
     }
 
     /**
-     * Get the dynamic Role & Capability Access Control Matrix.
-     */
-    public function getRbacMatrix(): ResponseInterface
-    {
-        $rolePermissionModel = new \App\Models\RolePermissionModel();
-        $data = $rolePermissionModel->getFullMatrix();
-
-        return $this->successResponse('RBAC matrix retrieved successfully.', $data);
-    }
-
-    /**
-     * Bulk update the Role & Capability Access Control Matrix.
-     */
-    public function updateRbacMatrix(): ResponseInterface
-    {
-        $body = $this->request->getJSON(true) ?? [];
-        $matrix = $body['matrix'] ?? [];
-
-        if (!is_array($matrix)) {
-            return $this->errorResponse('Invalid matrix payload. Expected an array.');
-        }
-
-        $rolePermissionModel = new \App\Models\RolePermissionModel();
-        $rolePermissionModel->saveMatrix($matrix);
-
-        $this->activityLogModel->logEvent([
-            'event_type'     => 'RBAC_UPDATED',
-            'severity'       => 'notice',
-            'actor_id'       => $this->currentUserId(),
-            'target_user_id' => null,
-            'details'        => "Superadmin updated dynamic Role & Capability Access Control Matrix.",
-        ]);
-
-        return $this->successResponse('RBAC capability matrix updated successfully.', $rolePermissionModel->getFullMatrix());
-    }
-
-    /**
      * Manually unlock a user account locked out due to failed login attempts.
      */
     public function unlockUser(string $id): ResponseInterface

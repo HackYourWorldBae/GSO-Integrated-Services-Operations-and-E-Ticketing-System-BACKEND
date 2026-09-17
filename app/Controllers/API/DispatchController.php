@@ -21,8 +21,6 @@ use CodeIgniter\HTTP\ResponseInterface;
  *  POST  /api/v1/dispatch/assign             - Assign worker to a ticket
  *  PATCH /api/v1/dispatch/assignments/:id    - Update assignment notes / schedule date
  *  POST  /api/v1/dispatch/assignments/:id/materials - Add materials to an assignment
- *  GET   /api/v1/dispatch/worker/:personnelId - Worker's current assignment (worker dashboard)
- *  GET   /api/v1/dispatch/worker/:personnelId/history - Worker's completed job history
  */
 class DispatchController extends BaseController
 {

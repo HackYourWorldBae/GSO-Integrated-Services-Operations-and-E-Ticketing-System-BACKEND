@@ -192,17 +192,31 @@ class AuthController extends BaseController
             }
         }
 
-        // File upload verification for Employee / Student ID picture
-        $file = $this->request->getFile('id_card_image');
-        if (!$file || !$file->isValid() || $file->hasMoved()) {
-            $errors['id_card_image'] = ['Please upload a clear picture of your Employee or Student ID.'];
+        // File upload verification for Employee / Student ID picture (Front ID)
+        $fileFront = $this->request->getFile('id_card_image');
+        if (!$fileFront || !$fileFront->isValid() || $fileFront->hasMoved()) {
+            $errors['id_card_image'] = ['Please upload a clear picture of the front of your Employee or Student ID.'];
         } else {
-            if ($file->getSizeByUnit('mb') > 5) {
-                $errors['id_card_image'] = ['The ID picture size must not exceed 5MB.'];
+            if ($fileFront->getSizeByUnit('mb') > 5) {
+                $errors['id_card_image'] = ['The Front ID picture size must not exceed 5MB.'];
             }
-            $ext = strtolower($file->getClientExtension());
-            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
-                $errors['id_card_image'] = ['Only JPG, PNG, and WebP images are allowed for the ID picture.'];
+            $extFront = strtolower($fileFront->getClientExtension());
+            if (!in_array($extFront, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $errors['id_card_image'] = ['Only JPG, PNG, and WebP images are allowed for the Front ID picture.'];
+            }
+        }
+
+        // File upload verification for Selfie while holding ID
+        $fileSelfie = $this->request->getFile('id_selfie_image');
+        if (!$fileSelfie || !$fileSelfie->isValid() || $fileSelfie->hasMoved()) {
+            $errors['id_selfie_image'] = ['Please upload a clear selfie while holding your Employee or Student ID.'];
+        } else {
+            if ($fileSelfie->getSizeByUnit('mb') > 5) {
+                $errors['id_selfie_image'] = ['The Selfie picture size must not exceed 5MB.'];
+            }
+            $extSelfie = strtolower($fileSelfie->getClientExtension());
+            if (!in_array($extSelfie, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $errors['id_selfie_image'] = ['Only JPG, PNG, and WebP images are allowed for the Selfie picture.'];
             }
         }
 
@@ -212,24 +226,36 @@ class AuthController extends BaseController
 
         // Security inspection using FileSecurityService
         $securityService = new \App\Libraries\FileSecurityService();
-        $inspection = $securityService->inspectFile($file->getTempName(), $file->getClientName(), $file->getClientMimeType());
-        if (!$inspection['safe']) {
-            return $this->errorResponse('Security check failed: ' . $inspection['reason'], ['id_card_image' => [$inspection['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        $inspectionFront = $securityService->inspectFile($fileFront->getTempName(), $fileFront->getClientName(), $fileFront->getClientMimeType());
+        if (!$inspectionFront['safe']) {
+            return $this->errorResponse('Security check failed: ' . $inspectionFront['reason'], ['id_card_image' => [$inspectionFront['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $inspectionSelfie = $securityService->inspectFile($fileSelfie->getTempName(), $fileSelfie->getClientName(), $fileSelfie->getClientMimeType());
+        if (!$inspectionSelfie['safe']) {
+            return $this->errorResponse('Security check failed: ' . $inspectionSelfie['reason'], ['id_selfie_image' => [$inspectionSelfie['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $userId = generate_uuid();
 
-        // Move ID file to WRITEPATH uploads/id_cards/
+        // Move files to WRITEPATH uploads/id_cards/
         $uploadDir = WRITEPATH . 'uploads/id_cards/';
         if (!is_dir($uploadDir)) {
             @mkdir($uploadDir, 0775, true);
         }
-        $fileName = 'id_card_' . $userId . '_' . time() . '.' . $ext;
-        if (!$file->move($uploadDir, $fileName)) {
-            return $this->errorResponse('Failed to save ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+
+        $fileNameFront = 'id_card_' . $userId . '_' . time() . '.' . $extFront;
+        if (!$fileFront->move($uploadDir, $fileNameFront)) {
+            return $this->errorResponse('Failed to save Front ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        $idCardRelativePath = 'id_cards/' . $fileName;
+        $fileNameSelfie = 'id_selfie_' . $userId . '_' . time() . '.' . $extSelfie;
+        if (!$fileSelfie->move($uploadDir, $fileNameSelfie)) {
+            return $this->errorResponse('Failed to save Selfie with ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $idCardRelativePath = 'id_cards/' . $fileNameFront;
+        $idSelfieRelativePath = 'id_cards/' . $fileNameSelfie;
 
         $insertData = [
             'id'                => $userId,
@@ -248,6 +274,10 @@ class AuthController extends BaseController
             'status'            => 'Pending',
             'is_verified'       => 0, // Unverified initially
         ];
+
+        if ($this->userModel->db->fieldExists('id_selfie_image', 'users')) {
+            $insertData['id_selfie_image'] = $idSelfieRelativePath;
+        }
 
         if (!$this->userModel->skipValidation(true)->insert($insertData)) {
             $dbError = $this->userModel->db->error();
@@ -748,17 +778,24 @@ class AuthController extends BaseController
     }
 
     /**
-     * Stream uploaded Employee / Student ID card image for verification.
+     * Stream uploaded Employee / Student ID card image or Selfie with ID for verification.
      * Accessible by Superadmin, Director, Admin, or the user themselves.
      */
     public function getIdCard(string $userId)
     {
         $user = $this->userModel->find($userId);
-        if (!$user || empty($user['id_card_image'])) {
-            return $this->response->setStatusCode(404)->setBody('ID card image not found.');
+        if (!$user) {
+            return $this->response->setStatusCode(404)->setBody('User not found.');
         }
 
-        $relativePath = ltrim(str_replace('\\', '/', $user['id_card_image']), '/');
+        $type = strtolower((string) ($this->request->getGet('type') ?? 'front'));
+        $targetField = ($type === 'selfie') ? 'id_selfie_image' : 'id_card_image';
+
+        if (empty($user[$targetField])) {
+            return $this->response->setStatusCode(404)->setBody(($type === 'selfie' ? 'Selfie with ID' : 'Front ID card') . ' image not found.');
+        }
+
+        $relativePath = ltrim(str_replace('\\', '/', $user[$targetField]), '/');
         if (str_starts_with($relativePath, 'uploads/')) {
             $relativePath = substr($relativePath, 8);
         }
@@ -769,7 +806,7 @@ class AuthController extends BaseController
             if (is_file($altPath)) {
                 $fullPath = $altPath;
             } else {
-                return $this->response->setStatusCode(404)->setBody('ID card file not found on disk.');
+                return $this->response->setStatusCode(404)->setBody('File not found on disk.');
             }
         }
 
@@ -784,5 +821,14 @@ class AuthController extends BaseController
             ->setHeader('Access-Control-Allow-Headers', '*')
             ->setHeader('Cache-Control', 'public, max-age=86400')
             ->setBody(file_get_contents($fullPath));
+    }
+
+    /**
+     * Dedicated stream endpoint for Selfie with ID.
+     */
+    public function getIdSelfie(string $userId)
+    {
+        $_GET['type'] = 'selfie';
+        return $this->getIdCard($userId);
     }
 }

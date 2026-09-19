@@ -103,15 +103,15 @@ class AuthController extends BaseController
                 $errors['student_type'] = ['Student accounts are exclusively for authorized representatives of Recognized Student Organizations (RSO) or the Supreme Student Government (SSG).'];
             } elseif ($studentType === 'rso') {
                 if (empty($organizationName)) {
-                    $errors['organization_name'] = ['Please specify the Recognized Student Organization (RSO) name.'];
+                    $errors['organization_name'] = ['Please specify the full name of the Recognized Student Organization (RSO).'];
                 } elseif (mb_strlen($organizationName) < 2 || mb_strlen($organizationName) > 150) {
                     $errors['organization_name'] = ['Organization name must be between 2 and 150 characters long.'];
                 }
             } elseif ($studentType === 'ssg') {
                 if (empty($organizationName)) {
-                    $errors['organization_name'] = ['Please specify your SSG committee or officer position.'];
+                    $errors['organization_name'] = ['Please specify your officer position.'];
                 } elseif (mb_strlen($organizationName) < 2 || mb_strlen($organizationName) > 150) {
-                    $errors['organization_name'] = ['SSG committee or position must be between 2 and 150 characters long.'];
+                    $errors['organization_name'] = ['Officer position must be between 2 and 150 characters long.'];
                 }
             }
             if (empty($college)) {

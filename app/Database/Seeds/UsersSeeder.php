@@ -25,7 +25,16 @@ class UsersSeeder extends Seeder
         ];
 
         $users = [
-            [ 'email' => 'enduser@email.com', 'role' => 'student', 'first_name' => 'End User', 'last_name' => 'Test', 'unit' => null ],
+            [
+                'email' => 'enduser@email.com',
+                'role' => 'employee',
+                'employee_type' => 'Teaching Staff',
+                'college' => 'College of Information Sciences (CIS)',
+                'student_id_number' => 'EMP-2301',
+                'first_name' => 'University',
+                'last_name' => 'Requestor',
+                'unit' => null
+            ],
             [ 'email' => 'fgmu-admin@email.com', 'role' => 'admin', 'first_name' => 'FGMU', 'last_name' => 'Admin', 'unit' => 'FGMU' ],
             [ 'email' => 'ssu-admin@email.com', 'role' => 'admin', 'first_name' => 'SSU', 'last_name' => 'Admin', 'unit' => 'SSU' ],
             [ 'email' => 'leau-admin@email.com', 'role' => 'admin', 'first_name' => 'LEAU', 'last_name' => 'Admin', 'unit' => 'LEAU' ],
@@ -42,10 +51,13 @@ class UsersSeeder extends Seeder
                 'email' => $u['email'],
                 'password_hash' => $passwordHash,
                 'role' => $u['role'],
+                'employee_type' => $u['employee_type'] ?? null,
+                'college' => $u['college'] ?? null,
+                'student_id_number' => $u['student_id_number'] ?? null,
                 'unit_id' => $u['unit'] ? $units[$u['unit']] : null,
                 'status' => 'Active',
                 'is_verified' => 1,
-                ];
+            ];
         }
 
         $this->db->table('users')->ignore(true)->insertBatch($data);

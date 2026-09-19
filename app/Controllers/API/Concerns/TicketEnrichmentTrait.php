@@ -47,7 +47,7 @@ trait TicketEnrichmentTrait
         $usersMap = [];
         if (!empty($userIds)) {
             $userRows = $db->table('users')
-                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, student_type, organization_name, college, contact_number as requester_contact')
+                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, student_type, employee_type, organization_name, college, contact_number as requester_contact')
                            ->whereIn('id', $userIds)
                            ->get()
                            ->getResultArray();

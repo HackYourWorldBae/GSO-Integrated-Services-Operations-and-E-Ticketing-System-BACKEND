@@ -69,6 +69,7 @@ class AuthController extends BaseController
         $password        = (string) ($this->request->getPost('password') ?? '');
         $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
         $studentType     = strtolower(trim((string) ($this->request->getPost('student_type') ?? '')));
+        $employeeType    = trim((string) ($this->request->getPost('employee_type') ?? ''));
         $organizationName = trim((string) ($this->request->getPost('organization_name') ?? ''));
         $college          = trim((string) ($this->request->getPost('college') ?? ''));
 
@@ -97,8 +98,9 @@ class AuthController extends BaseController
             $errors['role'] = ['Role must be either Student or Employee.'];
         }
 
-        // 3.1 Student Classification Validation (RSO or SSG only)
+        // 3.1 Student / Employee Classification Validation
         if ($role === 'student') {
+            $employeeType = null;
             if (!in_array($studentType, ['rso', 'ssg'], true)) {
                 $errors['student_type'] = ['Student accounts are exclusively for authorized representatives of Recognized Student Organizations (RSO) or the Supreme Student Government (SSG).'];
             } elseif ($studentType === 'rso') {
@@ -119,9 +121,33 @@ class AuthController extends BaseController
             } elseif (mb_strlen($college) > 150) {
                 $errors['college'] = ['College name must not exceed 150 characters.'];
             }
+        } elseif ($role === 'employee') {
+            $studentType = null;
+            $organizationName = null;
+
+            $validEmployeeTypes = [
+                'Teaching Staff',
+                'Research and Extension Staff',
+                'Support / Administrative Staff',
+            ];
+
+            if (empty($employeeType)) {
+                $errors['employee_type'] = ['Please select your faculty or staff classification (Teaching Staff, Research and Extension Staff, or Support / Administrative Staff).'];
+            } elseif (!in_array($employeeType, $validEmployeeTypes, true)) {
+                $errors['employee_type'] = ['Invalid faculty or staff classification selected.'];
+            } elseif ($employeeType === 'Teaching Staff') {
+                if (empty($college)) {
+                    $errors['college'] = ['Please select the college or academic unit you are assigned to.'];
+                } elseif (mb_strlen($college) > 150) {
+                    $errors['college'] = ['College name must not exceed 150 characters.'];
+                }
+            } else {
+                $college = null;
+            }
         } else {
             $studentType = null;
             $organizationName = null;
+            $employeeType = null;
             $college = null;
         }
 
@@ -276,6 +302,7 @@ class AuthController extends BaseController
             'contact_number'    => $contactNumber,
             'student_id_number' => $studentIdNumber,
             'student_type'      => $studentType,
+            'employee_type'     => $employeeType,
             'organization_name' => $organizationName,
             'college'           => $college,
             'role'              => $role,
@@ -298,7 +325,7 @@ class AuthController extends BaseController
 
         $activityDetails = $role === 'student'
             ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, College: {$college}, ID: {$studentIdNumber}). Pending ID card verification."
-            : "User self-registered a new {$role} account (ID: {$studentIdNumber}). Pending ID card verification.";
+            : "User self-registered a new employee account ({$employeeType}" . ($college ? ", College: {$college}" : "") . ", ID: {$studentIdNumber}). Pending ID card verification.";
 
         $this->activityLogModel->logEvent([
             'event_type'     => 'ACCOUNT_REGISTERED',
@@ -310,6 +337,7 @@ class AuthController extends BaseController
                 'role'              => $role,
                 'student_id_number' => $studentIdNumber,
                 'student_type'      => $studentType,
+                'employee_type'     => $employeeType,
                 'organization_name' => $organizationName,
                 'college'           => $college,
             ],

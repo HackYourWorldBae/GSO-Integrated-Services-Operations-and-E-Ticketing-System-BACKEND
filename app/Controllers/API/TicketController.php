@@ -9,6 +9,7 @@ use App\Models\LeauTicketDetailModel;
 use App\Models\SsuIncidentDetailModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
+use App\Libraries\ResendEmailService;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -456,10 +457,27 @@ class TicketController extends BaseController
             );
         }
 
-        // --- Notify Admins ---
+        // --- Notify Admins (In-App) & Gather Ticket Summaries ---
+        $ticketSummaryList = [];
+        $ssuTicketId       = null;
+        $emailService      = new ResendEmailService();
+
         foreach ($createdTickets as $tId) {
             $t = $this->ticketModel->find($tId);
             if ($t) {
+                // Collect for requestor email summary
+                $unitRow = $db->query("SELECT name, code FROM units WHERE id = ?", [$t['unit_id']])->getRowArray();
+                $ticketSummaryList[] = [
+                    'id'           => $tId,
+                    'service_type' => $t['service_type'],
+                    'unit_name'    => $unitRow['name'] ?? ($unitRow['code'] ?? 'GSO Unit'),
+                    'title'        => $t['title'],
+                ];
+
+                if ((int)$t['unit_id'] === 3 || $t['service_type'] === 'Incident Report') {
+                    $ssuTicketId = $tId;
+                }
+
                 $admins = $db->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = ?", [$t['unit_id']])->getResultArray();
                 foreach($admins as $admin) {
                     $this->notificationModel->createNotification(
@@ -469,6 +487,27 @@ class TicketController extends BaseController
                         "Ticket #{$tId} for {$t['service_type']} requires review."
                     );
                 }
+            }
+        }
+
+        // --- 1. Email Notification for Requestor ---
+        if (!empty($user['email']) && !empty($ticketSummaryList)) {
+            $reqName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+            if (empty($reqName)) {
+                $reqName = 'Campus Member';
+            }
+            $emailService->sendTicketIntakeConfirmation($user['email'], $reqName, $ticketSummaryList);
+        }
+
+        // --- 2. High-Priority Email Alerts for SSU Administrators ---
+        if ($ssuTicketId && !empty($body['ssu']['incidentReport'])) {
+            $ssuAdmins = $db->query(
+                "SELECT email FROM users WHERE role = 'admin' AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != ''"
+            )->getResultArray();
+
+            if (!empty($ssuAdmins)) {
+                $ssuEmails = array_column($ssuAdmins, 'email');
+                $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
             }
         }
 

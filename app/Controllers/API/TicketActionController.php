@@ -6,6 +6,8 @@ use App\Controllers\BaseController;
 use App\Models\TicketModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
+use App\Models\UserModel;
+use App\Libraries\ResendEmailService;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -46,6 +48,28 @@ class TicketActionController extends BaseController
         $this->logModel          = new TicketLogModel();
         $this->notificationModel = new NotificationModel();
     }
+
+    /**
+     * Helper to send an email status notification to the ticket requestor.
+     */
+    private function notifyRequestorByEmail(string $userId, string $ticketId, string $statusLabel, string $message, array $extra = []): void
+    {
+        try {
+            $userModel = new UserModel();
+            $user = $userModel->find($userId);
+            if ($user && !empty($user['email'])) {
+                $reqName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+                if (empty($reqName)) {
+                    $reqName = 'Campus Member';
+                }
+                $emailService = new ResendEmailService();
+                $emailService->sendTicketStatusUpdate($user['email'], $reqName, $ticketId, $statusLabel, $message, $extra);
+            }
+        } catch (\Throwable $e) {
+            log_message('error', '[TicketActionController::notifyRequestorByEmail] ' . $e->getMessage());
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Ticket Status Transitions
     // -------------------------------------------------------------------------
@@ -113,6 +137,13 @@ class TicketActionController extends BaseController
             $notifBody
         );
 
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            ($isEmergency === 1 ? 'Approved (Emergency Priority)' : 'Approved'),
+            $notifBody
+        );
+
         return $this->successResponse('Ticket approved successfully.', [
             'ticket_id'    => $ticketId, 
             'status'       => 'approved',
@@ -171,6 +202,13 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Incident #{$ticketId} Under Investigation",
+            'Your incident report is now being actively investigated by SSU staff.'
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Under Investigation',
             'Your incident report is now being actively investigated by SSU staff.'
         );
 
@@ -296,6 +334,13 @@ class TicketActionController extends BaseController
             'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
         );
 
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'SSU Notation Added',
+            'SSU staff has added a recommendation/notation to your incident report: "' . $notation . '"'
+        );
+
         return $this->successResponse(
             'Notation added successfully.',
             ['ticket_id' => $ticketId, 'notation' => $notation]
@@ -360,6 +405,13 @@ class TicketActionController extends BaseController
             'Your incident report has been resolved by SSU staff and has been archived.'
         );
 
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Incident Resolved',
+            'Your incident report has been resolved by SSU staff and has been archived.'
+        );
+
         return $this->successResponse(
             'Incident report resolved and archived.',
             ['ticket_id' => $ticketId, 'status' => 'resolved']
@@ -411,6 +463,14 @@ class TicketActionController extends BaseController
             'warning', 
             "Ticket #{$ticketId} Declined", 
             "Your request was declined. Reason: {$reason}"
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Declined',
+            "Your request was declined. Reason: {$reason}",
+            ['Reason for Decline' => $reason]
         );
 
         return $this->successResponse('Ticket declined.', ['ticket_id' => $ticketId, 'status' => 'declined']);
@@ -482,6 +542,14 @@ class TicketActionController extends BaseController
             "Your ticket for {$ticket['service_type']} has been delayed for approval: {$reason}"
         );
 
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Approval Delayed',
+            "Your ticket for {$ticket['service_type']} has been held for additional administrative review: {$reason}",
+            ['Hold Reason' => $reason]
+        );
+
         return $this->successResponse('Ticket approval delayed successfully.', [
             'ticket_id'             => $ticketId,
             'is_approval_delayed'   => 1,
@@ -531,6 +599,13 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Ticket #{$ticketId} Approval Resumed",
+            "Your ticket for {$ticket['service_type']} has been returned to the active approval queue."
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Approval Resumed',
             "Your ticket for {$ticket['service_type']} has been returned to the active approval queue."
         );
 
@@ -811,6 +886,13 @@ class TicketActionController extends BaseController
             "Your request for {$ticket['service_type']} has been marked as completed."
         );
 
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Completed',
+            "Work on your service request #{$ticketId} ({$ticket['service_type']}) has been marked as completed. Please sign in to review accomplishment details."
+        );
+
         return $this->successResponse('Ticket completed successfully.', [
             'ticket_id'        => $ticketId, 
             'status'           => $newStatus,
@@ -1028,6 +1110,13 @@ class TicketActionController extends BaseController
             'success',
             "Ticket #{$ticketId} Closed",
             "Your service request has been verified and officially closed. Thank you!"
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Verified & Closed',
+            "Your service request #{$ticketId} has been officially verified and closed. Thank you for using GSO Integrated Services!"
         );
 
         return $this->successResponse('Ticket verified and closed successfully.');

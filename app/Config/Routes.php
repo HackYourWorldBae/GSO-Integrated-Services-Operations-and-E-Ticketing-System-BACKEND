@@ -18,6 +18,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->post('auth/login',    'AuthController::login',    ['filter' => 'throttle:10,60']);
     $routes->post('auth/register', 'AuthController::register', ['filter' => 'throttle:10,60']);
 
+    // Password Recovery via Email Link (Rate limited to prevent abuse)
+    $routes->post('auth/forgot-password',    'AuthController::forgotPassword',   ['filter' => 'throttle:5,60']);
+    $routes->post('auth/verify-reset-token', 'AuthController::verifyResetToken', ['filter' => 'throttle:15,60']);
+    $routes->post('auth/reset-password',     'AuthController::resetPassword',    ['filter' => 'throttle:5,60']);
+
     // Public Scheduled Projects Announcements (FGMU & LEAU)
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
@@ -145,6 +150,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('superadmin/users/(:segment)/unlock', 'SuperadminController::unlockUser/$1', ['filter' => 'role:superadmin']);
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
         $routes->get('superadmin/account-activity-logs',  'SuperadminController::accountActivityLogs', ['filter' => 'role:superadmin']);
+
+        // -- System Settings & Resend.com Email Integration (Superadmin) --
+        $routes->get('settings/resend',        'SystemSettingController::getResendConfig',    ['filter' => 'role:superadmin']);
+        $routes->post('settings/resend',       'SystemSettingController::updateResendConfig', ['filter' => 'role:superadmin']);
+        $routes->post('settings/resend-key',   'SystemSettingController::updateResendConfig', ['filter' => 'role:superadmin']);
+        $routes->post('settings/resend/test',  'SystemSettingController::testResendEmail',    ['filter' => 'role:superadmin']);
 
         // -- Notifications --
         $routes->get('notifications',             'NotificationController::index');

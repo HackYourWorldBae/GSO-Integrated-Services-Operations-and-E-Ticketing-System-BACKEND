@@ -114,7 +114,7 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
                                 ->join('units', 'units.id = users.unit_id', 'left')
                                 ->where('users.id', $id)
                                 ->first();
@@ -126,6 +126,7 @@ class SuperadminController extends BaseController
         $now = time();
         $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
         $user['failed_login_attempts'] = (int) ($user['failed_login_attempts'] ?? 0);
+        $user['request_count'] = (int) ($user['request_count'] ?? 0);
         $lockoutTimestamp = !empty($user['lockout_until']) ? strtotime($user['lockout_until']) : 0;
         $user['is_locked'] = ($lockoutTimestamp > $now);
         $user['lockout_remaining_seconds'] = $user['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
@@ -273,7 +274,7 @@ class SuperadminController extends BaseController
             'last_name'      => 'permit_empty|max_length[100]',
             'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
             'role'           => 'permit_empty|in_list[student,employee,admin,director,superadmin]',
-            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Deactivated]',
+            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
             'contact_number' => 'permit_empty|max_length[30]',
             'unit_id'        => 'permit_empty',
             'password'       => 'permit_empty|min_length[6]',
@@ -291,7 +292,7 @@ class SuperadminController extends BaseController
         if (in_array($existing['role'], ['student', 'employee'])) {
             if (isset($body['first_name']) || isset($body['last_name']) || isset($body['email']) || isset($body['password']) || isset($body['role']) || isset($body['student_id_number'])) {
                 return $this->errorResponse(
-                    'Registered user accounts (Students & Employees) cannot be edited by the Super Administrator. You may only deactivate, suspend, or delete the account.',
+                    'Registered user accounts (Students & Employees) cannot be edited by the Super Administrator. You may only suspend or delete the account.',
                     [],
                     ResponseInterface::HTTP_FORBIDDEN
                 );
@@ -348,7 +349,7 @@ class SuperadminController extends BaseController
     }
 
     /**
-     * Change user account status directly (Active, Deactivated, Suspended).
+     * Change user account status directly (Active, Suspended).
      */
     public function updateStatus(string $id): ResponseInterface
     {
@@ -364,8 +365,8 @@ class SuperadminController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
         $newStatus = $body['status'] ?? null;
-        if (!in_array($newStatus, ['Active', 'Deactivated', 'Suspended', 'Rejected'])) {
-            return $this->errorResponse('Invalid status. Supported statuses: Active, Deactivated, Suspended, Rejected.');
+        if (!in_array($newStatus, ['Active', 'Suspended', 'Rejected'])) {
+            return $this->errorResponse('Invalid status. Supported statuses: Active, Suspended, Rejected.');
         }
 
         $updateData = ['status' => $newStatus];
@@ -383,7 +384,7 @@ class SuperadminController extends BaseController
 
             $this->activityLogModel->logEvent([
                 'event_type'     => 'ACCOUNT_STATUS_CHANGED',
-                'severity'       => in_array($newStatus, ['Suspended', 'Deactivated', 'Rejected'], true) ? 'warning' : 'notice',
+                'severity'       => in_array($newStatus, ['Suspended', 'Rejected'], true) ? 'warning' : 'notice',
                 'actor_id'       => $currentUserId,
                 'target_user_id' => $id,
                 'details'        => "Superadmin changed account status of {$existing['first_name']} {$existing['last_name']} from {$existing['status']} to {$newStatus}.",

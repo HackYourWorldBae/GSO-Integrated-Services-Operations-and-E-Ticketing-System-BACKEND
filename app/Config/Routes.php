@@ -101,6 +101,14 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin']);
         $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin']);
 
+        // -- Cross-Unit Collaborations (Admin / Director) --
+        $routes->post('tickets/(:segment)/collaborations',           'CollaborationController::requestCollaboration/$1', ['filter' => 'role:admin,director']);
+        $routes->get('tickets/(:segment)/collaborations',            'CollaborationController::getTicketCollaborations/$1');
+        $routes->patch('collaborations/(:num)/respond',              'CollaborationController::respond/$1',              ['filter' => 'role:admin,director']);
+        $routes->post('collaborations/(:num)/assign-personnel',      'CollaborationController::assignPersonnel/$1',      ['filter' => 'role:admin,director']);
+        $routes->patch('collaborations/(:num)/complete',             'CollaborationController::complete/$1',             ['filter' => 'role:admin,director']);
+        $routes->get('collaborations/my-unit',                       'CollaborationController::myUnitCollaborations',    ['filter' => 'role:admin,director']);
+
         // -- Personnel Categories (Admin) --
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
         $routes->get('personnel/categories/(:segment)',    'PersonnelController::categories/$1',      ['filter' => 'role:admin,director']);

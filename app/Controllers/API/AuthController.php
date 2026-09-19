@@ -161,18 +161,18 @@ class AuthController extends BaseController
             $errors['password_confirm'] = ['Passwords do not match.'];
         }
 
-        // Email validation (optional)
+        // Email validation (mandatory for password recovery & notifications)
         $emailToSave = null;
-        if (!empty($email)) {
-            if (strlen($email) > 100 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $errors['email'] = ['Please enter a valid email address.'];
+        if (empty($email)) {
+            $errors['email'] = ['Email is required for password recovery and system notifications.'];
+        } elseif (strlen($email) > 100 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors['email'] = ['Please enter a valid email address (e.g. name@bsu.edu.ph).'];
+        } else {
+            $existingEmail = $this->userModel->where('email', strtolower($email))->first();
+            if ($existingEmail) {
+                $errors['email'] = ['This email address is already registered.'];
             } else {
-                $existingEmail = $this->userModel->where('email', strtolower($email))->first();
-                if ($existingEmail) {
-                    $errors['email'] = ['This email address is already registered.'];
-                } else {
-                    $emailToSave = strtolower($email);
-                }
+                $emailToSave = strtolower($email);
             }
         }
 

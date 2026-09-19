@@ -50,7 +50,7 @@ class UserModel extends Model
     protected $validationRules = [
         'first_name'        => 'required|max_length[100]',
         'last_name'         => 'required|max_length[100]',
-        'email'             => 'permit_empty|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
+        'email'             => 'required|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
         'password_hash'     => 'required|min_length[8]',
         'role'              => 'required|in_list[student,employee,admin,director,superadmin]',
     ];
@@ -136,7 +136,7 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code')
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
                         ->join('units', 'units.id = users.unit_id', 'left');
 
         if (!empty($search)) {
@@ -171,6 +171,7 @@ class UserModel extends Model
         foreach ($users as &$u) {
             $u['is_verified'] = (int) ($u['is_verified'] ?? 0);
             $u['failed_login_attempts'] = (int) ($u['failed_login_attempts'] ?? 0);
+            $u['request_count'] = (int) ($u['request_count'] ?? 0);
             $lockoutTimestamp = !empty($u['lockout_until']) ? strtotime($u['lockout_until']) : 0;
             $u['is_locked'] = ($lockoutTimestamp > $now);
             $u['lockout_remaining_seconds'] = $u['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;

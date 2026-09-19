@@ -79,7 +79,7 @@ class DispatchController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
-        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+        if ($forbidden = $this->assertTicketAccess($ticket)) {
             return $forbidden;
         }
 

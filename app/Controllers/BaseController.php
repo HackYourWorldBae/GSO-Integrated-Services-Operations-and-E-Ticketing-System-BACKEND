@@ -202,6 +202,36 @@ abstract class BaseController extends Controller
     }
 
     /**
+     * Checks if current user has operational access to a ticket,
+     * either as the primary unit admin, campus-wide authority, or an accepted collaborator.
+     */
+    protected function assertTicketAccess(array|string $ticketOrId): ?ResponseInterface
+    {
+        $userRole = $this->currentUserRole();
+        if (in_array($userRole, ['director', 'superadmin'], true)) {
+            return null;
+        }
+
+        $ticket = is_array($ticketOrId) ? $ticketOrId : (new \App\Models\TicketModel())->find($ticketOrId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $userUnitId = $this->currentUserUnitId();
+        if ($userUnitId && (int)$ticket['unit_id'] === $userUnitId) {
+            return null;
+        }
+
+        // Check if user's unit is an active or pending collaborating unit
+        $collabModel = new \App\Models\TicketCollaborationModel();
+        if ($userUnitId && $collabModel->isUnitCollaborating($ticket['id'], $userUnitId)) {
+            return null;
+        }
+
+        return $this->forbiddenResponse("Jurisdiction error: Your unit (#{$userUnitId}) does not have access to ticket #{$ticket['id']}.");
+    }
+
+    /**
      * Asserts that the authenticated user has the specified capability according to the dynamic RBAC matrix.
      */
     protected function assertPermission(string $featureKey, string $customMessage = ''): ?ResponseInterface

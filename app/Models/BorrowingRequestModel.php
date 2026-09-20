@@ -55,7 +55,7 @@ class BorrowingRequestModel extends Model
         'borrower_email'         => 'required|valid_email|max_length[255]',
         'borrower_contact'       => 'required|max_length[30]',
         'item_name_requested'    => 'required|max_length[255]',
-        'quantity_needed'        => 'required|integer|greater_than_equal_to[1]',
+        'quantity_needed'        => 'permit_empty|integer|greater_than_equal_to[1]',
         'purpose_project'        => 'required',
         'date_needed'            => 'required|valid_date',
         'expected_return_date'   => 'required|valid_date',

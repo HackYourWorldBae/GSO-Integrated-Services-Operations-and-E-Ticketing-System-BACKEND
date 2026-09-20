@@ -420,6 +420,9 @@ class TicketController extends BaseController
                     ]);
 
                     // Create borrowing request record
+                    // (item model no longer collected; quantity is optional and defaults to 1)
+                    $qtyRaw = $borrowingDetails['quantity_needed'] ?? '';
+                    $qty = ($qtyRaw === '' || $qtyRaw === null) ? 1 : max(1, (int) $qtyRaw);
                     $borrowingModel->insert([
                         'ticket_id'              => $ticketId,
                         'borrower_name'          => sanitize_string($borrowingDetails['borrower_name'] ?? ($user['first_name'] . ' ' . $user['last_name'])),
@@ -429,8 +432,8 @@ class TicketController extends BaseController
                         'borrower_email'         => sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? '')),
                         'borrower_contact'       => sanitize_string($borrowingDetails['borrower_contact'] ?? ''),
                         'item_name_requested'    => sanitize_string($borrowingDetails['item_name'] ?? ''),
-                        'item_model_requested'   => sanitize_string($borrowingDetails['item_model'] ?? ''),
-                        'quantity_needed'        => (int) ($borrowingDetails['quantity_needed'] ?? 1),
+                        'item_model_requested'   => null,
+                        'quantity_needed'        => $qty,
                         'purpose_project'        => sanitize_string($borrowingDetails['purpose_project'] ?? ''),
                         'date_needed'            => sanitize_string($borrowingDetails['date_needed'] ?? ''),
                         'expected_return_date'   => sanitize_string($borrowingDetails['expected_return_date'] ?? ''),

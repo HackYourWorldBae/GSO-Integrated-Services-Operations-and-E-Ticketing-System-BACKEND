@@ -761,8 +761,18 @@ class TicketActionController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
-        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+        if ($forbidden = $this->assertTicketAccess($ticket)) {
             return $forbidden;
+        }
+
+        // Only the requesting (primary) unit may complete a collaboration ticket.
+        $collabModel = new \App\Models\TicketCollaborationModel();
+        if ($collabModel->hasLiveCollaboration($ticketId)) {
+            $userUnitId = $this->currentUserUnitId();
+            if ($userUnitId && (int)$ticket['unit_id'] !== $userUnitId
+                && !in_array($this->currentUserRole(), ['director', 'superadmin'], true)) {
+                return $this->forbiddenResponse('Only the requesting unit may complete a collaboration ticket.');
+            }
         }
 
         if (!in_array($ticket['status'], ['processing', 'approved', 'resolved'])) {

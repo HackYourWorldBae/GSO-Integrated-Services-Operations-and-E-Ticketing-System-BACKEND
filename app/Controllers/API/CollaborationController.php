@@ -375,6 +375,168 @@ class CollaborationController extends BaseController
     }
 
     /**
+     * Get collab tickets for the current unit filtered by workflow stage.
+     * GET /api/v1/collaborations/tickets?direction=incoming|outgoing|all&stage=approved|scheduled|active|all
+     *
+     * - Approved stage: ticket still 'approved'; receiving unit dispatches own workers here.
+     * - Scheduled stage: ticket 'processing' step 4; requesting unit awaits counterpart dispatch.
+     * - Active stage: ticket 'processing' step 5 or 'resolved'; joint execution.
+     */
+    public function collabTickets(): ResponseInterface
+    {
+        $userRole   = $this->currentUserRole();
+        $userUnitId = $this->currentUserUnitId();
+
+        if ($userRole === 'admin' && !$userUnitId) {
+            return $this->forbiddenResponse('Unit admin has no assigned unit.');
+        }
+
+        $unitId    = (int) ($this->request->getGet('unit_id') ?: ($userUnitId ?: 1));
+        // Admins are scoped to their own unit; director/superadmin may query any unit.
+        if ($userRole === 'admin' && $userUnitId && $unitId !== $userUnitId) {
+            $unitId = $userUnitId;
+        }
+
+        $direction = strtolower(trim((string) ($this->request->getGet('direction') ?? 'all')));
+        if (!in_array($direction, ['incoming', 'outgoing', 'all'], true)) {
+            $direction = 'all';
+        }
+        $stage = strtolower(trim((string) ($this->request->getGet('stage') ?? 'all')));
+        if (!in_array($stage, ['approved', 'scheduled', 'active', 'all'], true)) {
+            $stage = 'all';
+        }
+
+        $rows = $this->collabModel->getCollabTickets($unitId, $direction, $stage);
+
+        // Auto-start scheduled collab tickets whose implementation date has arrived,
+        // mirroring TicketQueueController::activeTickets so joint tickets start on
+        // time regardless of which unit polls first.
+        $ticketModel     = new \App\Models\TicketModel();
+        $assignmentModel = new \App\Models\TicketAssignmentModel();
+        $personnelModel  = new \App\Models\PersonnelModel();
+        $logModel        = new \App\Models\TicketLogModel();
+        $today = date('Y-m-d');
+        $autoStarted = [];
+        foreach ($rows as $row) {
+            $tid = $row['ticket_id'] ?? null;
+            if (!$tid || isset($autoStarted[$tid])) {
+                continue;
+            }
+            $autoStarted[$tid] = true;
+            if (($row['status'] ?? '') === 'processing' && (int)($row['current_step'] ?? 0) === 4) {
+                $assigns = $assignmentModel->getByTicket($tid);
+                $earliest = null;
+                foreach ($assigns as $a) {
+                    if (!empty($a['implementation_date'])) {
+                        $d = substr((string)$a['implementation_date'], 0, 10);
+                        if ($earliest === null || $d < $earliest) {
+                            $earliest = $d;
+                        }
+                    }
+                }
+                if ($earliest !== null && $earliest <= $today) {
+                    $now = date('Y-m-d H:i:s');
+                    $ticketModel->update($tid, [
+                        'status_label' => 'Job Started',
+                        'current_step' => 5,
+                        'updated_at'   => $now,
+                    ]);
+                    foreach ($assigns as $assignment) {
+                        if (!empty($assignment['personnel_id'])) {
+                            $personnelModel->update($assignment['personnel_id'], [
+                                'status'     => 'working',
+                                'updated_at' => $now,
+                            ]);
+                        }
+                        if (empty($assignment['dispatched_at'])) {
+                            $assignmentModel->update($assignment['id'], ['dispatched_at' => $now]);
+                        }
+                    }
+                    $logModel->logAction($tid, $this->currentUserId(), 'Job Started', 'System automatically started the joint collaboration ticket based on implementation date.');
+                }
+            }
+        }
+
+        // Enrich with assignment summary + personnel counts so the frontend can
+        // render the same ticket-list style without N+1 fetches.
+        $db = \Config\Database::connect();
+        $tickets = [];
+        foreach ($rows as $row) {
+            $ticketId = $row['ticket_id'] ?? $row['id'] ?? null;
+            if (!$ticketId) {
+                continue;
+            }
+            $assignRows = $db->table('ticket_assignments ta')
+                ->select('ta.*, p.name as worker_name, p.specialty as worker_specialty, p.unit_id as worker_unit_id, u.code as worker_unit_code')
+                ->join('personnel p', 'p.id = ta.personnel_id', 'left')
+                ->join('units u', 'u.id = p.unit_id', 'left')
+                ->where('ta.ticket_id', $ticketId)
+                ->where('ta.completed_at IS NULL')
+                ->orderBy('ta.assigned_at', 'ASC')
+                ->get()->getResultArray();
+
+            $myUnitAssigns = array_values(array_filter($assignRows, fn($a) => (int)($a['worker_unit_id'] ?? 0) === $unitId));
+            $otherUnitAssigns = array_values(array_filter($assignRows, fn($a) => (int)($a['worker_unit_id'] ?? 0) !== $unitId));
+
+            $isOutgoing = ((int)($row['requesting_unit_id'] ?? 0) === $unitId);
+            $firstName = trim((string)($row['first_name'] ?? ''));
+            $lastName = trim((string)($row['last_name'] ?? ''));
+            $requester = trim($firstName . ' ' . $lastName) ?: 'End User';
+
+            $tickets[] = [
+                'id'                        => $ticketId,
+                'title'                     => $row['title'] ?? 'Service Request',
+                'service_type'              => $row['service_type'] ?? null,
+                'service'                   => $row['service_type'] ?? null,
+                'description'               => $row['description'] ?? '',
+                'job_description'           => $row['description'] ?? '',
+                'status'                    => $row['status'] ?? null,
+                'status_label'              => $row['status_label'] ?? null,
+                'current_step'              => isset($row['current_step']) ? (int)$row['current_step'] : null,
+                'unit_id'                   => isset($row['unit_id']) ? (int)$row['unit_id'] : null,
+                'location'                  => $row['location'] ?? null,
+                'office_room'               => $row['office_room'] ?? null,
+                'is_emergency'              => !empty($row['is_emergency']),
+                'is_labor_only'             => !empty($row['is_labor_only']),
+                'submitted_at'              => $row['submitted_at'] ?? null,
+                'created_at'                => $row['submitted_at'] ?? null,
+                'requester'                 => $requester,
+                'email'                     => $row['email'] ?? null,
+                'contact_number'            => $row['requester_contact'] ?? null,
+                'user'                      => [
+                    'first_name' => $row['first_name'] ?? null,
+                    'last_name'  => $row['last_name'] ?? null,
+                    'email'      => $row['email'] ?? null,
+                ],
+                // Collaboration context
+                'collaboration_id'          => $row['collaboration_id'] ?? null,
+                'collaboration_status'      => $row['collaboration_status'] ?? null,
+                'collaboration_reason'      => $row['reason'] ?? null,
+                'scope_of_work'             => $row['scope_of_work'] ?? $row['reason'] ?? null,
+                'requesting_unit_id'        => isset($row['requesting_unit_id']) ? (int)$row['requesting_unit_id'] : null,
+                'collaborating_unit_id'     => isset($row['collaborating_unit_id']) ? (int)$row['collaborating_unit_id'] : null,
+                'requesting_unit_code'      => $row['requesting_unit_code'] ?? null,
+                'collaborating_unit_code'   => $row['collaborating_unit_code'] ?? null,
+                'is_outgoing'               => $isOutgoing,
+                'is_requesting_unit'        => $isOutgoing,
+                'assignments'               => $assignRows,
+                'my_unit_assignments'       => $myUnitAssigns,
+                'other_unit_assignments'    => $otherUnitAssigns,
+                'my_unit_dispatched'        => count($myUnitAssigns) > 0,
+                'collaboration_created_at'  => $row['collaboration_created_at'] ?? null,
+            ];
+        }
+
+        return $this->successResponse('Collab tickets retrieved successfully.', [
+            'unit_id'   => $unitId,
+            'direction' => $direction,
+            'stage'     => $stage,
+            'tickets'   => $tickets,
+            'count'     => count($tickets),
+        ]);
+    }
+
+    /**
      * Get collaborations involving the current user's unit.
      * GET /api/v1/collaborations/my-unit
      */

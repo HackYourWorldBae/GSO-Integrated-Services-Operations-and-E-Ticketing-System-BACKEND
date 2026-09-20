@@ -111,7 +111,36 @@ class DispatchController extends BaseController
         }
 
         if ((int) $worker['unit_id'] !== (int) $ticket['unit_id']) {
-            return $this->errorResponse("Assigned worker does not belong to the ticket's unit.");
+            // Cross-unit dispatch is allowed only when a live collaboration links
+            // the ticket's primary unit and the worker's home unit (either side
+            // may dispatch their own personnel to the joint ticket).
+            $collabModel = new \App\Models\TicketCollaborationModel();
+            $isCollabDispatch = $collabModel->where('ticket_id', $ticketId)
+                ->whereIn('status', ['pending', 'accepted'])
+                ->groupStart()
+                    ->groupStart()
+                        ->where('requesting_unit_id', (int) $ticket['unit_id'])
+                        ->where('collaborating_unit_id', (int) $worker['unit_id'])
+                    ->groupEnd()
+                    ->orGroupStart()
+                        ->where('requesting_unit_id', (int) $worker['unit_id'])
+                        ->where('collaborating_unit_id', (int) $ticket['unit_id'])
+                    ->groupEnd()
+                ->groupEnd()
+                ->first();
+            if (!$isCollabDispatch) {
+                return $this->errorResponse("Assigned worker does not belong to the ticket's unit.");
+            }
+            // Auto-accept a pending collaboration when the invited unit dispatches —
+            // dispatching personnel is an implicit acceptance of the request.
+            if (($isCollabDispatch['status'] ?? '') === 'pending'
+                && (int)($isCollabDispatch['collaborating_unit_id'] ?? 0) === (int)$worker['unit_id']) {
+                $collabModel->update($isCollabDispatch['id'], [
+                    'status'       => 'accepted',
+                    'responded_by' => $this->currentUserId(),
+                    'responded_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
         }
 
         $implementationDate = sanitize_string($body['implementation_date'] ?? date('Y-m-d'));
@@ -404,8 +433,20 @@ class DispatchController extends BaseController
         $ticket = $this->ticketModel->find($ticketId);
         if (!$ticket) return $this->notFoundResponse('Ticket');
 
-        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+        if ($forbidden = $this->assertTicketAccess($ticket)) {
             return $forbidden;
+        }
+
+        // Only the requesting (primary) unit may start a collab ticket early.
+        // Collaborating units dispatch + auto-start via schedule, but cannot
+        // force-start the joint ticket.
+        $collabModel = new \App\Models\TicketCollaborationModel();
+        if ($collabModel->hasLiveCollaboration($ticketId)) {
+            $userUnitId = $this->currentUserUnitId();
+            if ($userUnitId && (int)$ticket['unit_id'] !== $userUnitId
+                && !in_array($this->currentUserRole(), ['director', 'superadmin'], true)) {
+                return $this->forbiddenResponse('Only the requesting unit may start a collaboration ticket early. Your dispatched personnel will auto-start on the implementation date.');
+            }
         }
 
         $workerStatus = 'working';

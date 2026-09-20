@@ -135,6 +135,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // -- Cross-Unit Collaborations (Admin / Director) --
         $routes->post('tickets/(:segment)/collaborations',           'CollaborationController::requestCollaboration/$1', ['filter' => 'role:admin,director']);
         $routes->get('tickets/(:segment)/collaborations',            'CollaborationController::getTicketCollaborations/$1');
+        $routes->get('collaborations/tickets',                    'CollaborationController::collabTickets',                  ['filter' => 'role:admin,director']);
         $routes->patch('collaborations/(:num)/respond',              'CollaborationController::respondToCollaboration/$1',              ['filter' => 'role:admin,director']);
         $routes->post('collaborations/(:num)/assign-personnel',      'CollaborationController::assignPersonnel/$1',      ['filter' => 'role:admin,director']);
         $routes->patch('collaborations/(:num)/complete',             'CollaborationController::complete/$1',             ['filter' => 'role:admin,director']);

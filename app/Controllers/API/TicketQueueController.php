@@ -285,9 +285,10 @@ class TicketQueueController extends BaseController
             return $this->forbiddenResponse('You do not have permission to view this ticket.');
         }
 
-        // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
+        // For staff roles, also ensure unit jurisdiction (director has campus-wide access).
+        // Collaborating units may view joint tickets via assertTicketAccess.
         if ($this->isStaffRole() && $role === 'admin') {
-            if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            if ($forbidden = $this->assertTicketAccess($ticket)) {
                 return $forbidden;
             }
         }
@@ -346,9 +347,10 @@ class TicketQueueController extends BaseController
             return $this->forbiddenResponse('You do not have permission to view logs for this ticket.');
         }
 
-        // For staff roles, also ensure unit jurisdiction (director has campus-wide access)
+        // For staff roles, also ensure unit jurisdiction (director has campus-wide access).
+        // Collaborating units may view joint ticket logs via assertTicketAccess.
         if ($this->isStaffRole() && $role === 'admin') {
-            if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            if ($forbidden = $this->assertTicketAccess($ticket)) {
                 return $forbidden;
             }
         }

@@ -197,18 +197,55 @@ class DirectorController extends BaseController
         }
         $whereSql = !empty($dateConds) ? "WHERE " . implode(" AND ", $dateConds) : "";
 
-        $serviceRows = $db->query("
-            SELECT 
+        // A ticket may bundle multiple services from the same unit
+        // (stored as a comma-separated service_type, e.g. "Carpentry, Electrical").
+        // Analytics must count each selected service as an individual
+        // service request per unit instead of counting the ticket once.
+        $ticketServiceRows = $db->query("
+            SELECT
                 u.code AS unit_code,
                 u.name AS unit_name,
-                COALESCE(NULLIF(t.service_type, ''), 'General Maintenance') AS service_type,
-                COUNT(*) AS count
+                COALESCE(NULLIF(t.service_type, ''), 'General Maintenance') AS service_type
             FROM tickets t
             JOIN units u ON u.id = t.unit_id
             {$whereSql}
-            GROUP BY t.unit_id, u.code, u.name, t.service_type
-            ORDER BY count DESC
         ", $dateParams)->getResultArray();
+
+        // Aggregate individual services: split comma-separated bundles.
+        $serviceCounts = []; // "UNIT||Service Name" => ['unit_code'=>..,'unit_name'=>..,'name'=>..,'count'=>..]
+        foreach ($ticketServiceRows as $tRow) {
+            $uCode = strtoupper((string)($tRow['unit_code'] ?? 'FGMU'));
+            $rawServices = explode(',', (string)($tRow['service_type'] ?? ''));
+            $split = [];
+            foreach ($rawServices as $part) {
+                $name = trim($part);
+                if ($name !== '') {
+                    $split[] = $name;
+                }
+            }
+            if (empty($split)) {
+                $split[] = 'General Maintenance';
+            }
+            // De-duplicate identical services accidentally listed twice on one ticket
+            $split = array_values(array_unique($split));
+            foreach ($split as $serviceName) {
+                $key = $uCode . '||' . $serviceName;
+                if (!isset($serviceCounts[$key])) {
+                    $serviceCounts[$key] = [
+                        'unit_code' => $uCode,
+                        'unit_name' => $tRow['unit_name'],
+                        'name'      => $serviceName,
+                        'count'     => 0,
+                    ];
+                }
+                $serviceCounts[$key]['count']++;
+            }
+        }
+
+        // Sort by count DESC so top services come first
+        uasort($serviceCounts, fn($a, $b) => $b['count'] <=> $a['count']);
+
+        $totalServiceRequestsAcross = array_sum(array_column($serviceCounts, 'count'));
 
         $serviceBreakdown = [];
         $serviceBreakdownByUnit = [
@@ -232,15 +269,15 @@ class DirectorController extends BaseController
             ],
         ];
 
-        foreach ($serviceRows as $row) {
+        foreach ($serviceCounts as $row) {
             $c = (int)$row['count'];
-            $pct = $totalRequestsAcross > 0 ? round(($c / $totalRequestsAcross) * 100, 1) : 0;
+            $pct = $totalServiceRequestsAcross > 0 ? round(($c / $totalServiceRequestsAcross) * 100, 1) : 0;
             $uCode = strtoupper((string)($row['unit_code'] ?? 'FGMU'));
 
             $serviceBreakdown[] = [
                 'unit_code' => $uCode,
                 'unit_name' => $row['unit_name'],
-                'name'      => $row['service_type'],
+                'name'      => $row['name'],
                 'count'     => $c,
                 'percent'   => $pct,
             ];
@@ -249,7 +286,7 @@ class DirectorController extends BaseController
                 $serviceBreakdownByUnit[$uCode]['total'] += $c;
                 $serviceBreakdownByUnit[$uCode]['services'][] = [
                     'unit_code' => $uCode,
-                    'name'      => $row['service_type'],
+                    'name'      => $row['name'],
                     'count'     => $c,
                     'percent'   => 0,
                 ];
@@ -527,6 +564,7 @@ class DirectorController extends BaseController
             'available_years' => $availableYears,
             'summary' => [
                 'total_requests'        => $totalRequestsAcross,
+                'total_service_requests'=> $totalServiceRequestsAcross,
                 'total_resolved'        => $totalResolvedAcross,
                 'total_declined'        => $totalDeclinedAcross,
                 'total_pending'         => $totalPendingAcross,

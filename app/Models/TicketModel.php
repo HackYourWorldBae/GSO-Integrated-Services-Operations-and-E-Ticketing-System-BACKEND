@@ -616,12 +616,38 @@ class TicketModel extends Model
             $where = $unitId 
                 ? "WHERE unit_id = " . (int)$unitId . " AND $condition AND (is_project = 0 OR is_project IS NULL)" 
                 : "WHERE $condition AND (is_project = 0 OR is_project IS NULL)";
-            $counts = $db->query("
-                SELECT service_type, COUNT(*) as count 
+            $rows = $db->query("
+                SELECT COALESCE(NULLIF(service_type, ''), 'General Maintenance') AS service_type
                 FROM tickets 
-                $where 
-                GROUP BY service_type
+                $where
             ")->getResultArray();
+
+            // A ticket may bundle multiple services from the same unit
+            // (comma-separated service_type). Count each selected service
+            // as an individual service request instead of per ticket.
+            $splitCounts = [];
+            foreach ($rows as $r) {
+                $parts = explode(',', (string)($r['service_type'] ?? ''));
+                $services = [];
+                foreach ($parts as $part) {
+                    $name = trim($part);
+                    if ($name !== '') {
+                        $services[] = $name;
+                    }
+                }
+                if (empty($services)) {
+                    $services[] = 'General Maintenance';
+                }
+                foreach (array_values(array_unique($services)) as $serviceName) {
+                    $splitCounts[$serviceName] = ($splitCounts[$serviceName] ?? 0) + 1;
+                }
+            }
+            arsort($splitCounts);
+
+            $counts = [];
+            foreach ($splitCounts as $serviceName => $c) {
+                $counts[] = ['service_type' => $serviceName, 'count' => $c];
+            }
             
             $freq[$periodKey] = $counts;
         }

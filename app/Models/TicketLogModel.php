@@ -14,16 +14,24 @@ class TicketLogModel extends Model
 
     /**
      * Log a ticket action/event.
+     * Never fatal: audit logging must not break the primary operation
+     * (e.g. non-ticket callers like inventory logging), so failures are
+     * recorded to the error log and reported via the return value.
      */
     public function logAction(string $ticketId, ?string $userId, string $action, ?string $details = null): bool
     {
-        return (bool) $this->insert([
-            'ticket_id'  => $ticketId,
-            'user_id'    => $userId,
-            'action'     => $action,
-            'details'    => $details,
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
+        try {
+            return (bool) $this->insert([
+                'ticket_id'  => $ticketId,
+                'user_id'    => $userId,
+                'action'     => $action,
+                'details'    => $details,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[TicketLogModel::logAction] ' . $e->getMessage());
+            return false;
+        }
     }
 
     /**

@@ -69,7 +69,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('attachments/(:num)',                  'TicketAttachmentController::downloadAttachment/$1');
         $routes->post('tickets/(:segment)/accomplishment',  'TicketAttachmentController::uploadAccomplishment/$1', ['filter' => 'role:admin,worker']);
         $routes->get('tickets/(:segment)/accomplishment',   'TicketAttachmentController::downloadAccomplishment/$1');
-        $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketActionController::verifyAndClose/$1', ['filter' => 'role:admin,director,user,superadmin']);
+        $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketActionController::verifyAndClose/$1', ['filter' => 'role:admin,director,student,employee,superadmin']);
         $routes->patch('tickets/(:segment)/eodb',           'TicketActionController::updateEodb/$1',           ['filter' => 'role:admin']);
 
         // -- Ticket Queues (Per Unit — Admin, Director, Superadmin) --
@@ -111,7 +111,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // or the wildcard swallows them (e.g. "overdue" -> getByTicket).
         $routes->get('borrowing/overdue',              'BorrowingController::getOverdue',        ['filter' => 'role:admin,director,superadmin']);
         $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
-        $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,user,superadmin']);
+        $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,student,employee,superadmin']);
         $routes->post('borrowing/mark-overdue',        'BorrowingController::markOverdue',       ['filter' => 'role:admin']);
         $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,superadmin']);
         $routes->patch('borrowing/(:segment)/director-reject',  'BorrowingController::directorReject/$1',  ['filter' => 'role:director,superadmin']);

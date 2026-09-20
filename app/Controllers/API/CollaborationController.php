@@ -68,8 +68,16 @@ class CollaborationController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
         $collaboratingUnitId = (int) ($body['collaborating_unit_id'] ?? 0);
-        $reason              = trim((string) ($body['reason'] ?? ''));
         $scopeOfWork         = trim((string) ($body['scope_of_work'] ?? ''));
+        // Accept `reason` as canonical, but fall back to `scope_of_work` since
+        // older/newer clients may only send one of the two fields.
+        $reason              = trim((string) ($body['reason'] ?? ''));
+        if ($reason === '' && $scopeOfWork !== '') {
+            $reason = $scopeOfWork;
+        }
+        if ($scopeOfWork === '' && $reason !== '') {
+            $scopeOfWork = $reason;
+        }
 
         if ($collaboratingUnitId <= 0 || !in_array($collaboratingUnitId, [1, 2, 3], true)) {
             return $this->errorResponse('Please specify a valid collaborating unit (FGMU, LEAU, or SSU).');
@@ -198,7 +206,7 @@ class CollaborationController extends BaseController
         }
 
         $body   = $this->request->getJSON(true) ?? [];
-        $action = strtolower(trim((string) ($body['action'] ?? $body['status'] ?? '')));
+        $action = strtolower(trim((string) ($body['action'] ?? $body['response_status'] ?? $body['status'] ?? '')));
         $notes  = trim((string) ($body['response_notes'] ?? $body['notes'] ?? ''));
 
         if (!in_array($action, ['accepted', 'declined'], true)) {

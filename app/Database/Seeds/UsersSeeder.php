@@ -40,6 +40,9 @@ class UsersSeeder extends Seeder
             [ 'email' => 'leau-admin@email.com', 'role' => 'admin', 'first_name' => 'LEAU', 'last_name' => 'Admin', 'unit' => 'LEAU' ],
             [ 'email' => 'director@email.com', 'role' => 'director', 'first_name' => 'GSO', 'last_name' => 'Director', 'unit' => null ],
             [ 'email' => 'superadmin@email.com', 'role' => 'superadmin', 'first_name' => 'Super', 'last_name' => 'Admin', 'unit' => null ],
+            // Personnel Bulletin Board shared logins (field workers pick their name after login)
+            [ 'email' => 'fgmu-personnels@email.com', 'role' => 'employee', 'employee_type' => 'Field Personnel', 'first_name' => 'FGMU', 'last_name' => 'Personnel Board', 'unit' => 'FGMU' ],
+            [ 'email' => 'leau-personnels@email.com', 'role' => 'employee', 'employee_type' => 'Field Personnel', 'first_name' => 'LEAU', 'last_name' => 'Personnel Board', 'unit' => 'LEAU' ],
         ];
 
         $data = [];

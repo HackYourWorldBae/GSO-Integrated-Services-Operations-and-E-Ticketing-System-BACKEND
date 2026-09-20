@@ -141,6 +141,12 @@ class AuthController extends BaseController
                 } elseif (mb_strlen($college) > 150) {
                     $errors['college'] = ['College name must not exceed 150 characters.'];
                 }
+            } elseif ($employeeType === 'Research and Extension Staff') {
+                if (empty($college)) {
+                    $errors['college'] = ['Please select your assigned research or extension center.'];
+                } elseif (mb_strlen($college) > 150) {
+                    $errors['college'] = ['Center name must not exceed 150 characters.'];
+                }
             } elseif ($employeeType === 'Support / Administrative Staff') {
                 if (empty($college)) {
                     $errors['college'] = ['Please select your assigned administrative or support building.'];

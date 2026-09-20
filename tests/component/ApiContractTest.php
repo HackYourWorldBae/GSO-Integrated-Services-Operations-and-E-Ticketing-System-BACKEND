@@ -301,4 +301,75 @@ final class ApiContractTest extends CIUnitTestCase
             'dispatch/start must stay admin/worker-gated.'
         );
     }
+
+    /**
+     * Level 3 — Component tests for the LEAU borrowing workflow wiring.
+     *
+     * Guarantees the borrowing state machine (BorrowingController +
+     * InventoryController + BorrowingWorkflow library + models) stays wired
+     * to the routes the new frontend workspaces call.
+     */
+    public function testBorrowingControllersAreWired(): void
+    {
+        foreach ([
+            'App\\Controllers\\API\\BorrowingController' => [
+                'directorApprove', 'directorReject', 'assignInventory',
+                'readyForPickup', 'pickup', 'returnItem', 'cancel',
+                'getByTicket', 'getQueue', 'getOverdue', 'markOverdue',
+            ],
+            'App\\Controllers\\API\\InventoryController' => [
+                'index', 'show', 'create', 'update', 'adjustQuantity',
+                'delete', 'categories', 'stats',
+            ],
+        ] as $class => $methods) {
+            $this->assertTrue(class_exists($class), "{$class} must exist");
+            foreach ($methods as $method) {
+                $this->assertTrue(method_exists($class, $method), "{$class}::{$method} must exist");
+            }
+        }
+
+        foreach ([
+            'App\\Models\\BorrowingRequestModel'    => ['getByTicket', 'getQueue', 'getOverdue', 'markOverdue'],
+            'App\\Models\\InventoryItemModel'       => ['getFiltered', 'countFiltered'],
+            'App\\Models\\BorrowingAttachmentModel' => ['getByBorrowingRequest'],
+            'App\\Models\\BorrowingHistoryModel'    => ['getByBorrowingRequest'],
+        ] as $class => $methods) {
+            $this->assertTrue(class_exists($class), "{$class} must exist");
+            foreach ($methods as $method) {
+                $this->assertTrue(method_exists($class, $method), "{$class}::{$method} must exist");
+            }
+        }
+
+        $this->assertTrue(class_exists('App\\Libraries\\BorrowingWorkflow'), 'BorrowingWorkflow library must exist');
+        foreach (['canTransition', 'isTerminal', 'isOverdue', 'clampAssignQuantity', 'canAssignInventory', 'returnTicketPatch'] as $method) {
+            $this->assertTrue(
+                method_exists('App\\Libraries\\BorrowingWorkflow', $method),
+                "BorrowingWorkflow::{$method} must exist"
+            );
+        }
+    }
+
+    public function testBorrowingOperationsRemainRoleGated(): void
+    {
+        $this->assertMatchesRegularExpression(
+            '/borrowing\/\(\:segment\)\/assign-inventory\'[^\n]*role:admin/',
+            $this->routesContent,
+            'borrowing assign-inventory must stay admin-gated.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/borrowing\/\(\:segment\)\/director-approve\'[^\n]*role:director/',
+            $this->routesContent,
+            'borrowing director-approve must stay director-gated.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/\'inventory\'[^\n]*role:admin/',
+            $this->routesContent,
+            'inventory creation must stay admin-gated.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/inventory\/\(\:num\)\/adjust-quantity\'[^\n]*role:admin/',
+            $this->routesContent,
+            'inventory adjust-quantity must stay admin-gated.'
+        );
+    }
 }

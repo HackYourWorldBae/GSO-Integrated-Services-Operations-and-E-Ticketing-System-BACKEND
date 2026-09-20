@@ -254,6 +254,27 @@ class TicketController extends BaseController
                     }
                 }
             }
+
+            // 3. Validate LEAU Borrowing services (should be allowed for students)
+            if (!empty($body['leauBorrowing']['services'])) {
+                $allowedBorrowingServices = [
+                    'borrowing of tools/ equipment',
+                    'borrowing of tools/equipment',
+                    'borrowing of plants',
+                ];
+
+                foreach ($body['leauBorrowing']['services'] as $srv) {
+                    $rawService = trim((string)($srv['service'] ?? ''));
+                    $normalizedService = strtolower(preg_replace('/\s+/', ' ', $rawService));
+                    if (!in_array($normalizedService, $allowedBorrowingServices, true)) {
+                        return $this->errorResponse(
+                            "Student organization accounts (RSO/SSG) are not authorized to request '{$rawService}'.",
+                            ['unauthorized_service' => $rawService],
+                            ResponseInterface::HTTP_FORBIDDEN
+                        );
+                    }
+                }
+            }
         }
 
         $db             = Database::connect();
@@ -310,7 +331,7 @@ class TicketController extends BaseController
                 }
             }
 
-            // --- 2. LEAU Intake ---
+            // --- 2. LEAU Intake (Regular Services) ---
             if (!empty($body['leau']['services'])) {
                 $leauDetails = sanitize_array($body['leau']['details'] ?? []);
                 $leauModel   = new LeauTicketDetailModel();
@@ -354,6 +375,71 @@ class TicketController extends BaseController
                     ]);
 
                     $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU service request: {$serviceString}");
+                    $createdTickets[] = $ticketId;
+                }
+            }
+
+            // --- 2b. LEAU Borrowing Intake (Borrowing of Plants / Tools & Equipment) ---
+            if (!empty($body['leauBorrowing']['services'])) {
+                $borrowingDetails = sanitize_array($body['leauBorrowing']['details'] ?? []);
+                $borrowingModel   = new \App\Models\BorrowingRequestModel();
+
+                $servicesList = array_map(function($srv) {
+                    return sanitize_string($srv['service'] ?? '');
+                }, $body['leauBorrowing']['services']);
+                $servicesList = array_filter($servicesList);
+
+                if (!empty($servicesList)) {
+                    $serviceString = $this->formatServicesList($servicesList);
+                    if (empty($serviceString)) {
+                        $serviceString = 'Borrowing Request';
+                    }
+
+                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], 0);
+
+                    // Get user details for borrower info
+                    $userModel = new \App\Models\UserModel();
+                    $user = $userModel->find($userId);
+
+                    $this->ticketModel->insert([
+                        'id'          => $ticketId,
+                        'user_id'     => $userId,
+                        'unit_id'     => self::UNIT_MAP['LEAU'],
+                        'title'       => sanitize_string($serviceString),
+                        'service_type'=> $serviceString,
+                        'description' => sanitize_string($borrowingDetails['purpose_project'] ?? 'Borrowing request.'),
+                        'status'      => 'pending',
+                        'status_label'=> 'Pending Director Approval',
+                        'is_emergency'=> 0,
+                        'current_step'=> 1,
+                        'location'    => sanitize_string($borrowingDetails['department_major'] ?? ''),
+                        'office_room' => '',
+                        'is_archived' => 0,
+                        'submitted_at'=> date('Y-m-d H:i:s'),
+                        'updated_at'  => date('Y-m-d H:i:s'),
+                    ]);
+
+                    // Create borrowing request record
+                    $borrowingModel->insert([
+                        'ticket_id'              => $ticketId,
+                        'borrower_name'          => sanitize_string($borrowingDetails['borrower_name'] ?? ($user['first_name'] . ' ' . $user['last_name'])),
+                        'borrower_id_number'     => sanitize_string($borrowingDetails['borrower_id_number'] ?? ''),
+                        'borrower_type'          => sanitize_string($borrowingDetails['borrower_type'] ?? 'staff'),
+                        'department_major'       => sanitize_string($borrowingDetails['department_major'] ?? ''),
+                        'borrower_email'         => sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? '')),
+                        'borrower_contact'       => sanitize_string($borrowingDetails['borrower_contact'] ?? ''),
+                        'item_name_requested'    => sanitize_string($borrowingDetails['item_name'] ?? ''),
+                        'item_model_requested'   => sanitize_string($borrowingDetails['item_model'] ?? ''),
+                        'quantity_needed'        => (int) ($borrowingDetails['quantity_needed'] ?? 1),
+                        'purpose_project'        => sanitize_string($borrowingDetails['purpose_project'] ?? ''),
+                        'date_needed'            => sanitize_string($borrowingDetails['date_needed'] ?? ''),
+                        'expected_return_date'   => sanitize_string($borrowingDetails['expected_return_date'] ?? ''),
+                        'terms_agreed'           => !empty($borrowingDetails['terms_agreed']) ? 1 : 0,
+                        'terms_agreed_at'        => !empty($borrowingDetails['terms_agreed']) ? date('Y-m-d H:i:s') : null,
+                        'status'                 => 'pending_director',
+                    ]);
+
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU borrowing request: {$serviceString}");
                     $createdTickets[] = $ticketId;
                 }
             }

@@ -106,10 +106,34 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('dispatch/assignments/(:num)',             'DispatchController::updateAssignment/$1',     ['filter' => 'role:admin']);
         $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin']);
 
+        // -- Borrowing Workflow (LEAU) --
+        $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,user,superadmin']);
+        $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/overdue',              'BorrowingController::getOverdue',        ['filter' => 'role:admin,director,superadmin']);
+        $routes->post('borrowing/mark-overdue',        'BorrowingController::markOverdue',       ['filter' => 'role:admin']);
+        $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,superadmin']);
+        $routes->patch('borrowing/(:segment)/director-reject',  'BorrowingController::directorReject/$1',  ['filter' => 'role:director,superadmin']);
+        $routes->post('borrowing/(:segment)/assign-inventory', 'BorrowingController::assignInventory/$1', ['filter' => 'role:admin']);
+        $routes->patch('borrowing/(:segment)/ready-for-pickup', 'BorrowingController::readyForPickup/$1', ['filter' => 'role:admin']);
+        $routes->patch('borrowing/(:segment)/pickup',   'BorrowingController::pickup/$1',        ['filter' => 'role:admin']);
+        $routes->patch('borrowing/(:segment)/return',   'BorrowingController::returnItem/$1',     ['filter' => 'role:admin']);
+        $routes->patch('borrowing/(:segment)/cancel',   'BorrowingController::cancel/$1',         ['filter' => 'role:admin']);
+
+        // -- Inventory Management (LEAU Admin) --
+        $routes->get('inventory',                  'InventoryController::index',      ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('inventory/categories',       'InventoryController::categories', ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('inventory/stats',            'InventoryController::stats',      ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('inventory/(:num)',           'InventoryController::show/$1',    ['filter' => 'role:admin,director,superadmin']);
+        $routes->post('inventory',                 'InventoryController::create',     ['filter' => 'role:admin']);
+        $routes->put('inventory/(:num)',           'InventoryController::update/$1',  ['filter' => 'role:admin']);
+        $routes->patch('inventory/(:num)',         'InventoryController::update/$1',  ['filter' => 'role:admin']);
+        $routes->patch('inventory/(:num)/adjust-quantity', 'InventoryController::adjustQuantity/$1', ['filter' => 'role:admin']);
+        $routes->delete('inventory/(:num)',        'InventoryController::delete/$1',  ['filter' => 'role:admin']);
+
         // -- Cross-Unit Collaborations (Admin / Director) --
         $routes->post('tickets/(:segment)/collaborations',           'CollaborationController::requestCollaboration/$1', ['filter' => 'role:admin,director']);
         $routes->get('tickets/(:segment)/collaborations',            'CollaborationController::getTicketCollaborations/$1');
-        $routes->patch('collaborations/(:num)/respond',              'CollaborationController::respond/$1',              ['filter' => 'role:admin,director']);
+        $routes->patch('collaborations/(:num)/respond',              'CollaborationController::respondToCollaboration/$1',              ['filter' => 'role:admin,director']);
         $routes->post('collaborations/(:num)/assign-personnel',      'CollaborationController::assignPersonnel/$1',      ['filter' => 'role:admin,director']);
         $routes->patch('collaborations/(:num)/complete',             'CollaborationController::complete/$1',             ['filter' => 'role:admin,director']);
         $routes->get('collaborations/my-unit',                       'CollaborationController::myUnitCollaborations',    ['filter' => 'role:admin,director']);

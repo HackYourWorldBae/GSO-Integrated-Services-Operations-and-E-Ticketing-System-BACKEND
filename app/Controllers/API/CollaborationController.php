@@ -172,8 +172,12 @@ class CollaborationController extends BaseController
     /**
      * Respond to a collaboration request (Accept / Decline).
      * PATCH /api/v1/collaborations/:id/respond
+     *
+     * NOTE: named respondToCollaboration (not respond) to avoid clashing
+     * with BaseController::respond()'s response-helper signature, which is
+     * a fatal declaration error under PHP 8.
      */
-    public function respond(int $id): ResponseInterface
+    public function respondToCollaboration(int $id): ResponseInterface
     {
         $collab = $this->collabModel->find($id);
         if (!$collab) {

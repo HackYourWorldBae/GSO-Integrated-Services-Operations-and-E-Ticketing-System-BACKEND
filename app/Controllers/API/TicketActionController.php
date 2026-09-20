@@ -123,6 +123,22 @@ class TicketActionController extends BaseController
 
         $this->ticketModel->update($ticketId, $updateData);
 
+        // Borrowing sync: LEAU borrowing tickets move from pending_director -> approved_director
+        // so they appear in the LEAU Admin approved queue ready for inventory assignment.
+        try {
+            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
+            if (str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools')) {
+                $db = Database::connect();
+                $db->table('borrowing_requests')
+                    ->where('ticket_id', $ticketId)
+                    ->where('status', 'pending_director')
+                    ->update(['status' => 'approved_director', 'updated_at' => date('Y-m-d H:i:s')]);
+                $logMessage .= ' Borrowing director approval synced.';
+            }
+        } catch (\Throwable $borrowSyncErr) {
+            log_message('error', '[TicketActionController::approve] Borrowing sync failed: ' . $borrowSyncErr->getMessage());
+        }
+
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
 
         $notifTitle = ($isEmergency === 1) ? "Ticket #{$ticketId} Approved (Emergency Priority)" : "Ticket #{$ticketId} Approved";
@@ -455,6 +471,20 @@ class TicketActionController extends BaseController
             'reviewed_by'         => $this->currentUserId(),
             'updated_at'          => date('Y-m-d H:i:s'),
         ]);
+
+        // Borrowing sync: declined borrowing tickets are cancelled in the borrowing workflow.
+        try {
+            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
+            if (str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools')) {
+                $db = Database::connect();
+                $db->table('borrowing_requests')
+                    ->where('ticket_id', $ticketId)
+                    ->where('status', 'pending_director')
+                    ->update(['status' => 'cancelled', 'updated_at' => date('Y-m-d H:i:s')]);
+            }
+        } catch (\Throwable $borrowSyncErr) {
+            log_message('error', '[TicketActionController::decline] Borrowing sync failed: ' . $borrowSyncErr->getMessage());
+        }
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Declined', "Ticket declined. Reason: {$reason}");
 

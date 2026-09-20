@@ -107,9 +107,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('dispatch/assignments/(:num)/materials',   'DispatchController::addMaterials/$1',         ['filter' => 'role:admin']);
 
         // -- Borrowing Workflow (LEAU) --
-        $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,user,superadmin']);
-        $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
+        // NOTE: static segments must be declared BEFORE /borrowing/(:segment)
+        // or the wildcard swallows them (e.g. "overdue" -> getByTicket).
         $routes->get('borrowing/overdue',              'BorrowingController::getOverdue',        ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,user,superadmin']);
         $routes->post('borrowing/mark-overdue',        'BorrowingController::markOverdue',       ['filter' => 'role:admin']);
         $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,superadmin']);
         $routes->patch('borrowing/(:segment)/director-reject',  'BorrowingController::directorReject/$1',  ['filter' => 'role:director,superadmin']);

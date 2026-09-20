@@ -49,6 +49,7 @@ class RoleGuardFilter implements FilterInterface
 
         if (!in_array($currentRole, $arguments, true)) {
             // Check dynamic capability matrix for cross-role delegations
+            $hasDynamicAccess = false;
             // Admin accessing Director analytics
             if ($currentRole === 'admin' && in_array('director', $arguments, true)) {
                 $hasDynamicAccess = $permissionModel->hasPermission($currentRole, 'reports.view');

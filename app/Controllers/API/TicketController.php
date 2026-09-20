@@ -401,6 +401,41 @@ class TicketController extends BaseController
                     $userModel = new \App\Models\UserModel();
                     $user = $userModel->find($userId);
 
+                    // Upfront validation: rejecting here (before the ticket
+                    // row is created) prevents orphan tickets with no
+                    // borrowing record when required details are missing.
+                    $borrowerName      = sanitize_string($borrowingDetails['borrower_name'] ?? ($user['first_name'] . ' ' . $user['last_name']));
+                    $borrowerIdNumber  = sanitize_string($borrowingDetails['borrower_id_number'] ?? ($user['student_id_number'] ?? ''));
+                    $borrowerEmail     = sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? ''));
+                    $borrowerContact   = sanitize_string($borrowingDetails['borrower_contact'] ?? ($user['contact_number'] ?? ''));
+                    $borrowItemName    = sanitize_string($borrowingDetails['item_name'] ?? '');
+                    $borrowPurpose     = sanitize_string($borrowingDetails['purpose_project'] ?? '');
+                    $borrowDateNeeded  = sanitize_string($borrowingDetails['date_needed'] ?? '');
+                    $borrowReturnDate  = sanitize_string($borrowingDetails['expected_return_date'] ?? '');
+                    $borrowTermsAgreed = !empty($borrowingDetails['terms_agreed']);
+
+                    $borrowErrors = [];
+                    if ($borrowItemName === '')    { $borrowErrors['item_name'] = ['Item name is required.']; }
+                    if ($borrowPurpose === '')    { $borrowErrors['purpose_project'] = ['Purpose / Event or Project Name is required.']; }
+                    if ($borrowDateNeeded === '') { $borrowErrors['date_needed'] = ['Pickup date is required.']; }
+                    if ($borrowReturnDate === '') { $borrowErrors['expected_return_date'] = ['Return date is required.']; }
+                    if (!$borrowTermsAgreed)      { $borrowErrors['terms_agreed'] = ['You must agree to the terms and conditions.']; }
+                    if ($borrowerName === '')     { $borrowErrors['borrower_name'] = ['Borrower name is required.']; }
+                    if ($borrowerIdNumber === '') { $borrowErrors['borrower_id_number'] = ['Borrower ID number is required.']; }
+                    if ($borrowerEmail === '')    { $borrowErrors['borrower_email'] = ['Borrower email is required.']; }
+                    if ($borrowerContact === '')  { $borrowErrors['borrower_contact'] = ['Borrower contact number is required.']; }
+                    if (!empty($borrowErrors)) {
+                        // Reject the whole intake explicitly (rollback any
+                        // tickets already staged by other unit branches) so
+                        // no partial/orphan records are ever committed.
+                        $db->transRollback();
+                        return $this->errorResponse(
+                            'Borrowing request details are incomplete.',
+                            $borrowErrors,
+                            ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                        );
+                    }
+
                     $this->ticketModel->insert([
                         'id'          => $ticketId,
                         'user_id'     => $userId,
@@ -423,24 +458,30 @@ class TicketController extends BaseController
                     // (item model no longer collected; quantity is optional and defaults to 1)
                     $qtyRaw = $borrowingDetails['quantity_needed'] ?? '';
                     $qty = ($qtyRaw === '' || $qtyRaw === null) ? 1 : max(1, (int) $qtyRaw);
-                    $borrowingModel->insert([
+                    $borrowingId = $borrowingModel->insert([
                         'ticket_id'              => $ticketId,
-                        'borrower_name'          => sanitize_string($borrowingDetails['borrower_name'] ?? ($user['first_name'] . ' ' . $user['last_name'])),
-                        'borrower_id_number'     => sanitize_string($borrowingDetails['borrower_id_number'] ?? ''),
+                        'borrower_name'          => $borrowerName,
+                        'borrower_id_number'     => $borrowerIdNumber,
                         'borrower_type'          => sanitize_string($borrowingDetails['borrower_type'] ?? 'staff'),
-                        'department_major'       => sanitize_string($borrowingDetails['department_major'] ?? ''),
-                        'borrower_email'         => sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? '')),
-                        'borrower_contact'       => sanitize_string($borrowingDetails['borrower_contact'] ?? ''),
-                        'item_name_requested'    => sanitize_string($borrowingDetails['item_name'] ?? ''),
+                        'department_major'       => sanitize_string($borrowingDetails['department_major'] ?? ($user['college'] ?? '')),
+                        'borrower_email'         => $borrowerEmail,
+                        'borrower_contact'       => $borrowerContact,
+                        'item_name_requested'    => $borrowItemName,
                         'item_model_requested'   => null,
                         'quantity_needed'        => $qty,
-                        'purpose_project'        => sanitize_string($borrowingDetails['purpose_project'] ?? ''),
-                        'date_needed'            => sanitize_string($borrowingDetails['date_needed'] ?? ''),
-                        'expected_return_date'   => sanitize_string($borrowingDetails['expected_return_date'] ?? ''),
-                        'terms_agreed'           => !empty($borrowingDetails['terms_agreed']) ? 1 : 0,
-                        'terms_agreed_at'        => !empty($borrowingDetails['terms_agreed']) ? date('Y-m-d H:i:s') : null,
+                        'purpose_project'        => $borrowPurpose,
+                        'date_needed'            => $borrowDateNeeded,
+                        'expected_return_date'   => $borrowReturnDate,
+                        'terms_agreed'           => $borrowTermsAgreed ? 1 : 0,
+                        'terms_agreed_at'        => $borrowTermsAgreed ? date('Y-m-d H:i:s') : null,
                         'status'                 => 'pending_director',
                     ]);
+                    if (!$borrowingId) {
+                        // Never commit a ticket without its borrowing record.
+                        throw new \RuntimeException(
+                            'Borrowing request could not be saved: ' . json_encode($borrowingModel->errors())
+                        );
+                    }
 
                     $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU borrowing request: {$serviceString}");
                     $createdTickets[] = $ticketId;

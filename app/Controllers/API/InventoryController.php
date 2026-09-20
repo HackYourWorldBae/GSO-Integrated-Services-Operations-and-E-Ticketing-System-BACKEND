@@ -120,7 +120,7 @@ class InventoryController extends BaseController
             'condition_status'  => sanitize_string($body['condition_status'] ?? 'good'),
             'location'          => sanitize_string($body['location'] ?? ''),
             'description'       => sanitize_string($body['description'] ?? ''),
-            'is_active'         => isset($body['is_active']) ? (bool) $body['is_active'] : true,
+            'is_active'          => isset($body['is_active']) ? (int) (bool) $body['is_active'] : 1,
             'created_by'        => $this->currentUserId(),
             'created_at'        => date('Y-m-d H:i:s'),
             'updated_at'        => date('Y-m-d H:i:s'),

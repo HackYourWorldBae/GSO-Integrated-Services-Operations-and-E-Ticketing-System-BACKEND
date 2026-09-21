@@ -41,6 +41,9 @@ trait TicketEnrichmentTrait
         $assignmentsList = $assignmentsData['all'] ?? [];
         $feedbacks       = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
         $materialsMap    = $this->buildMaterialsMap($db, $ticketIds);
+        // Borrowing requests (one row per ticket via ticket_id UQ) so ticket
+        // lists + full-info modals can show item / purpose / schedule.
+        $borrowingMap    = $this->buildDetailMap($db, 'borrowing_requests',     'ticket_id', $ticketIds);
 
         // Load user/requester profiles in bulk for tickets
         $userIds = array_filter(array_unique(array_column($tickets, 'user_id')));
@@ -147,6 +150,7 @@ trait TicketEnrichmentTrait
 
             $ticket['assignment']          = $assignments[$id] ?? null;
             $ticket['assignments']         = $assignmentsList[$id] ?? [];
+            $ticket['borrowing']           = $borrowingMap[$id] ?? null;
             $ticket['attachments']         = $attachmentsMap[$id] ?? [];
             $ticket['feedback']            = $feedbacks[$id] ?? null;
             $ticket['materials']           = $materialsMap[$id] ?? [];
@@ -286,6 +290,7 @@ trait TicketEnrichmentTrait
             'leau_ticket_details'  => ['ticket_id'],
             'ssu_incident_details' => ['ticket_id'],
             'ticket_feedbacks'     => ['ticket_id'],
+            'borrowing_requests'   => ['ticket_id'],
         ];
         if (!isset($allowedTables[$table]) || !in_array($keyColumn, $allowedTables[$table], true)) {
             return [];

@@ -79,6 +79,9 @@ class TicketCollaborationModel extends Model
      *              the requesting unit already dispatched (status 'processing',
      *              step 4) — the receiver dispatches late via the same tab.
      *              Tickets my unit already staffed are excluded.
+     * - active:    joint execution only (status 'processing' AND step 5).
+     *              Completed tickets (resolved/step 6) graduate to the
+     *              Awaiting Requestor Rating job tab like normal tickets.
      * - scheduled: ticket.status = 'processing' AND current_step = 4 (dispatched, awaiting start)
      * - active:    ticket.status = 'processing' AND current_step = 5, or status = 'resolved'
      * - all:       no ticket-status filter
@@ -152,13 +155,11 @@ class TicketCollaborationModel extends Model
             $builder->where('t.status', 'processing');
             $builder->where('t.current_step', 4);
         } elseif ($stage === 'active') {
-            $builder->groupStart()
-                    ->groupStart()
-                        ->where('t.status', 'processing')
-                        ->where('t.current_step', 5)
-                    ->groupEnd()
-                    ->orWhere('t.status', 'resolved')
-                    ->groupEnd();
+            // Joint execution only. Resolved tickets move to the
+            // Awaiting Requestor Rating job tab (and out of collab tabs),
+            // so the Complete action can't be pressed twice from here.
+            $builder->where('t.status', 'processing');
+            $builder->where('t.current_step', 5);
         }
 
         $builder->where('(t.is_archived = 0 OR t.is_archived IS NULL)');

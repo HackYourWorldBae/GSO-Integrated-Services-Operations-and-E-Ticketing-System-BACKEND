@@ -141,10 +141,6 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('collaborations/(:num)/complete',             'CollaborationController::complete/$1',             ['filter' => 'role:admin,director']);
         $routes->get('collaborations/my-unit',                       'CollaborationController::myUnitCollaborations',    ['filter' => 'role:admin,director']);
 
-        // -- Personnel Bulletin Board (field workers pick name, view assigned works) --
-        $routes->get('personnel-board/roster', 'PersonnelBoardController::roster', ['filter' => 'role:employee,admin,director']);
-        $routes->get('personnel-board/works',  'PersonnelBoardController::works',  ['filter' => 'role:employee,admin,director']);
-
         // -- Personnel Categories (Admin) --
         // NOTE: These must be declared BEFORE /personnel/(:segment) to avoid route collision
         $routes->get('personnel/categories/(:segment)',    'PersonnelController::categories/$1',      ['filter' => 'role:admin,director']);

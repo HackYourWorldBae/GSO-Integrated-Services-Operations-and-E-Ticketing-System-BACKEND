@@ -74,7 +74,11 @@ class TicketCollaborationModel extends Model
      * Get collab tickets for a unit filtered by workflow stage.
      *
      * Stages mirror the dispatch lifecycle:
-     * - approved:  ticket.status = 'approved' (awaiting collaborator dispatch)
+     * - approved:  incoming requests still awaiting MY unit's dispatch. Covers
+     *              both not-yet-dispatched tickets (status 'approved') and tickets
+     *              the requesting unit already dispatched (status 'processing',
+     *              step 4) — the receiver dispatches late via the same tab.
+     *              Tickets my unit already staffed are excluded.
      * - scheduled: ticket.status = 'processing' AND current_step = 4 (dispatched, awaiting start)
      * - active:    ticket.status = 'processing' AND current_step = 5, or status = 'resolved'
      * - all:       no ticket-status filter
@@ -123,7 +127,27 @@ class TicketCollaborationModel extends Model
 
         $stage = strtolower(trim($stage));
         if ($stage === 'approved') {
-            $builder->where('t.status', 'approved');
+            if ($direction === 'incoming') {
+                // Receiving end: show every live request still awaiting MY unit's
+                // dispatch — whether the ticket is still 'approved' or the
+                // requesting unit already dispatched it ('processing', step 4).
+                // Once my unit staffs the ticket it graduates to scheduled/active.
+                $builder->groupStart()
+                        ->where('t.status', 'approved')
+                        ->orGroupStart()
+                            ->where('t.status', 'processing')
+                            ->where('t.current_step', 4)
+                        ->groupEnd()
+                        ->groupEnd();
+                $unitIdInt = (int) $unitId;
+                $builder->where(
+                    "NOT EXISTS (SELECT 1 FROM ticket_assignments ta " .
+                    "JOIN personnel p ON p.id = ta.personnel_id " .
+                    "WHERE ta.ticket_id = t.id AND ta.completed_at IS NULL AND p.unit_id = {$unitIdInt})"
+                );
+            } else {
+                $builder->where('t.status', 'approved');
+            }
         } elseif ($stage === 'scheduled') {
             $builder->where('t.status', 'processing');
             $builder->where('t.current_step', 4);

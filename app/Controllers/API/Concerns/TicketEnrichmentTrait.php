@@ -339,9 +339,11 @@ trait TicketEnrichmentTrait
         $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
 
         $rows = $db->query("
-            SELECT ta.*, p.name AS personnel_name, p.specialty AS specialty, p.specialty AS profession, NULL AS personnel_contact
+            SELECT ta.*, p.name AS personnel_name, p.specialty AS specialty, p.specialty AS profession, NULL AS personnel_contact,
+                   p.unit_id AS worker_unit_id, u.code AS worker_unit_code, u.name AS worker_unit_name
             FROM ticket_assignments ta
             LEFT JOIN personnel p ON p.id = ta.personnel_id
+            LEFT JOIN units u ON u.id = p.unit_id
             WHERE ta.ticket_id IN ({$placeholders})
             ORDER BY ta.assigned_at ASC
         ", $ticketIds)->getResultArray();

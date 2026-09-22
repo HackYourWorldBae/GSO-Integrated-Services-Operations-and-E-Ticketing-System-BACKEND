@@ -689,6 +689,15 @@ class BorrowingController extends BaseController
         $page   = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(500, max(1, (int) ($this->request->getGet('per_page') ?? 100)));
 
+        // Automatic overdue sync: any picked-up request past its expected return
+        // date is flipped to overdue on every queue read, so the Active >
+        // Borrowed Requests tab is always correct with no manual button.
+        try {
+            $this->borrowingModel->markOverdue();
+        } catch (\Throwable $e) {
+            log_message('error', '[BorrowingController::getQueue] auto-mark overdue failed: ' . $e->getMessage());
+        }
+
         $tickets = $this->borrowingModel->getQueue($status, $perPage, ($page - 1) * $perPage);
 
         return $this->successResponse('Borrowing queue retrieved.', [
@@ -707,6 +716,13 @@ class BorrowingController extends BaseController
     {
         if ($forbidden = $this->assertUnitAccess('LEAU')) {
             return $forbidden;
+        }
+
+        // Same automatic sync as the queue endpoint.
+        try {
+            $this->borrowingModel->markOverdue();
+        } catch (\Throwable $e) {
+            log_message('error', '[BorrowingController::getOverdue] auto-mark overdue failed: ' . $e->getMessage());
         }
 
         $overdue = $this->borrowingModel->getOverdue();

@@ -102,15 +102,38 @@ class BorrowingRequestModel extends Model
     }
 
     /**
-     * Get overdue borrowing requests
+     * Get overdue borrowing requests.
+     * Returns requests already flagged overdue, plus any picked-up requests
+     * past their return date (safety net in case the auto-sync has not run yet).
      */
     public function getOverdue(): array
     {
         $today = date('Y-m-d');
-        return $this->where('status', 'picked_up')
+
+        $flagged = $this->where('status', 'overdue')
+            ->orderBy('expected_return_date', 'ASC')
+            ->findAll();
+
+        $pastDue = $this->where('status', 'picked_up')
             ->where('expected_return_date <', $today)
             ->orderBy('expected_return_date', 'ASC')
             ->findAll();
+
+        $merged = [...$flagged];
+        foreach ($pastDue as $row) {
+            $exists = false;
+            foreach ($merged as $m) {
+                if ((string) ($m['ticket_id'] ?? '') === (string) ($row['ticket_id'] ?? '') && (string) ($m['id'] ?? '') === (string) ($row['id'] ?? '')) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists) {
+                $merged[] = $row;
+            }
+        }
+
+        return $merged;
     }
 
     /**

@@ -339,7 +339,10 @@ class BorrowingController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status'       => 'processing',
             'status_label' => 'Ready for Pickup',
-            'current_step' => 5,
+            // Keep scheduled (step 4) until actual pickup: the request must stay
+            // in Scheduled > Borrowing Requests and out of Active > In Progress,
+            // regardless of the pickup date.
+            'current_step' => 4,
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
 

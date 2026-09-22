@@ -145,6 +145,28 @@ class TicketQueueController extends BaseController
         foreach ($tickets as &$ticket) {
             $currentStep = (int) $ticket['current_step'];
             $needsStart = ($currentStep === 4);
+
+            // Borrowing requests are date-driven by pickup date and move only via
+            // explicit pickup action — never auto-start them into Active/In Progress.
+            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
+            $isBorrowing = !empty($ticket['borrowing'])
+                || str_contains($serviceLower, 'borrowing of plants')
+                || str_contains($serviceLower, 'borrowing of tools')
+                || str_contains($serviceLower, 'borrowing request');
+            if ($isBorrowing) {
+                // Self-heal tickets marked ready before the step-4 fix: awaiting
+                // pickup must stay scheduled, never Active/In Progress.
+                $bStatus = strtolower((string) ($ticket['borrowing']['status'] ?? ''));
+                if (in_array($bStatus, ['inventory_assigned', 'ready_for_pickup'], true) && (int) $ticket['current_step'] === 5) {
+                    $this->ticketModel->update($ticket['id'], [
+                        'current_step' => 4,
+                        'status_label' => $bStatus === 'ready_for_pickup' ? 'Ready for Pickup' : 'Inventory Assigned - Awaiting Pickup Prep',
+                        'updated_at'   => date('Y-m-d H:i:s'),
+                    ]);
+                    $ticket['current_step'] = 4;
+                }
+                continue;
+            }
             
             if ($needsStart && !empty($ticket['assignment']['implementation_date'])) {
                 if ($ticket['assignment']['implementation_date'] <= $today) {

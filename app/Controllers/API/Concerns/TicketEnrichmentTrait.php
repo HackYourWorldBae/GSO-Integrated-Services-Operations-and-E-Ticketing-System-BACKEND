@@ -151,6 +151,26 @@ trait TicketEnrichmentTrait
             $ticket['assignment']          = $assignments[$id] ?? null;
             $ticket['assignments']         = $assignmentsList[$id] ?? [];
             $ticket['borrowing']           = $borrowingMap[$id] ?? null;
+
+            // Flatten borrowing request particulars directly onto ticket
+            if (!empty($ticket['borrowing'])) {
+                $b = $ticket['borrowing'];
+                $ticket['item_name_requested']  = $b['item_name_requested'] ?? null;
+                $ticket['item_model_requested'] = $b['item_model_requested'] ?? null;
+                $ticket['quantity_needed']      = $b['quantity_needed'] ?? null;
+                $ticket['assigned_quantity']    = $b['assigned_quantity'] ?? null;
+                $ticket['date_needed']          = $b['date_needed'] ?? null;
+                $ticket['expected_return_date'] = $b['expected_return_date'] ?? null;
+                $ticket['purpose_project']      = $b['purpose_project'] ?? null;
+                $ticket['borrowing_status']     = $b['status'] ?? null;
+                $ticket['returned_at']          = $b['returned_at'] ?? null;
+                $ticket['return_condition']     = $b['return_condition'] ?? null;
+                $ticket['return_notes']         = $b['return_notes'] ?? null;
+                if (empty($ticket['description']) && !empty($b['purpose_project'])) {
+                    $ticket['description'] = $b['purpose_project'];
+                }
+            }
+
             $ticket['attachments']         = $attachmentsMap[$id] ?? [];
             $ticket['feedback']            = $feedbacks[$id] ?? null;
             $ticket['materials']           = $materialsMap[$id] ?? [];

@@ -96,8 +96,17 @@ class TicketActionController extends BaseController
         $unitId = (int) $ticket['unit_id'];
         $currentStep = 3;
         $newStatus   = 'approved';
-        $statusLabel = 'Queued for Dispatch';
-        $logMessage  = 'Ticket approved — queued for dispatch.';
+
+        $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
+        $isBorrowing  = str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools') || str_contains($serviceLower, 'borrowing request');
+
+        if ($isBorrowing) {
+            $statusLabel = 'Approved - Awaiting Inventory Assignment';
+            $logMessage  = 'Borrowing request approved by Director — awaiting inventory assignment.';
+        } else {
+            $statusLabel = 'Queued for Dispatch';
+            $logMessage  = 'Ticket approved — queued for dispatch.';
+        }
         // SSU Incident Reports are handled by /investigate, /notation, and /resolve endpoints.
 
         $body = $this->request->getJSON(true) ?? [];
@@ -117,7 +126,9 @@ class TicketActionController extends BaseController
         if ($isEmergency !== null) {
             $updateData['is_emergency'] = $isEmergency;
             if ($isEmergency === 1) {
-                $logMessage = 'Ticket approved as EMERGENCY PRIORITY by Director — queued for immediate dispatch.';
+                $logMessage = $isBorrowing
+                    ? 'Borrowing request approved as EMERGENCY PRIORITY by Director — awaiting immediate inventory assignment.'
+                    : 'Ticket approved as EMERGENCY PRIORITY by Director — queued for immediate dispatch.';
             }
         }
 
@@ -126,8 +137,7 @@ class TicketActionController extends BaseController
         // Borrowing sync: LEAU borrowing tickets move from pending_director -> approved_director
         // so they appear in the LEAU Admin approved queue ready for inventory assignment.
         try {
-            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-            if (str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools')) {
+            if ($isBorrowing) {
                 $db = Database::connect();
                 $db->table('borrowing_requests')
                     ->where('ticket_id', $ticketId)
@@ -144,7 +154,9 @@ class TicketActionController extends BaseController
         $notifTitle = ($isEmergency === 1) ? "Ticket #{$ticketId} Approved (Emergency Priority)" : "Ticket #{$ticketId} Approved";
         $notifBody  = ($isEmergency === 1)
             ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the Director."
-            : "Your request for {$ticket['service_type']} has been approved.";
+            : ($isBorrowing
+                ? "Your borrowing request for {$ticket['service_type']} has been approved by the Director. LEAU Admin will assign inventory."
+                : "Your request for {$ticket['service_type']} has been approved.");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],

@@ -117,4 +117,44 @@ final class BorrowingWorkflowTest extends CIUnitTestCase
         $this->assertFalse(BorrowingWorkflow::isValidReturnCondition('mint'));
         $this->assertFalse(BorrowingWorkflow::isValidReturnCondition(''));
     }
+
+    public function testTicketStatusLabelMapping(): void
+    {
+        $this->assertSame(
+            'Approved - Awaiting Inventory Assignment',
+            BorrowingWorkflow::getTicketStatusLabel('approved_director')
+        );
+        $this->assertSame(
+            'Inventory Assigned - Awaiting Pickup Prep',
+            BorrowingWorkflow::getTicketStatusLabel('inventory_assigned')
+        );
+        $this->assertSame(
+            'Ready for Pickup',
+            BorrowingWorkflow::getTicketStatusLabel('ready_for_pickup')
+        );
+        $this->assertSame(
+            'Item Picked Up',
+            BorrowingWorkflow::getTicketStatusLabel('picked_up')
+        );
+        $this->assertSame(
+            'Overdue for Return',
+            BorrowingWorkflow::getTicketStatusLabel('overdue')
+        );
+        $this->assertSame(
+            'Returned & Completed',
+            BorrowingWorkflow::getTicketStatusLabel('returned')
+        );
+        $this->assertSame(
+            'Pending Director Approval',
+            BorrowingWorkflow::getTicketStatusLabel('pending_director')
+        );
+        $this->assertSame(
+            'Declined by Director',
+            BorrowingWorkflow::getTicketStatusLabel('cancelled', 'declined')
+        );
+        $this->assertSame(
+            'Cancelled',
+            BorrowingWorkflow::getTicketStatusLabel('cancelled', 'cancelled')
+        );
+    }
 }

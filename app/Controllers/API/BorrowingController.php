@@ -91,6 +91,17 @@ class BorrowingController extends BaseController
             'updated_at'       => date('Y-m-d H:i:s'),
         ]);
 
+        $this->ticketModel->update($ticketId, [
+            'status'                => 'approved',
+            'status_label'          => 'Approved - Awaiting Inventory Assignment',
+            'is_approval_delayed'   => 0,
+            'approval_delay_reason' => null,
+            'current_step'          => 3,
+            'reviewed_at'           => date('Y-m-d H:i:s'),
+            'reviewed_by'           => $this->currentUserId(),
+            'updated_at'            => date('Y-m-d H:i:s'),
+        ]);
+
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Director Approved', "Director approved borrowing request. Notes: {$notes}");
 
         $this->notificationModel->createNotification(

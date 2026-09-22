@@ -161,6 +161,29 @@ trait TicketEnrichmentTrait
                 : ($ticket['is_labor_only'] ? 'assessment' : (!empty($ticket['materials']) ? ($ticket['materials'][0]['stage'] ?? 'assessment') : 'none'));
             $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']) || $ticket['is_labor_only'];
 
+            // Defensively normalize borrowing ticket status_label so it never shows "Queued for Dispatch"
+            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
+            $isBorrowingTicket = !empty($ticket['borrowing'])
+                || str_contains($serviceLower, 'borrowing of plants')
+                || str_contains($serviceLower, 'borrowing of tools')
+                || str_contains($serviceLower, 'borrowing request');
+
+            if ($isBorrowingTicket) {
+                $rawLabel = (string) ($ticket['status_label'] ?? '');
+                $bStatus  = (string) ($ticket['borrowing']['status'] ?? '');
+                $tStatus  = (string) ($ticket['status'] ?? '');
+
+                if ($rawLabel === 'Queued for Dispatch' || empty($rawLabel) || in_array($tStatus, ['approved', 'approved_director'], true)) {
+                    if ($bStatus !== '') {
+                        $ticket['status_label'] = \App\Libraries\BorrowingWorkflow::getTicketStatusLabel($bStatus, $tStatus);
+                    } else {
+                        $ticket['status_label'] = in_array($tStatus, ['approved', 'approved_director'], true)
+                            ? 'Approved - Awaiting Inventory Assignment'
+                            : 'Pending Director Approval';
+                    }
+                }
+            }
+
             $isIncidentReport = ((int) ($ticket['unit_id'] ?? 0) === 3) 
                 || (($ticket['service_type'] ?? '') === 'Incident Report')
                 || (($ticket['title'] ?? '') === 'Incident Report');

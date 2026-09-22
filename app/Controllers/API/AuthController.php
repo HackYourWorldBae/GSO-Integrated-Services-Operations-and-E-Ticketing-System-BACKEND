@@ -663,7 +663,7 @@ class AuthController extends BaseController
     }
 
     /**
-     * Update the current user's profile fields (name, contact number).
+     * Update the current user's profile fields (name, contact number, email).
      * Requires: JwtAuthFilter
      */
     public function updateProfile(): ResponseInterface
@@ -681,6 +681,17 @@ class AuthController extends BaseController
         }
         if (isset($body['contact_number'])) {
             $updateData['contact_number'] = sanitize_string($body['contact_number']);
+        }
+        if (isset($body['email'])) {
+            $email = strtolower(trim((string) $body['email']));
+            if ($email === '' || strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->errorResponse('Please enter a valid email address.', ['email' => 'Please enter a valid email address.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $existing = $this->userModel->where('email', $email)->first();
+            if ($existing && (string) ($existing['id'] ?? '') !== (string) $userId) {
+                return $this->errorResponse('This email address is already registered.', ['email' => 'This email address is already registered.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            $updateData['email'] = $email;
         }
 
         if (empty($updateData)) {

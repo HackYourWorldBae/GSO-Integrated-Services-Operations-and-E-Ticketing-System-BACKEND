@@ -200,14 +200,6 @@ class TicketController extends BaseController
             return $this->errorResponse('Your account is pending verification by the Super Administrator before you can submit service requests.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
-        if ($user['status'] === 'Deactivated') {
-            return $this->errorResponse(
-                'Your account has been deactivated. You can view existing tickets, but you cannot submit new requests. Please contact the GSO office to reactivate your account.',
-                ['is_deactivated' => true],
-                ResponseInterface::HTTP_FORBIDDEN
-            );
-        }
-
         if ($user['status'] === 'Suspended') {
             return $this->errorResponse(
                 'Your account has been suspended. Please contact the GSO office.',
@@ -620,13 +612,18 @@ class TicketController extends BaseController
             }
         }
 
-        // --- 1. Email Notification for Requestor ---
+        // --- 1. Email Notification for Requestor (respects updated email + opt-in) ---
         if (!empty($user['email']) && !empty($ticketSummaryList)) {
-            $reqName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
-            if (empty($reqName)) {
-                $reqName = 'Campus Member';
+            $freshUser = $userModel->find($userId);
+            $optedIn = !array_key_exists('email_notifications_enabled', (array) $freshUser) || (int) ($freshUser['email_notifications_enabled'] ?? 1) === 1;
+            if ($optedIn) {
+                $reqName = trim(($freshUser['first_name'] ?? $user['first_name'] ?? '') . ' ' . ($freshUser['last_name'] ?? $user['last_name'] ?? ''));
+                if (empty($reqName)) {
+                    $reqName = 'Campus Member';
+                }
+                $emailToUse = $freshUser['email'] ?? $user['email'];
+                $emailService->sendTicketIntakeConfirmation($emailToUse, $reqName, $ticketSummaryList);
             }
-            $emailService->sendTicketIntakeConfirmation($user['email'], $reqName, $ticketSummaryList);
         }
 
         // --- 2. High-Priority Email Alerts for SSU Administrators (opt-in only) ---

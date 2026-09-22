@@ -765,6 +765,10 @@ class BorrowingController extends BaseController
             $userModel = new UserModel();
             $user = $userModel->find($userId);
             if ($user && !empty($user['email'])) {
+                if (array_key_exists('email_notifications_enabled', $user) && (int) $user['email_notifications_enabled'] === 0) {
+                    log_message('info', "[BorrowingController::sendBorrowingEmail] Skipped — requestor opted out ({$userId})");
+                    return;
+                }
                 $reqName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
                 if (empty($reqName)) {
                     $reqName = 'Campus Member';

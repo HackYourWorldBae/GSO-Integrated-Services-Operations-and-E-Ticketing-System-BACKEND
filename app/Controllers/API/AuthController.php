@@ -451,9 +451,17 @@ class AuthController extends BaseController
 
         if ($user['status'] === 'Suspended') {
             return $this->errorResponse(
-                'Account Suspended: Your account has been suspended by the administrator. Login access is disabled. Please contact the GSO office for assistance.',
+                'Your account has been suspended. Please contact the GSO office.',
                 ['is_suspended' => true],
-                ResponseInterface::HTTP_UNAUTHORIZED
+                ResponseInterface::HTTP_FORBIDDEN
+            );
+        }
+        // Legacy Deactivated (migrated to Suspended) — treat same as Suspended for cached JWTs
+        if ($user['status'] === 'Deactivated') {
+            return $this->errorResponse(
+                'Your account has been suspended. Please contact the GSO office.',
+                ['is_suspended' => true],
+                ResponseInterface::HTTP_FORBIDDEN
             );
         }
 

@@ -682,6 +682,10 @@ class AuthController extends BaseController
         if (isset($body['contact_number'])) {
             $updateData['contact_number'] = sanitize_string($body['contact_number']);
         }
+        if (array_key_exists('email_notifications_enabled', $body)) {
+            $raw = $body['email_notifications_enabled'];
+            $updateData['email_notifications_enabled'] = ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') ? 1 : 0;
+        }
         if (isset($body['email'])) {
             $email = strtolower(trim((string) $body['email']));
             if ($email === '' || strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {

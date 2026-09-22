@@ -629,15 +629,54 @@ class TicketController extends BaseController
             $emailService->sendTicketIntakeConfirmation($user['email'], $reqName, $ticketSummaryList);
         }
 
-        // --- 2. High-Priority Email Alerts for SSU Administrators ---
+        // --- 2. High-Priority Email Alerts for SSU Administrators (opt-in only) ---
         if ($ssuTicketId && !empty($body['ssu']['incidentReport'])) {
+            // Respect per-account email opt-in; include both admin and staff of SSU
+            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+            $optInClause = $colExists
+                ? "AND COALESCE(email_notifications_enabled, 1) = 1"
+                : "";
             $ssuAdmins = $db->query(
-                "SELECT email FROM users WHERE role = 'admin' AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != ''"
+                "SELECT email FROM users WHERE role IN ('admin','staff') AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}"
             )->getResultArray();
 
             if (!empty($ssuAdmins)) {
-                $ssuEmails = array_column($ssuAdmins, 'email');
-                $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
+                $ssuEmails = array_values(array_filter(array_column($ssuAdmins, 'email')));
+                if (!empty($ssuEmails)) {
+                    $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
+                }
+            }
+        }
+
+        // --- 3. New Request Email to Opted-In Unit Admins/Staff (FGMU/LEAU/SSU) ---
+        // For non-SSU or in addition to the SSU alert, notify opted-in personnel of
+        // the destination unit so they can act without polling the dashboard.
+        // SSU ticket already alerted above; skip duplicate email for SSU here.
+        if (!$ssuTicketId) {
+            foreach ($createdTickets as $tIdNotify) {
+                $tRow = $this->ticketModel->find($tIdNotify);
+                if (!$tRow || empty($tRow['unit_id'])) {
+                    continue;
+                }
+                $unitAdmins = $db->query(
+                    "SELECT email, first_name, last_name FROM users WHERE role IN ('admin','staff') AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != ''" . ($db->fieldExists('email_notifications_enabled', 'users') ? " AND COALESCE(email_notifications_enabled, 1) = 1" : ""),
+                    [(int) $tRow['unit_id']]
+                )->getResultArray();
+                if (empty($unitAdmins)) {
+                    continue;
+                }
+                $adminEmails = array_values(array_filter(array_column($unitAdmins, 'email')));
+                if (empty($adminEmails)) {
+                    continue;
+                }
+                $emailService->sendTicketStatusUpdate(
+                    $adminEmails,
+                    'GSO Operations Team',
+                    (string) $tIdNotify,
+                    'New Request Assigned — ' . ($tRow['service_type'] ?? 'Work Order'),
+                    "A new service request has been assigned to your unit and is awaiting review in the admin dashboard.",
+                    ['Service' => $tRow['service_type'] ?? '', 'Unit ID' => (string) $tRow['unit_id']]
+                );
             }
         }
 

@@ -41,6 +41,7 @@ class UserModel extends Model
         'avatar_path',
         'status',
         'is_verified',
+        'email_notifications_enabled',
         'failed_login_attempts',
         'lockout_until',
     ];
@@ -119,6 +120,9 @@ class UserModel extends Model
 
         // Explicitly cast is_verified to int (0 or 1) so JSON serialization is boolean-friendly
         $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
+        $user['email_notifications_enabled'] = isset($user['email_notifications_enabled'])
+            ? (int) $user['email_notifications_enabled']
+            : 1;
 
         // Attach avatar URL
         $user['avatar_url'] = !empty($user['avatar_path'])

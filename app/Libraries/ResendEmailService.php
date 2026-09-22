@@ -339,6 +339,35 @@ class ResendEmailService
     }
 
     /**
+     * Return emails of users in a unit who opted into email updates.
+     * Used as a filtering helper before dispatching unit-targeted alerts.
+     *
+     * @param int $unitId
+     * @param string[] $roles
+     * @return string[]
+     */
+    public function getOptedInUnitEmails(int $unitId, array $roles = ['admin', 'staff']): array
+    {
+        try {
+            $db = \Config\Database::connect();
+            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+            $optInClause = $colExists ? 'AND COALESCE(email_notifications_enabled, 1) = 1' : '';
+            $placeholders = implode(',', array_fill(0, count($roles), '?'));
+            $params = array_merge($roles, [$unitId]);
+            // Roles are bound as values, unit_id as last param — build safely
+            $roleList = implode(',', array_map(fn($r) => $db->escape($r), $roles));
+            $rows = $db->query(
+                "SELECT email FROM users WHERE role IN ({$roleList}) AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}",
+                [$unitId]
+            )->getResultArray();
+            return array_values(array_filter(array_column($rows, 'email')));
+        } catch (\Throwable $e) {
+            log_message('error', '[ResendEmailService::getOptedInUnitEmails] ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
      * Send High-Priority Incident Report Email Alert to SSU Administrators.
      */
     public function sendSsuIncidentAlertToAdmins(array $adminEmails, array $incidentData, string $ticketId): array

@@ -136,10 +136,11 @@ abstract class BaseController extends Controller
 
     /**
      * Check whether the current user is a staff/operational role.
+     * Staff are internal GSO sub-unit personnel (provisioned by Superadmin IT).
      */
     protected function isStaffRole(): bool
     {
-        return in_array($this->currentUserRole(), ['admin', 'director', 'superadmin'], true);
+        return in_array($this->currentUserRole(), ['admin', 'staff', 'director', 'superadmin'], true);
     }
 
     /**
@@ -165,7 +166,7 @@ abstract class BaseController extends Controller
     /**
      * Enforces tenant/unit scoping.
      * Directors have university-wide jurisdiction.
-     * Admins are scoped strictly to their assigned unit_id.
+     * Admins and Staff are scoped strictly to their assigned unit_id.
      *
      * @param int|string $targetUnit Unit ID or Unit Code (e.g. 'FGMU', 1)
      * @param string $customMessage Optional custom error message
@@ -186,8 +187,8 @@ abstract class BaseController extends Controller
             return null;
         }
 
-        // Unit Admins must match their assigned unit_id
-        if (in_array($userRole, ['admin'], true)) {
+        // Unit Admins and Staff must match their assigned unit_id
+        if (in_array($userRole, ['admin', 'staff'], true)) {
             if ($userUnitId === null || $userUnitId !== $targetUnitId) {
                 $msg = !empty($customMessage) 
                     ? $customMessage 

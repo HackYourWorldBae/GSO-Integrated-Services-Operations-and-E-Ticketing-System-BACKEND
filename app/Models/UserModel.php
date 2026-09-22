@@ -53,7 +53,7 @@ class UserModel extends Model
         'last_name'         => 'required|max_length[100]',
         'email'             => 'required|valid_email|max_length[255]|is_unique[users.email,id,{id}]',
         'password_hash'     => 'required|min_length[8]',
-        'role'              => 'required|in_list[student,employee,admin,director,superadmin]',
+        'role'              => 'required|in_list[student,employee,admin,staff,director,superadmin]',
     ];
 
     protected $validationMessages = [
@@ -314,7 +314,7 @@ class UserModel extends Model
         $suspendedUsers = $this->where('status', 'Suspended')->countAllResults();
 
         // Role breakdown
-        $roles = ['superadmin', 'admin', 'director', 'employee', 'student'];
+        $roles = ['superadmin', 'admin', 'staff', 'director', 'employee', 'student'];
         $roleBreakdown = [];
         foreach ($roles as $r) {
             $roleBreakdown[$r] = $this->where('role', $r)->countAllResults();

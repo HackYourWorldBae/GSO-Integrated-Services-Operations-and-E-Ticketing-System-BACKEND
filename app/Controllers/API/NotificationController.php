@@ -104,11 +104,14 @@ class NotificationController extends BaseController
             unset($n);
         }
 
-        $unreadCount = count(array_filter($notifications, fn($n) => $n['is_read'] == 0));
+        $unreadCount = $this->notificationModel
+            ->where('user_id', $userId)
+            ->where('is_read', 0)
+            ->countAllResults();
 
         return $this->successResponse('Notifications fetched successfully.', [
             'notifications' => $notifications,
-            'unread_count'  => $unreadCount,
+            'unread_count'  => (int) $unreadCount,
         ]);
     }
 

@@ -109,7 +109,7 @@ trait TicketEnrichmentTrait
 
             $ticket['details'] = match((int) $ticket['unit_id']) {
                 1       => $fgmuDetails[$id]  ?? null,
-                2       => $leauDetails[$id]  ?? null,
+                2       => $leauDetails[$id]  ?? ($borrowingMap[$id] ?? null),
                 3       => $ssuIrDetails[$id] ?? null,
                 default => null,
             };

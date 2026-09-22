@@ -219,6 +219,13 @@ class SuperadminController extends BaseController
 
         $unitId = !empty($body['unit_id']) ? (int) $body['unit_id'] : null;
 
+        // Policy: Admin and Staff are always scoped to a sub-unit dashboard
+        if (in_array($body['role'], ['admin', 'staff'], true) && $unitId === null) {
+            return $this->errorResponse('Admin and Staff accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
+                'unit_id' => ['A sub-unit assignment is required for Admin and Staff accounts.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         $insertData = [
             'id'                => $userId,
             'first_name'        => $firstName,
@@ -303,6 +310,17 @@ class SuperadminController extends BaseController
         $currentUserId = $this->currentUserId();
         if ((string) $id === (string) $currentUserId && isset($body['role']) && $body['role'] !== 'superadmin') {
             return $this->errorResponse('You cannot demote your own Superadmin account.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        // Policy: Admin and Staff must always resolve to a sub-unit
+        $finalRole = $body['role'] ?? $existing['role'];
+        $finalUnitId = array_key_exists('unit_id', $body)
+            ? (!empty($body['unit_id']) ? (int) $body['unit_id'] : null)
+            : (isset($existing['unit_id']) ? (int) $existing['unit_id'] : null);
+        if (in_array($finalRole, ['admin', 'staff'], true) && $finalUnitId === null) {
+            return $this->errorResponse('Admin and Staff accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
+                'unit_id' => ['A sub-unit assignment is required for Admin and Staff accounts.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $updateData = [];

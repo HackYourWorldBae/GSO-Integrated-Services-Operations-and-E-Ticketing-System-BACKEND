@@ -177,6 +177,30 @@ class TicketActionController extends BaseController
             $notifBody
         );
 
+        // Notify destination Unit Admins that a ticket has been approved by the Director and is ready for dispatch
+        $dbConn = \Config\Database::connect();
+        $unitAdmins = $dbConn->query(
+            "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+            [$unitId]
+        )->getResultArray();
+        $adminNotifTitle = ($isEmergency === 1)
+            ? "New Emergency Ticket Approved (#{$ticketId})"
+            : "New Ticket Approved (#{$ticketId})";
+        $adminNotifBody = ($isEmergency === 1)
+            ? "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved as EMERGENCY PRIORITY by the Director and requires immediate dispatch."
+            : ($isBorrowing
+                ? "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
+                : "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is ready for dispatch.");
+
+        foreach ($unitAdmins as $uAdmin) {
+            $this->notificationModel->createNotification(
+                $uAdmin['id'],
+                'info',
+                $adminNotifTitle,
+                $adminNotifBody
+            );
+        }
+
         return $this->successResponse('Ticket approved successfully.', [
             'ticket_id'    => $ticketId, 
             'status'       => 'approved',

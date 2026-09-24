@@ -181,9 +181,12 @@ class SuperadminController extends BaseController
             ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Contact number normalization and format validation
+        // Contact numbers are unnecessary for internal accounts (admin, staff, director, superadmin).
+        // They are only collected for external requesters (student, employee) via self-registration.
         $contactNumber = null;
-        if (!empty($body['contact_number'])) {
+        $internalRoles = ['admin', 'staff', 'director', 'superadmin'];
+        $provisionRole = $body['role'] ?? '';
+        if (!in_array($provisionRole, $internalRoles, true) && !empty($body['contact_number'])) {
             $cleanContact = preg_replace('/[^\d+]/', '', (string) $body['contact_number']);
             if (str_starts_with($cleanContact, '+63')) {
                 $cleanContact = '0' . substr($cleanContact, 3);
@@ -329,7 +332,16 @@ class SuperadminController extends BaseController
         if (isset($body['email']))          $updateData['email']          = strtolower(trim($body['email']));
         if (isset($body['role']))           $updateData['role']           = $body['role'];
         if (isset($body['status']))         $updateData['status']         = $body['status'];
-        if (isset($body['contact_number']))    $updateData['contact_number']    = $body['contact_number'];
+        // Contact numbers are unnecessary for internal accounts — ignore input and clear any legacy value.
+        // Only null it out when there is already a real update (or a role transition) to avoid
+        // turning empty payloads into no-op writes.
+        $isInternalFinal = in_array($finalRole, ['admin', 'staff', 'director', 'superadmin'], true);
+        if (!$isInternalFinal && isset($body['contact_number'])) {
+            $updateData['contact_number'] = $body['contact_number'];
+        }
+        if ($isInternalFinal && !empty($updateData) && !empty($existing['contact_number'])) {
+            $updateData['contact_number'] = null;
+        }
         if (isset($body['student_type']))      $updateData['student_type']      = trim((string) $body['student_type']);
         if (isset($body['organization_name'])) $updateData['organization_name'] = trim((string) $body['organization_name']);
         if (isset($body['college']))           $updateData['college']           = trim((string) $body['college']);

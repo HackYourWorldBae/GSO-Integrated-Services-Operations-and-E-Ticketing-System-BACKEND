@@ -80,6 +80,44 @@ class PersonnelCategorySeeder extends Seeder
                 'is_system'          => 1,
                 'supported_services' => json_encode(['Mowing/ Weeding', 'Pruning/ Cutting']),
             ],
+
+            // SSU (Unit ID: 3)
+            [
+                'unit_id'            => 3,
+                'name'               => 'Campus Security & Patrol',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Campus Security / Patrol', 'Perimeter Security']),
+            ],
+            [
+                'unit_id'            => 3,
+                'name'               => 'Traffic & Parking Control',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Traffic & Parking Assistance']),
+            ],
+            [
+                'unit_id'            => 3,
+                'name'               => 'Event & Crowd Control',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Crowd Management / Escort']),
+            ],
+            [
+                'unit_id'            => 3,
+                'name'               => 'Surveillance & CCTV Monitoring',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['CCTV / Surveillance Check']),
+            ],
+            [
+                'unit_id'            => 3,
+                'name'               => 'Emergency Response & Incident Investigation',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Emergency Response', 'Incident Report']),
+            ],
+            [
+                'unit_id'            => 3,
+                'name'               => 'General Security & Logistics',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Campus Security / Patrol', 'Others']),
+            ],
         ];
 
         // INSERT IGNORE so running the seeder repeatedly remains idempotent

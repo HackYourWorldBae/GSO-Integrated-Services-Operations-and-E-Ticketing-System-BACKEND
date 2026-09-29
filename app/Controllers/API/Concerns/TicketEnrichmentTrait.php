@@ -204,24 +204,38 @@ trait TicketEnrichmentTrait
                 }
             }
 
-            $isIncidentReport = ((int) ($ticket['unit_id'] ?? 0) === 3) 
-                || (($ticket['service_type'] ?? '') === 'Incident Report')
-                || (($ticket['title'] ?? '') === 'Incident Report');
+            $isIncidentReport = (($ticket['service_type'] ?? '') === 'Incident Report')
+                || (($ticket['title'] ?? '') === 'Incident Report')
+                || !empty($ticket['details']['incident_date']);
 
-            $isUnscheduled = $isIncidentReport 
+            $firstAssign = (!empty($ticket['assignments']) && is_array($ticket['assignments']))
+                ? ($ticket['assignments'][0] ?? null)
+                : null;
+
+            $hasSchedule = !empty($ticket['assignment']['working_days']) 
+                || !empty($ticket['project_working_days']) 
+                || !empty($firstAssign['working_days'])
+                || !empty($ticket['assignment']['implementation_date'])
+                || !empty($firstAssign['implementation_date'])
+                || !empty($ticket['project_target_date']);
+
+            $isUnscheduled = ($isIncidentReport && !$hasSchedule)
                 || in_array($ticket['status'], ['pending', 'declined', 'cancelled'], true)
-                || (empty($ticket['assignment']['working_days']) && empty($ticket['project_working_days']));
+                || !$hasSchedule;
 
             $ticket['working_days']        = $isUnscheduled ? null : (!empty($ticket['assignment']['working_days']) 
                 ? (int) $ticket['assignment']['working_days'] 
-                : (!empty($ticket['project_working_days']) 
-                    ? (int) $ticket['project_working_days'] 
-                    : null));
+                : (!empty($firstAssign['working_days'])
+                    ? (int) $firstAssign['working_days']
+                    : (!empty($ticket['project_working_days']) 
+                        ? (int) $ticket['project_working_days'] 
+                        : null)));
             $ticket['implementation_date'] = $isUnscheduled ? null : ($ticket['assignment']['implementation_date'] 
-                ?? (!empty($ticket['assignments'][0]['implementation_date']) ? $ticket['assignments'][0]['implementation_date'] : null)
-                ?? ($ticket['project_target_date'] ?? null));
-            $ticket['assigned_worker']     = $isUnscheduled ? null : ($ticket['assignment']['personnel_name'] ?? null);
-            $ticket['assigned_profession'] = $isUnscheduled ? null : ($ticket['assignment']['specialty'] ?? null);
+                ?? ($firstAssign['implementation_date'] ?? null)
+                ?? ($ticket['project_target_date'] ?? null)
+                ?? ($ticket['target_completion_date'] ?? null));
+            $ticket['assigned_worker']     = $isUnscheduled ? null : ($ticket['assignment']['personnel_name'] ?? ($firstAssign['personnel_name'] ?? null));
+            $ticket['assigned_profession'] = $isUnscheduled ? null : ($ticket['assignment']['specialty'] ?? ($firstAssign['specialty'] ?? null));
 
             $ticket['extension_days']           = $isUnscheduled ? 0 : (int) ($ticket['extension_days'] ?? 0);
             $ticket['extended_completion_date'] = $isUnscheduled ? null : ($ticket['extended_completion_date'] ?? null);

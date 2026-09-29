@@ -483,6 +483,32 @@ class CollaborationController extends BaseController
             $lastName = trim((string)($row['last_name'] ?? ''));
             $requester = trim($firstName . ' ' . $lastName) ?: 'End User';
 
+            // Extract schedule set by requesting unit or existing assignments
+            $implDate = null;
+            $workingDays = null;
+            foreach ($assignRows as $a) {
+                if (!empty($a['implementation_date']) && empty($implDate)) {
+                    $implDate = substr((string)$a['implementation_date'], 0, 10);
+                }
+                if (!empty($a['working_days']) && empty($workingDays)) {
+                    $workingDays = (int)$a['working_days'];
+                }
+            }
+            if (empty($implDate)) {
+                if (!empty($row['project_target_date'])) {
+                    $implDate = substr((string)$row['project_target_date'], 0, 10);
+                } elseif (!empty($row['target_completion_date'])) {
+                    $implDate = substr((string)$row['target_completion_date'], 0, 10);
+                }
+            }
+            if (empty($workingDays)) {
+                if (!empty($row['project_working_days'])) {
+                    $workingDays = (int)$row['project_working_days'];
+                } elseif (!empty($row['eodb_days'])) {
+                    $workingDays = (int)$row['eodb_days'];
+                }
+            }
+
             $tickets[] = [
                 'id'                        => $ticketId,
                 'title'                     => $row['title'] ?? 'Service Request',
@@ -508,6 +534,14 @@ class CollaborationController extends BaseController
                     'last_name'  => $row['last_name'] ?? null,
                     'email'      => $row['email'] ?? null,
                 ],
+                // Schedule and turnaround
+                'implementation_date'       => $implDate,
+                'implementationDate'        => $implDate,
+                'working_days'              => $workingDays,
+                'workingDays'               => $workingDays,
+                'project_working_days'      => $workingDays,
+                'project_target_date'       => $implDate,
+                'target_completion_date'    => $row['target_completion_date'] ?? null,
                 // Collaboration context
                 'collaboration_id'          => $row['collaboration_id'] ?? null,
                 'collaboration_status'      => $row['collaboration_status'] ?? null,

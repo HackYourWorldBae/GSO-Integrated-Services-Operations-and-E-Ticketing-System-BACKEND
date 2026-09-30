@@ -85,6 +85,23 @@ final class BorrowingPipelineTest extends CIUnitTestCase
     }
 
     /**
+     * Unassigning inventory restores availability and returns state to approved_director.
+     */
+    public function testInventoryUnassignRevertsToApprovedAndRestoresStock(): void
+    {
+        $available = 5;
+        $assigned = 2;
+        $available -= $assigned;
+        $this->assertSame(3, $available);
+
+        $this->assertTrue(BorrowingWorkflow::canTransition('inventory_assigned', 'approved_director'));
+        $this->assertTrue(BorrowingWorkflow::canUnassignInventory('inventory_assigned'));
+
+        $available += $assigned;
+        $this->assertSame(5, $available);
+    }
+
+    /**
      * Over-assignment is clamped, so stock can never go negative.
      */
     public function testOverAssignmentNeverDrivesStockNegative(): void

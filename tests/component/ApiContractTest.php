@@ -313,7 +313,7 @@ final class ApiContractTest extends CIUnitTestCase
     {
         foreach ([
             'App\\Controllers\\API\\BorrowingController' => [
-                'directorApprove', 'directorReject', 'assignInventory',
+                'directorApprove', 'directorReject', 'assignInventory', 'unassignInventory',
                 'readyForPickup', 'pickup', 'returnItem', 'cancel',
                 'getByTicket', 'getQueue', 'getOverdue', 'markOverdue',
             ],
@@ -341,7 +341,7 @@ final class ApiContractTest extends CIUnitTestCase
         }
 
         $this->assertTrue(class_exists('App\\Libraries\\BorrowingWorkflow'), 'BorrowingWorkflow library must exist');
-        foreach (['canTransition', 'isTerminal', 'isOverdue', 'clampAssignQuantity', 'canAssignInventory', 'returnTicketPatch'] as $method) {
+        foreach (['canTransition', 'isTerminal', 'isOverdue', 'clampAssignQuantity', 'canAssignInventory', 'canUnassignInventory', 'returnTicketPatch'] as $method) {
             $this->assertTrue(
                 method_exists('App\\Libraries\\BorrowingWorkflow', $method),
                 "BorrowingWorkflow::{$method} must exist"
@@ -355,6 +355,11 @@ final class ApiContractTest extends CIUnitTestCase
             '/borrowing\/\(\:segment\)\/assign-inventory\'[^\n]*role:admin/',
             $this->routesContent,
             'borrowing assign-inventory must stay admin-gated.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/borrowing\/\(\:segment\)\/unassign-inventory\'[^\n]*role:admin/',
+            $this->routesContent,
+            'borrowing unassign-inventory must stay admin-gated.'
         );
         $this->assertMatchesRegularExpression(
             '/borrowing\/\(\:segment\)\/director-approve\'[^\n]*role:director/',

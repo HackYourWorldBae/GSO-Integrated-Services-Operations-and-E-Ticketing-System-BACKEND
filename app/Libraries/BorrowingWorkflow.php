@@ -38,7 +38,7 @@ class BorrowingWorkflow
     public const TRANSITIONS = [
         self::STATUS_PENDING_DIRECTOR   => [self::STATUS_APPROVED_DIRECTOR, self::STATUS_CANCELLED],
         self::STATUS_APPROVED_DIRECTOR  => [self::STATUS_INVENTORY_ASSIGNED, self::STATUS_CANCELLED],
-        self::STATUS_INVENTORY_ASSIGNED => [self::STATUS_READY_FOR_PICKUP, self::STATUS_CANCELLED],
+        self::STATUS_INVENTORY_ASSIGNED => [self::STATUS_READY_FOR_PICKUP, self::STATUS_APPROVED_DIRECTOR, self::STATUS_CANCELLED],
         self::STATUS_READY_FOR_PICKUP   => [self::STATUS_PICKED_UP, self::STATUS_CANCELLED],
         self::STATUS_PICKED_UP          => [self::STATUS_OVERDUE, self::STATUS_RETURNED, self::STATUS_CANCELLED],
         self::STATUS_OVERDUE            => [self::STATUS_RETURNED, self::STATUS_CANCELLED],
@@ -100,6 +100,14 @@ class BorrowingWorkflow
     public static function canAssignInventory(string $status): bool
     {
         return $status === self::STATUS_APPROVED_DIRECTOR;
+    }
+
+    /**
+     * Inventory may only be unassigned before being marked ready for pickup.
+     */
+    public static function canUnassignInventory(string $status): bool
+    {
+        return $status === self::STATUS_INVENTORY_ASSIGNED;
     }
 
     /**

@@ -299,6 +299,108 @@ class BorrowingController extends BaseController
     }
 
     /**
+     * LEAU Admin unassigns inventory from a borrowing request before ready-for-pickup,
+     * reverting the ticket back to the approved list.
+     * POST /api/v1/borrowing/{ticketId}/unassign-inventory
+     */
+    public function unassignInventory(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->forbiddenResponse('Only LEAU Admin can unassign inventory.');
+        }
+
+        if ((int) $ticket['unit_id'] !== 2) {
+            return $this->errorResponse('Inventory unassignment is only available for LEAU tickets.');
+        }
+
+        $borrowing = $this->borrowingModel->getByTicket($ticketId);
+        if (!$borrowing) {
+            return $this->notFoundResponse('Borrowing request not found for this ticket.');
+        }
+
+        if ($borrowing['status'] !== 'inventory_assigned') {
+            // Idempotent: If already approved_director and has no inventory assigned, return success
+            if ($borrowing['status'] === 'approved_director' && empty($borrowing['assigned_inventory_id'])) {
+                return $this->successResponse('Inventory is not assigned to this ticket.', [
+                    'borrowing_id' => $borrowing['id'],
+                    'status'       => 'approved_director',
+                ]);
+            }
+
+            return $this->errorResponse("Cannot unassign inventory from borrowing request in status '{$borrowing['status']}'.");
+        }
+
+        $inventoryId = $borrowing['assigned_inventory_id'] ?? null;
+        $assignedQuantity = (int) ($borrowing['assigned_quantity'] ?? 0);
+
+        $db = Database::connect();
+        $db->transStart();
+
+        try {
+            // Restore inventory availability
+            if (!empty($inventoryId) && $assignedQuantity > 0) {
+                $inventory = $this->inventoryModel->find($inventoryId);
+                if ($inventory) {
+                    $newAvailable = (int) $inventory['quantity_available'] + $assignedQuantity;
+                    $this->inventoryModel->update($inventoryId, [
+                        'quantity_available' => $newAvailable,
+                        'updated_at'         => date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+
+            // Revert borrowing request
+            $this->borrowingModel->update($borrowing['id'], [
+                'status'                => 'approved_director',
+                'assigned_inventory_id' => null,
+                'assigned_quantity'     => null,
+                'updated_at'            => date('Y-m-d H:i:s'),
+            ]);
+
+            // Revert ticket to approved list
+            $this->ticketModel->update($ticketId, [
+                'status'       => 'approved',
+                'status_label' => 'Approved - Awaiting Inventory Assignment',
+                'current_step' => 3,
+                'updated_at'   => date('Y-m-d H:i:s'),
+            ]);
+
+            $this->logModel->logAction(
+                $ticketId,
+                $this->currentUserId(),
+                'Inventory Unassigned',
+                "Unassigned inventory for borrowing request. Ticket reverted to approved list."
+            );
+
+            $db->transComplete();
+
+            if ($db->transStatus() === false) {
+                return $this->errorResponse('Transaction failed.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            return $this->successResponse('Inventory unassigned successfully. Ticket reverted to approved list.', [
+                'borrowing_id' => $borrowing['id'],
+                'status'       => 'approved_director',
+            ]);
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[BorrowingController::unassignInventory] ' . $e->getMessage());
+            return $this->errorResponse('Failed to unassign inventory.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * LEAU Admin marks borrowing as ready for pickup.
      * PATCH /api/v1/borrowing/{ticketId}/ready-for-pickup
      */

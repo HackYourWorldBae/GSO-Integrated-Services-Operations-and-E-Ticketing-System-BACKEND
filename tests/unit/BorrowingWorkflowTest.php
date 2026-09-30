@@ -98,6 +98,14 @@ final class BorrowingWorkflowTest extends CIUnitTestCase
         $this->assertFalse(BorrowingWorkflow::canAssignInventory('inventory_assigned'));
     }
 
+    public function testInventoryUnassignmentIsAllowedAndGated(): void
+    {
+        $this->assertTrue(BorrowingWorkflow::canTransition('inventory_assigned', 'approved_director'));
+        $this->assertTrue(BorrowingWorkflow::canUnassignInventory('inventory_assigned'));
+        $this->assertFalse(BorrowingWorkflow::canUnassignInventory('ready_for_pickup'));
+        $this->assertFalse(BorrowingWorkflow::canUnassignInventory('approved_director'));
+    }
+
     public function testReturnPatchAutoArchivesWithNoRating(): void
     {
         $patch = BorrowingWorkflow::returnTicketPatch([]);

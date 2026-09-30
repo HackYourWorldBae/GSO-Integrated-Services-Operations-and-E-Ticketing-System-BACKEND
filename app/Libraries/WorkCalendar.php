@@ -181,7 +181,7 @@ class WorkCalendar
             $isStartDay = ($dayYmd === $start->format('Y-m-d'));
             $isEndDay   = ($dayYmd === $end->format('Y-m-d'));
 
-            if (self::isWorkingDay($current) || $isStartDay) {
+            if (self::isWorkingDay($current)) {
                 if (!$isStartDay && !$isEndDay) {
                     // Full intermediate working day
                     $totalHours += self::STANDARD_DAILY_HOURS;

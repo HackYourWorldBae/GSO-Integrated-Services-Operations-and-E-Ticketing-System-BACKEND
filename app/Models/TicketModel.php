@@ -187,8 +187,15 @@ class TicketModel extends Model
     {
         $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                     ->join('users', 'users.id = tickets.user_id', 'left')
+                    ->join('borrowing_requests', 'borrowing_requests.ticket_id = tickets.id', 'left')
                     ->where('tickets.unit_id', $unitId)
-                    ->whereIn('tickets.status', ['approved'])
+                    ->groupStart()
+                        ->whereIn('tickets.status', ['approved'])
+                        ->orGroupStart()
+                            ->where('tickets.status', 'processing')
+                            ->where('borrowing_requests.status', 'inventory_assigned')
+                        ->groupEnd()
+                    ->groupEnd()
                     ->where('(tickets.is_archived = 0 OR tickets.is_archived IS NULL)')
                     ->orderBy('tickets.submitted_at', 'ASC');
 

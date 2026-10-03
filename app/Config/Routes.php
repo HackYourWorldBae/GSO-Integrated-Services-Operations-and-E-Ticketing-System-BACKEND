@@ -157,8 +157,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->put('personnel/(:segment)',             'PersonnelController::update/$1',      ['filter' => 'role:admin']);
         $routes->delete('personnel/(:segment)',          'PersonnelController::delete/$1',      ['filter' => 'role:admin']);
 
-        // -- Feedback (Requestors: student / employee) --
-        $routes->post('feedback',              'FeedbackController::submit',      ['filter' => 'role:student,employee']);
+        // -- Feedback (Requestors: student, employee, admin, staff, director) --
+        $routes->post('feedback',              'FeedbackController::submit',      ['filter' => 'role:student,employee,admin,staff,director,superadmin,worker']);
         $routes->get('feedback/(:segment)',    'FeedbackController::show/$1');
 
         // -- Director Analytics --

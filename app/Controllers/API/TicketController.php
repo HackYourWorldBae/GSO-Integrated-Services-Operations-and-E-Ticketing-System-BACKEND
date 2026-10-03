@@ -596,30 +596,19 @@ class TicketController extends BaseController
                     'title'        => $t['title'],
                 ];
 
-                if ((int)$t['unit_id'] === 3 || $t['service_type'] === 'Incident Report') {
-                    $ssuTicketId = $tId;
-                    $ssuAdmins = $db->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = 3 AND status = 'Active'")->getResultArray();
-                    foreach ($ssuAdmins as $admin) {
-                        $this->notificationModel->createNotification(
-                            $admin['id'], 
-                            'info', 
-                            "New SSU Request Submitted", 
-                            "Incident/Request #{$tId} ({$t['service_type']}) has been submitted and requires review."
-                        );
-                    }
-                } else {
-                    // FGMU & LEAU: Newly submitted tickets require Director review & approval.
-                    // Unit admins do NOT approve tickets; notify Directors only to enforce strict RBAC.
-                    $directors = $db->query("SELECT id FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
-                    $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
-                    foreach ($directors as $director) {
-                        $this->notificationModel->createNotification(
-                            $director['id'],
-                            'info',
-                            "New Ticket Awaiting Approval",
-                            "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) requires your review and approval."
-                        );
-                    }
+                // Role-Based Notification Policy:
+                // All newly submitted tickets (FGMU, LEAU, SSU) require Director review & approval.
+                // Unit admins do NOT receive notifications for newly submitted tickets; they only receive
+                // notifications once a ticket has been approved by the Director and is queued for dispatch.
+                $directors = $db->query("SELECT id FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
+                $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
+                foreach ($directors as $director) {
+                    $this->notificationModel->createNotification(
+                        $director['id'],
+                        'info',
+                        "New Ticket Awaiting Approval",
+                        "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) requires your review and approval."
+                    );
                 }
             }
         }

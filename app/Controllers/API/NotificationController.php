@@ -35,8 +35,18 @@ class NotificationController extends BaseController
             return $this->errorResponse('Unauthorized.', [], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
-        $notifications = $this->notificationModel
-            ->where('user_id', $userId)
+        $userRole = strtolower($this->currentUserRole() ?? '');
+
+        $query = $this->notificationModel->where('user_id', $userId);
+        if ($userRole === 'admin') {
+            // Role-Based Notification Defense:
+            // Unit Admins only receive notifications of tickets once approved/actionable by their unit;
+            // they must never receive or see 'awaiting approval' submissions.
+            $query->notLike('title', 'Awaiting Approval')
+                  ->notLike('message', 'requires your review and approval');
+        }
+
+        $notifications = $query
             ->orderBy('id', 'DESC')
             ->limit(50)
             ->findAll();
@@ -104,10 +114,14 @@ class NotificationController extends BaseController
             unset($n);
         }
 
-        $unreadCount = $this->notificationModel
+        $unreadQuery = $this->notificationModel
             ->where('user_id', $userId)
-            ->where('is_read', 0)
-            ->countAllResults();
+            ->where('is_read', 0);
+        if ($userRole === 'admin') {
+            $unreadQuery->notLike('title', 'Awaiting Approval')
+                        ->notLike('message', 'requires your review and approval');
+        }
+        $unreadCount = $unreadQuery->countAllResults();
 
         return $this->successResponse('Notifications fetched successfully.', [
             'notifications' => $notifications,

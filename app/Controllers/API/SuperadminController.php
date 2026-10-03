@@ -505,6 +505,18 @@ class SuperadminController extends BaseController
             'metadata'       => ['role' => $existing['role']],
         ]);
 
+        try {
+            $notificationModel = new \App\Models\NotificationModel();
+            $notificationModel->createNotification(
+                $id,
+                'success',
+                'Account Identity Verified',
+                'Your institutional ID verification has been approved! You now have full requestor privileges to submit service tickets.'
+            );
+        } catch (\Throwable $notifErr) {
+            log_message('error', '[SuperadminController::verifyUser] Notification error: ' . $notifErr->getMessage());
+        }
+
         return $this->successResponse('User account identity successfully verified and request submission unlocked.', $safeUser);
     }
 
@@ -543,6 +555,18 @@ class SuperadminController extends BaseController
             'details'        => "Superadmin rejected identity verification for {$existing['first_name']} {$existing['last_name']}. Reason: {$reason}",
             'metadata'       => ['reason' => $reason],
         ]);
+
+        try {
+            $notificationModel = new \App\Models\NotificationModel();
+            $notificationModel->createNotification(
+                $id,
+                'warning',
+                'Account Verification Status: Rejected',
+                "Your identity document verification was rejected. Reason: {$reason}. Please re-upload clear credentials."
+            );
+        } catch (\Throwable $notifErr) {
+            log_message('error', '[SuperadminController::rejectVerification] Notification error: ' . $notifErr->getMessage());
+        }
 
         return $this->successResponse('User account verification was rejected.', [
             'user'   => $safeUser,

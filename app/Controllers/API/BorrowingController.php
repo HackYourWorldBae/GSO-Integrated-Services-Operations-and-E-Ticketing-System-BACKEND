@@ -111,6 +111,22 @@ class BorrowingController extends BaseController
             "Your borrowing request #{$ticketId} has been approved by the Director. LEAU Admin will now assign inventory."
         );
 
+        // Notify destination Unit Admins (LEAU) that the borrowing request is approved and ready for inventory assignment
+        try {
+            $dbConn = \Config\Database::connect();
+            $leauAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = 2 AND status = 'Active'")->getResultArray();
+            foreach ($leauAdmins as $uAdmin) {
+                $this->notificationModel->createNotification(
+                    $uAdmin['id'],
+                    'info',
+                    "New Borrowing Ticket Approved (#{$ticketId})",
+                    "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
+                );
+            }
+        } catch (\Throwable $err) {
+            log_message('error', '[BorrowingController::directorApprove] Admin notification error: ' . $err->getMessage());
+        }
+
         $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'approved_director', "Your borrowing request has been approved by the Director.");
 
         return $this->successResponse('Borrowing request approved by Director.', [

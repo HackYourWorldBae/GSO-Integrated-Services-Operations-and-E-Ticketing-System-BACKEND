@@ -355,6 +355,34 @@ class AuthController extends BaseController
             ],
         ]);
 
+        // Dispatch in-app notification to active Superadmins for identity document verification
+        try {
+            $notificationModel = new \App\Models\NotificationModel();
+            $dbConn = \Config\Database::connect();
+            $superadmins = $dbConn->query("SELECT id FROM users WHERE role = 'superadmin' AND status = 'Active'")->getResultArray();
+            $regFullName = trim(($createdUser['first_name'] ?? '') . ' ' . ($createdUser['last_name'] ?? ''));
+            $roleLabel = ucfirst($role);
+            $notifMsg = "New registration request from {$regFullName} ({$roleLabel}, ID: {$studentIdNumber}). Awaiting identity verification.";
+            foreach ($superadmins as $sa) {
+                $notificationModel->createNotification(
+                    $sa['id'],
+                    'info',
+                    'New User Registration Request',
+                    $notifMsg
+                );
+            }
+
+            // Welcoming notification for the registrant
+            $notificationModel->createNotification(
+                $userId,
+                'info',
+                'Account Registration Received',
+                'Your account registration has been submitted. Your institutional ID card is currently queued for verification by the Super Administrator.'
+            );
+        } catch (\Throwable $notifErr) {
+            log_message('error', '[AuthController::register] Notification dispatch error: ' . $notifErr->getMessage());
+        }
+
         return $this->successResponse(
             'Account created successfully! You can now log in to view your dashboard. Please note that an administrator must verify your ID card before you can submit service requests.',
             ['user' => $createdUser],

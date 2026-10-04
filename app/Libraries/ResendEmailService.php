@@ -265,9 +265,11 @@ class ResendEmailService
     }
 
     /**
-     * Send Ticket Status Change Email to Requestor.
+     * Send Ticket Status Change Email to Requestor or Directors.
+     *
+     * @param string|array<string> $toEmail
      */
-    public function sendTicketStatusUpdate(string $toEmail, string $userName, string $ticketId, string $statusLabel, string $message, array $extra = []): array
+    public function sendTicketStatusUpdate($toEmail, string $userName, string $ticketId, string $statusLabel, string $message, array $extra = []): array
     {
         $safeName   = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
         $safeId     = htmlspecialchars($ticketId, ENT_QUOTES, 'UTF-8');

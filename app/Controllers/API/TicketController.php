@@ -584,84 +584,88 @@ class TicketController extends BaseController
         $ssuTicketId       = null;
         $emailService      = new ResendEmailService();
 
-        foreach ($createdTickets as $tId) {
-            $t = $this->ticketModel->find($tId);
-            if ($t) {
-                // Collect for requestor email summary
-                $unitRow = $db->query("SELECT name, code FROM units WHERE id = ?", [$t['unit_id']])->getRowArray();
-                $ticketSummaryList[] = [
-                    'id'           => $tId,
-                    'service_type' => $t['service_type'],
-                    'unit_name'    => $unitRow['name'] ?? ($unitRow['code'] ?? 'GSO Unit'),
-                    'title'        => $t['title'],
-                ];
+        try {
+            foreach ($createdTickets as $tId) {
+                $t = $this->ticketModel->find($tId);
+                if ($t) {
+                    // Collect for requestor email summary
+                    $unitRow = $db->query("SELECT name, code FROM units WHERE id = ?", [$t['unit_id']])->getRowArray();
+                    $ticketSummaryList[] = [
+                        'id'           => $tId,
+                        'service_type' => $t['service_type'],
+                        'unit_name'    => $unitRow['name'] ?? ($unitRow['code'] ?? 'GSO Unit'),
+                        'title'        => $t['title'],
+                    ];
 
-                // Role-Based Notification Policy:
-                // All newly submitted tickets (FGMU, LEAU, SSU) require Director review & approval.
-                // Unit admins do NOT receive notifications for newly submitted tickets; they only receive
-                // notifications once a ticket has been approved by the Director and is queued for dispatch.
-                $directors = $db->query("SELECT id FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
-                $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
-                foreach ($directors as $director) {
-                    $this->notificationModel->createNotification(
-                        $director['id'],
-                        'info',
-                        "New Ticket Awaiting Approval",
-                        "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) requires your review and approval."
+                    // Role-Based Notification Policy:
+                    // All newly submitted tickets (FGMU, LEAU, SSU) require Director review & approval.
+                    // Unit admins do NOT receive notifications for newly submitted tickets; they only receive
+                    // notifications once a ticket has been approved by the Director and is queued for dispatch.
+                    $directors = $db->query("SELECT id FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
+                    $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
+                    foreach ($directors as $director) {
+                        $this->notificationModel->createNotification(
+                            $director['id'],
+                            'info',
+                            "New Ticket Awaiting Approval",
+                            "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) requires your review and approval."
+                        );
+                    }
+                }
+            }
+
+            // --- 1. Email Notification for Requestor (respects updated email + opt-in) ---
+            if (!empty($user['email']) && !empty($ticketSummaryList)) {
+                $freshUser = $userModel->find($userId);
+                $optedIn = !array_key_exists('email_notifications_enabled', (array) $freshUser) || (int) ($freshUser['email_notifications_enabled'] ?? 1) === 1;
+                if ($optedIn) {
+                    $reqName = trim(($freshUser['first_name'] ?? $user['first_name'] ?? '') . ' ' . ($freshUser['last_name'] ?? $user['last_name'] ?? ''));
+                    if (empty($reqName)) {
+                        $reqName = 'Campus Member';
+                    }
+                    $emailToUse = $freshUser['email'] ?? $user['email'];
+                    $emailService->sendTicketIntakeConfirmation($emailToUse, $reqName, $ticketSummaryList);
+                }
+            }
+
+            // --- 2. High-Priority Email Alerts for SSU Administrators (opt-in only) ---
+            if ($ssuTicketId && !empty($body['ssu']['incidentReport'])) {
+                // Respect per-account email opt-in; include both admin and staff of SSU
+                $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+                $optInClause = $colExists
+                    ? "AND COALESCE(email_notifications_enabled, 1) = 1"
+                    : "";
+                $ssuAdmins = $db->query(
+                    "SELECT email FROM users WHERE role IN ('admin','staff') AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}"
+                )->getResultArray();
+
+                if (!empty($ssuAdmins)) {
+                    $ssuEmails = array_values(array_filter(array_column($ssuAdmins, 'email')));
+                    if (!empty($ssuEmails)) {
+                        $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
+                    }
+                }
+            }
+
+            // --- 3. New Request Email to Opted-In Directors (for FGMU / LEAU requests awaiting approval) ---
+            if (!$ssuTicketId && !empty($ticketSummaryList)) {
+                $directors = $db->query(
+                    "SELECT email FROM users WHERE role = 'director' AND status = 'Active' AND email IS NOT NULL AND email != ''" . ($db->fieldExists('email_notifications_enabled', 'users') ? " AND COALESCE(email_notifications_enabled, 1) = 1" : "")
+                )->getResultArray();
+                $directorEmails = array_values(array_filter(array_column($directors, 'email')));
+                if (!empty($directorEmails)) {
+                    $emailService->sendTicketStatusUpdate(
+                        $directorEmails,
+                        'GSO Director',
+                        implode(', #', $createdTickets),
+                        'New Service Request(s) Awaiting Approval',
+                        "One or more service requests have been submitted and require Director review and approval.",
+                        ['Tickets' => '#' . implode(', #', $createdTickets)]
                     );
                 }
             }
-        }
-
-        // --- 1. Email Notification for Requestor (respects updated email + opt-in) ---
-        if (!empty($user['email']) && !empty($ticketSummaryList)) {
-            $freshUser = $userModel->find($userId);
-            $optedIn = !array_key_exists('email_notifications_enabled', (array) $freshUser) || (int) ($freshUser['email_notifications_enabled'] ?? 1) === 1;
-            if ($optedIn) {
-                $reqName = trim(($freshUser['first_name'] ?? $user['first_name'] ?? '') . ' ' . ($freshUser['last_name'] ?? $user['last_name'] ?? ''));
-                if (empty($reqName)) {
-                    $reqName = 'Campus Member';
-                }
-                $emailToUse = $freshUser['email'] ?? $user['email'];
-                $emailService->sendTicketIntakeConfirmation($emailToUse, $reqName, $ticketSummaryList);
-            }
-        }
-
-        // --- 2. High-Priority Email Alerts for SSU Administrators (opt-in only) ---
-        if ($ssuTicketId && !empty($body['ssu']['incidentReport'])) {
-            // Respect per-account email opt-in; include both admin and staff of SSU
-            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
-            $optInClause = $colExists
-                ? "AND COALESCE(email_notifications_enabled, 1) = 1"
-                : "";
-            $ssuAdmins = $db->query(
-                "SELECT email FROM users WHERE role IN ('admin','staff') AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}"
-            )->getResultArray();
-
-            if (!empty($ssuAdmins)) {
-                $ssuEmails = array_values(array_filter(array_column($ssuAdmins, 'email')));
-                if (!empty($ssuEmails)) {
-                    $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
-                }
-            }
-        }
-
-        // --- 3. New Request Email to Opted-In Directors (for FGMU / LEAU requests awaiting approval) ---
-        if (!$ssuTicketId && !empty($ticketSummaryList)) {
-            $directors = $db->query(
-                "SELECT email FROM users WHERE role = 'director' AND status = 'Active' AND email IS NOT NULL AND email != ''" . ($db->fieldExists('email_notifications_enabled', 'users') ? " AND COALESCE(email_notifications_enabled, 1) = 1" : "")
-            )->getResultArray();
-            $directorEmails = array_values(array_filter(array_column($directors, 'email')));
-            if (!empty($directorEmails)) {
-                $emailService->sendTicketStatusUpdate(
-                    $directorEmails,
-                    'GSO Director',
-                    implode(', #', $createdTickets),
-                    'New Service Request(s) Awaiting Approval',
-                    "One or more service requests have been submitted and require Director review and approval.",
-                    ['Tickets' => '#' . implode(', #', $createdTickets)]
-                );
-            }
+        } catch (\Throwable $notifEx) {
+            log_message('error', '[TicketController::submitIntake] Post-creation notification/email error: ' . $notifEx->getMessage());
         }
 
         return $this->successResponse(

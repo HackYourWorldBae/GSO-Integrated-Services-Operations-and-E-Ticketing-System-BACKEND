@@ -138,3 +138,5 @@ writable/backups/*
 # Database dumps & DDL files
 *.sql
 !gso_db_dump.sql
+!Hostinger Database Updates/
+!Hostinger Database Updates/*.sql

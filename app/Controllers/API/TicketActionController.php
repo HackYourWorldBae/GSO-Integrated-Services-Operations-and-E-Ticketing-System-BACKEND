@@ -688,6 +688,170 @@ class TicketActionController extends BaseController
     }
 
     /**
+     * Change nature of work / recategorize a pending ticket.
+     * Allows the Director to correct the service type / nature of work selected by the requester
+     * when it does not match the problem description.
+     *
+     * PATCH /tickets/:id/recategorize
+     * PATCH /tickets/:id/change-nature-of-work
+     */
+    public function recategorize(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        // Only pending tickets can be recategorized (before active dispatch/approval)
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Only pending tickets can be recategorized. Current status: {$ticket['status']}.");
+        }
+
+        $body    = $this->request->getJSON(true) ?? [];
+        $rawPost = $this->request->getRawInput() ?? [];
+
+        $newService = sanitize_string(
+            $body['service_type']
+            ?? $body['service']
+            ?? $body['nature_of_work']
+            ?? $rawPost['service_type']
+            ?? $this->request->getPost('service_type')
+            ?? ''
+        );
+
+        $reason = sanitize_string(
+            $body['reason']
+            ?? $body['recategorization_reason']
+            ?? $body['remarks']
+            ?? $rawPost['reason']
+            ?? $this->request->getPost('reason')
+            ?? ''
+        );
+
+        if (empty($newService)) {
+            return $this->errorResponse('A valid new nature of work / service type is required.', [
+                'service_type' => ['Required.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $oldService = trim((string) ($ticket['service_type'] ?? ''));
+        if (strcasecmp($oldService, $newService) === 0) {
+            return $this->errorResponse('The new service type is identical to the current nature of work.', [
+                'service_type' => ['Must differ from current service type.']
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (empty($reason)) {
+            $reason = 'Recategorized by Director to align with the reported issue description.';
+        }
+
+        $now    = date('Y-m-d H:i:s');
+        $userId = $this->currentUserId();
+
+        $updateData = [
+            'service_type' => $newService,
+            'updated_at'   => $now,
+        ];
+
+        // Safe database column assignment:
+        $db = Database::connect();
+        if ($db->fieldExists('is_recategorized', 'tickets')) {
+            $updateData['is_recategorized'] = 1;
+        }
+        if ($db->fieldExists('original_service_type', 'tickets')) {
+            $updateData['original_service_type'] = !empty($ticket['original_service_type'])
+                ? $ticket['original_service_type']
+                : $oldService;
+        }
+        if ($db->fieldExists('recategorized_at', 'tickets')) {
+            $updateData['recategorized_at'] = $now;
+        }
+        if ($db->fieldExists('recategorized_by', 'tickets')) {
+            $updateData['recategorized_by'] = $userId;
+        }
+        if ($db->fieldExists('recategorization_reason', 'tickets')) {
+            $updateData['recategorization_reason'] = $reason;
+        }
+
+        // If the ticket title was originally matching the old service name, synchronize title as well
+        if (empty($ticket['title']) || trim((string) $ticket['title']) === $oldService) {
+            $updateData['title'] = $newService;
+        }
+
+        // Check if an explicit unit transfer was requested or if unit should be switched
+        $targetUnitId = isset($body['unit_id']) ? (int) $body['unit_id'] : null;
+        if ($targetUnitId && in_array($targetUnitId, [1, 2, 3], true) && $targetUnitId !== (int) $ticket['unit_id']) {
+            $updateData['unit_id'] = $targetUnitId;
+        }
+
+        $this->ticketModel->update($ticketId, $updateData);
+
+        // 1. Audit log
+        $logMessage = "Nature of work recategorized from '{$oldService}' to '{$newService}' by Director.";
+        if (!empty($reason)) {
+            $logMessage .= " Reason: {$reason}";
+        }
+        $this->logModel->logAction($ticketId, $userId, 'Nature of Work Changed', $logMessage);
+
+        // 2. In-app notification to requester
+        $notifTitle = "Ticket #{$ticketId} Recategorized";
+        $notifBody  = "The Director updated the nature of work for your request from \"{$oldService}\" to \"{$newService}\" to properly categorize your ticket according to your description. Note: {$reason}";
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            $notifTitle,
+            $notifBody
+        );
+
+        // 3. Email notification to requester
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Nature of Work Updated',
+            $notifBody,
+            [
+                'Previous Nature of Work' => $oldService,
+                'Updated Nature of Work'  => $newService,
+                'Director Note'           => $reason
+            ]
+        );
+
+        // 4. If transferred to another unit, notify destination unit admins
+        if (!empty($updateData['unit_id']) && $updateData['unit_id'] !== (int) $ticket['unit_id']) {
+            $unitAdmins = $db->query(
+                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                [$updateData['unit_id']]
+            )->getResultArray();
+
+            foreach ($unitAdmins as $admin) {
+                $this->notificationModel->createNotification(
+                    $admin['id'],
+                    'info',
+                    "Ticket #{$ticketId} Transferred to Your Unit",
+                    "Ticket #{$ticketId} has been recategorized as \"{$newService}\" and transferred to your queue by the Director."
+                );
+            }
+        }
+
+        return $this->successResponse('Nature of work updated successfully.', [
+            'ticket_id'               => $ticketId,
+            'service_type'            => $newService,
+            'old_service_type'        => $oldService,
+            'is_recategorized'        => 1,
+            'original_service_type'   => $updateData['original_service_type'] ?? $oldService,
+            'recategorization_reason' => $reason,
+            'recategorized_at'        => $now,
+            'unit_id'                 => $updateData['unit_id'] ?? (int) $ticket['unit_id'],
+        ]);
+    }
+
+    /**
      * Extend a project or ticket timeline due to unforeseen circumstances (Admins & Dispatchers).
      *
      * Body:

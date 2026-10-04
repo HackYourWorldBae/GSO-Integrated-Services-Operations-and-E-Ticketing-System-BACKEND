@@ -162,16 +162,49 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------
-    -- 5. TICKET FEEDBACKS TABLE UPGRADES
+    -- 5. SSU LOOKUPS COMPATIBILITY PATCH (Handles legacy 'name' column if present)
     -- ------------------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_feedbacks') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_feedbacks' AND column_name = 'early_rating') THEN
-            ALTER TABLE `ticket_feedbacks` ADD COLUMN `early_rating` TINYINT(1) UNSIGNED NULL DEFAULT NULL AFTER `timeliness_rating`;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ssu_incident_types') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_types' AND column_name = 'name') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_types' AND column_name = 'type_name') THEN
+            ALTER TABLE `ssu_incident_types` CHANGE COLUMN `name` `type_name` VARCHAR(150) NOT NULL;
+        END IF;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ssu_incident_issues') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_issues' AND column_name = 'name') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_issues' AND column_name = 'issue_name') THEN
+            ALTER TABLE `ssu_incident_issues` CHANGE COLUMN `name` `issue_name` VARCHAR(150) NOT NULL;
+        END IF;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ssu_incident_roles') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_roles' AND column_name = 'name') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_roles' AND column_name = 'role_name') THEN
+            ALTER TABLE `ssu_incident_roles` CHANGE COLUMN `name` `role_name` VARCHAR(150) NOT NULL;
         END IF;
     END IF;
 
     -- ------------------------------------------------------------------------
-    -- 6. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
+    -- 6. TICKET FEEDBACKS & DELAY REASONS UPGRADES
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_feedbacks') THEN
+        ALTER TABLE `ticket_feedbacks` 
+        MODIFY COLUMN `completion_status` ENUM('early', 'on-time', 'beyond-time', 'not-completed') NOT NULL DEFAULT 'on-time';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'feedback_delay_reasons') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'feedback_delay_reasons' AND column_name = 'name') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'feedback_delay_reasons' AND column_name = 'reason_code') THEN
+            ALTER TABLE `feedback_delay_reasons` CHANGE COLUMN `name` `reason_code` VARCHAR(60) NOT NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'feedback_delay_reasons' AND column_name = 'reason_label') THEN
+            ALTER TABLE `feedback_delay_reasons` ADD COLUMN `reason_label` VARCHAR(200) NOT NULL DEFAULT '' AFTER `reason_code`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 7. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
     -- ------------------------------------------------------------------------
     DROP TABLE IF EXISTS `ci_sessions`;
     DROP TABLE IF EXISTS `role_permissions`;
@@ -503,91 +536,78 @@ CREATE TABLE IF NOT EXISTS `ssu_incident_details` (
   CONSTRAINT `fk_ssu_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- SSU Lookups and Bridge Tables
+-- ----------------------------------------------------------------------------
+-- SSU Lookups and Bridge Tables (Exact schema matching CI4 migrations)
+-- ----------------------------------------------------------------------------
+
 CREATE TABLE IF NOT EXISTS `ssu_incident_types` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `type_name` varchar(150) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ssu_incident_type_name` (`name`)
+  UNIQUE KEY `uq_ssu_incident_type_name` (`type_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO `ssu_incident_types` (`id`, `name`) VALUES
-(1, 'Theft'),
-(2, 'Vandalism'),
-(3, 'Physical Altercation'),
-(4, 'Trespassing'),
-(5, 'Lost and Found'),
-(6, 'Vehicular Incident'),
-(7, 'Others');
+INSERT IGNORE INTO `ssu_incident_types` (`id`, `type_name`) VALUES
+(1, 'Theft / Robbery'),
+(2, 'Vandalism / Property Damage'),
+(3, 'Physical Assault / Altercation'),
+(4, 'Trespassing / Unauthorized Entry'),
+(5, 'Road Accident / Vehicular Collision'),
+(6, 'Medical Emergency / Injury'),
+(7, 'Fire / Hazard Alert'),
+(8, 'Other Security Concern');
 
 CREATE TABLE IF NOT EXISTS `ssu_incident_type_items` (
-  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL,
   `incident_type_id` int(11) UNSIGNED NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ticket_incident_type` (`ticket_id`,`incident_type_id`),
+  PRIMARY KEY (`ticket_id`, `incident_type_id`),
   KEY `idx_ssu_iti_type` (`incident_type_id`),
-  CONSTRAINT `fk_ssu_iti_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ssu_iti_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `ssu_incident_details` (`ticket_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ssu_iti_type` FOREIGN KEY (`incident_type_id`) REFERENCES `ssu_incident_types` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `ssu_incident_issues` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `issue_name` varchar(150) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ssu_incident_issue_name` (`name`)
+  UNIQUE KEY `uq_ssu_incident_issue_name` (`issue_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO `ssu_incident_issues` (`id`, `name`) VALUES
-(1, 'Property Damage'),
-(2, 'Security Threat'),
-(3, 'Safety Hazard'),
-(4, 'Disturbance'),
-(5, 'Missing Item'),
-(6, 'Unauthorized Access'),
-(7, 'Others');
+INSERT IGNORE INTO `ssu_incident_issues` (`id`, `issue_name`) VALUES
+(1, 'Lost / Stolen Personal Belongings'),
+(2, 'Damaged University Facilities / Equipment'),
+(3, 'Safety Policy Violation'),
+(4, 'Traffic Regulation Violation'),
+(5, 'Suspicious Activity Observed');
 
 CREATE TABLE IF NOT EXISTS `ssu_incident_issue_items` (
-  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL,
-  `incident_issue_id` int(11) UNSIGNED NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ticket_incident_issue` (`ticket_id`,`incident_issue_id`),
-  KEY `idx_ssu_iii_issue` (`incident_issue_id`),
-  CONSTRAINT `fk_ssu_iii_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_ssu_iii_issue` FOREIGN KEY (`incident_issue_id`) REFERENCES `ssu_incident_issues` (`id`) ON DELETE CASCADE
+  `issue_id` int(11) UNSIGNED NOT NULL,
+  PRIMARY KEY (`ticket_id`, `issue_id`),
+  KEY `idx_ssu_iii_issue` (`issue_id`),
+  CONSTRAINT `fk_ssu_iii_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `ssu_incident_details` (`ticket_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ssu_iii_issue` FOREIGN KEY (`issue_id`) REFERENCES `ssu_incident_issues` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `ssu_incident_roles` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `role_name` varchar(150) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ssu_incident_role_name` (`name`)
+  UNIQUE KEY `uq_ssu_incident_role_name` (`role_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO `ssu_incident_roles` (`id`, `name`) VALUES
-(1, 'Victim'),
-(2, 'Complainant'),
-(3, 'Witness'),
-(4, 'Suspect / Person of Interest'),
-(5, 'Reporting Party');
+INSERT IGNORE INTO `ssu_incident_roles` (`id`, `role_name`) VALUES
+(1, 'Victim / Complainant'),
+(2, 'Eyewitness'),
+(3, 'Security Officer on Duty'),
+(4, 'Responding Personnel');
 
 CREATE TABLE IF NOT EXISTS `ssu_incident_role_items` (
-  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL,
   `role_id` int(11) UNSIGNED NOT NULL,
-  `person_name` varchar(255) NOT NULL,
-  `notes` text DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_ssu_iri_ticket` (`ticket_id`),
+  PRIMARY KEY (`ticket_id`, `role_id`),
   KEY `idx_ssu_iri_role` (`role_id`),
-  CONSTRAINT `fk_ssu_iri_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ssu_iri_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `ssu_incident_details` (`ticket_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ssu_iri_role` FOREIGN KEY (`role_id`) REFERENCES `ssu_incident_roles` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -675,44 +695,46 @@ CREATE TABLE IF NOT EXISTS `ticket_materials` (
 CREATE TABLE IF NOT EXISTS `ticket_feedbacks` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL,
-  `rating` int(1) NOT NULL,
-  `quality_rating` int(1) NOT NULL DEFAULT 5,
-  `timeliness_rating` int(1) NOT NULL DEFAULT 5,
-  `early_rating` tinyint(1) UNSIGNED NULL DEFAULT NULL,
-  `comments` text DEFAULT NULL,
-  `submitted_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `user_id` varchar(36) NOT NULL,
+  `completion_status` enum('early','on-time','beyond-time','not-completed') NOT NULL DEFAULT 'on-time',
+  `courtesy_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
+  `quality_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
+  `efficiency_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
+  `timeliness_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
+  `cleanliness_rating` tinyint(3) UNSIGNED NOT NULL DEFAULT 5,
+  `remarks` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_feedback_ticket` (`ticket_id`),
-  CONSTRAINT `fk_feedback_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
+  KEY `idx_feedbacks_user` (`user_id`),
+  CONSTRAINT `fk_feedback_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_feedback_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `feedback_delay_reasons`
 CREATE TABLE IF NOT EXISTS `feedback_delay_reasons` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name` varchar(150) NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `reason_code` varchar(60) NOT NULL,
+  `reason_label` varchar(200) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_delay_reason_name` (`name`)
+  UNIQUE KEY `uq_delay_reason_code` (`reason_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO `feedback_delay_reasons` (`id`, `name`) VALUES
-(1, 'Weather/Environmental Conditions'),
-(2, 'Awaiting Materials/Supplies'),
-(3, 'Manpower Shortage/Reassignment'),
-(4, 'Facility Unavailability/Access Issue'),
-(5, 'Scope Expansion/Complex Problem'),
-(6, 'Others');
+INSERT IGNORE INTO `feedback_delay_reasons` (`id`, `reason_code`, `reason_label`) VALUES
+(1, 'personnelAbsent', 'Assigned personnel was absent or unavailable'),
+(2, 'extendedBreak', 'Personnel took extended breaks during the repair/task'),
+(3, 'additionalWork', 'Unexpected additional work or complications arose'),
+(4, 'lackDays', 'Insufficient number of days allotted for the job scope'),
+(5, 'lackMaterials', 'Delay due to lack of replacement parts or materials'),
+(6, 'lackSkills', 'Required specialized tools or external expertise');
 
 -- Table structure for table `ticket_feedback_delay_items`
 CREATE TABLE IF NOT EXISTS `ticket_feedback_delay_items` (
-  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `ticket_id` varchar(60) NOT NULL,
+  `feedback_id` int(11) UNSIGNED NOT NULL,
   `delay_reason_id` int(11) UNSIGNED NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_ticket_delay_reason` (`ticket_id`,`delay_reason_id`),
+  PRIMARY KEY (`feedback_id`, `delay_reason_id`),
   KEY `idx_tfdi_reason` (`delay_reason_id`),
-  CONSTRAINT `fk_tfdi_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_tfdi_feedback` FOREIGN KEY (`feedback_id`) REFERENCES `ticket_feedbacks` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tfdi_reason` FOREIGN KEY (`delay_reason_id`) REFERENCES `feedback_delay_reasons` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -204,7 +204,127 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------
-    -- 7. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
+    -- 7. UNIT TICKET DETAILS UPGRADES
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'fgmu_ticket_details') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'fgmu_ticket_details' AND column_name = 'college_building') THEN
+            ALTER TABLE `fgmu_ticket_details` ADD COLUMN `college_building` VARCHAR(255) NULL AFTER `ticket_id`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'fgmu_ticket_details' AND column_name = 'office_room') THEN
+            ALTER TABLE `fgmu_ticket_details` ADD COLUMN `office_room` VARCHAR(100) NULL AFTER `college_building`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'fgmu_ticket_details' AND column_name = 'source_of_fund') THEN
+            ALTER TABLE `fgmu_ticket_details` ADD COLUMN `source_of_fund` VARCHAR(150) NULL DEFAULT NULL AFTER `office_room`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'fgmu_ticket_details' AND column_name = 'jr_no') THEN
+            ALTER TABLE `fgmu_ticket_details` ADD COLUMN `jr_no` VARCHAR(60) NULL DEFAULT NULL AFTER `source_of_fund`;
+        END IF;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'leau_ticket_details') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'leau_ticket_details' AND column_name = 'college_building') THEN
+            ALTER TABLE `leau_ticket_details` ADD COLUMN `college_building` VARCHAR(255) NULL AFTER `ticket_id`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'leau_ticket_details' AND column_name = 'office_room') THEN
+            ALTER TABLE `leau_ticket_details` ADD COLUMN `office_room` VARCHAR(100) NULL AFTER `college_building`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'leau_ticket_details' AND column_name = 'source_of_fund') THEN
+            ALTER TABLE `leau_ticket_details` ADD COLUMN `source_of_fund` VARCHAR(150) NULL DEFAULT NULL AFTER `office_room`;
+        END IF;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ssu_incident_details') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'where_occurred') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `where_occurred` TEXT NULL AFTER `ticket_id`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'when_occurred') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `when_occurred` VARCHAR(150) NULL AFTER `where_occurred`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'how_narrative') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `how_narrative` TEXT NULL AFTER `when_occurred`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'reporter_name') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `reporter_name` VARCHAR(255) NULL AFTER `how_narrative`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'reporter_signature') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `reporter_signature` LONGTEXT NULL AFTER `reporter_name`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'other_incident') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `other_incident` TEXT NULL AFTER `reporter_signature`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'other_information') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `other_information` TEXT NULL AFTER `other_incident`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'follow_up') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `follow_up` TINYINT(1) NOT NULL DEFAULT 0 AFTER `other_information`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ssu_incident_details' AND column_name = 'who_involved') THEN
+            ALTER TABLE `ssu_incident_details` ADD COLUMN `who_involved` TEXT NULL AFTER `follow_up`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 8. TICKET ATTACHMENTS UPGRADES
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_attachments') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_attachments' AND column_name = 'created_at')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_attachments' AND column_name = 'uploaded_at') THEN
+            ALTER TABLE `ticket_attachments` CHANGE COLUMN `created_at` `uploaded_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_attachments' AND column_name = 'is_encrypted') THEN
+            ALTER TABLE `ticket_attachments` ADD COLUMN `is_encrypted` TINYINT(1) NOT NULL DEFAULT 0 AFTER `file_size_bytes`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_attachments' AND column_name = 'encryption_iv') THEN
+            ALTER TABLE `ticket_attachments` ADD COLUMN `encryption_iv` VARCHAR(64) NULL DEFAULT NULL AFTER `is_encrypted`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_attachments' AND column_name = 'encryption_tag') THEN
+            ALTER TABLE `ticket_attachments` ADD COLUMN `encryption_tag` VARCHAR(64) NULL DEFAULT NULL AFTER `encryption_iv`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 9. TICKET MATERIALS UPGRADES
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_materials') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_materials' AND column_name = 'stage') THEN
+            ALTER TABLE `ticket_materials` ADD COLUMN `stage` VARCHAR(20) NOT NULL DEFAULT 'assessment' AFTER `total_price`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 10. NOTIFICATIONS & OTP UPGRADES
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'notifications') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'notifications' AND column_name = 'type') THEN
+            ALTER TABLE `notifications` ADD COLUMN `type` VARCHAR(50) NOT NULL DEFAULT 'info' AFTER `user_id`;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'notifications' AND column_name = 'updated_at') THEN
+            ALTER TABLE `notifications` ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`;
+        END IF;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'otp_codes') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'otp_codes' AND column_name = 'user_data') THEN
+            ALTER TABLE `otp_codes` ADD COLUMN `user_data` TEXT NULL AFTER `created_at`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 11. SYSTEM SETTINGS COMPATIBILITY PATCH (Handles 'setting_key' vs 'key')
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'system_settings') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'system_settings' AND column_name = 'setting_key') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'system_settings' AND column_name = 'key') THEN
+            ALTER TABLE `system_settings` CHANGE COLUMN `setting_key` `key` VARCHAR(100) NOT NULL;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'system_settings' AND column_name = 'setting_value') 
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'system_settings' AND column_name = 'value') THEN
+            ALTER TABLE `system_settings` CHANGE COLUMN `setting_value` `value` TEXT DEFAULT NULL;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 12. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
     -- ------------------------------------------------------------------------
     DROP TABLE IF EXISTS `ci_sessions`;
     DROP TABLE IF EXISTS `role_permissions`;
@@ -489,10 +609,13 @@ CREATE TABLE IF NOT EXISTS `ticket_attachments` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(60) NOT NULL,
   `file_name` varchar(255) NOT NULL,
-  `file_path` varchar(500) NOT NULL,
+  `file_path` text NOT NULL,
   `file_type` varchar(100) DEFAULT NULL,
-  `file_size_bytes` int(11) UNSIGNED DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `file_size_bytes` bigint(20) UNSIGNED DEFAULT NULL,
+  `is_encrypted` tinyint(1) NOT NULL DEFAULT 0,
+  `encryption_iv` varchar(64) DEFAULT NULL,
+  `encryption_tag` varchar(64) DEFAULT NULL,
+  `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_attachments_ticket` (`ticket_id`),
   CONSTRAINT `fk_attachments_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
@@ -501,13 +624,10 @@ CREATE TABLE IF NOT EXISTS `ticket_attachments` (
 -- Table structure for table `fgmu_ticket_details`
 CREATE TABLE IF NOT EXISTS `fgmu_ticket_details` (
   `ticket_id` varchar(60) NOT NULL,
-  `aircon_type` varchar(100) DEFAULT NULL,
-  `refrigeration_brand` varchar(100) DEFAULT NULL,
-  `water_leak_severity` varchar(50) DEFAULT NULL,
-  `masonry_material` varchar(100) DEFAULT NULL,
-  `furniture_type` varchar(100) DEFAULT NULL,
-  `welding_structural` tinyint(1) DEFAULT 0,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `college_building` varchar(255) NOT NULL,
+  `office_room` varchar(100) NOT NULL,
+  `source_of_fund` varchar(150) DEFAULT NULL,
+  `jr_no` varchar(60) DEFAULT NULL,
   PRIMARY KEY (`ticket_id`),
   CONSTRAINT `fk_fgmu_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -515,11 +635,9 @@ CREATE TABLE IF NOT EXISTS `fgmu_ticket_details` (
 -- Table structure for table `leau_ticket_details`
 CREATE TABLE IF NOT EXISTS `leau_ticket_details` (
   `ticket_id` varchar(60) NOT NULL,
-  `landscaping_type` varchar(100) DEFAULT NULL,
-  `drainage_location` varchar(255) DEFAULT NULL,
-  `disinfection_chemicals` varchar(255) DEFAULT NULL,
-  `waste_hazard_level` varchar(50) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `college_building` varchar(255) NOT NULL,
+  `office_room` varchar(100) NOT NULL,
+  `source_of_fund` varchar(150) DEFAULT NULL,
   PRIMARY KEY (`ticket_id`),
   CONSTRAINT `fk_leau_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -527,11 +645,15 @@ CREATE TABLE IF NOT EXISTS `leau_ticket_details` (
 -- Table structure for table `ssu_incident_details`
 CREATE TABLE IF NOT EXISTS `ssu_incident_details` (
   `ticket_id` varchar(60) NOT NULL,
-  `incident_date` datetime DEFAULT NULL,
-  `persons_involved` text DEFAULT NULL,
-  `evidence_summary` text DEFAULT NULL,
-  `security_notified` tinyint(1) DEFAULT 0,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `other_incident` text DEFAULT NULL,
+  `other_information` text DEFAULT NULL,
+  `follow_up` tinyint(1) NOT NULL DEFAULT 0,
+  `who_involved` text DEFAULT NULL,
+  `where_occurred` text NOT NULL,
+  `when_occurred` varchar(150) NOT NULL,
+  `how_narrative` text NOT NULL,
+  `reporter_name` varchar(255) NOT NULL,
+  `reporter_signature` longtext DEFAULT NULL,
   PRIMARY KEY (`ticket_id`),
   CONSTRAINT `fk_ssu_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -799,11 +921,13 @@ CREATE TABLE IF NOT EXISTS `user_sessions` (
 CREATE TABLE IF NOT EXISTS `notifications` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` varchar(36) NOT NULL,
+  `type` varchar(50) NOT NULL DEFAULT 'info',
   `title` varchar(255) NOT NULL,
   `message` text NOT NULL,
   `link` varchar(255) DEFAULT NULL,
   `is_read` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_notifications_user` (`user_id`),
   CONSTRAINT `fk_notifications_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
@@ -813,24 +937,26 @@ CREATE TABLE IF NOT EXISTS `notifications` (
 CREATE TABLE IF NOT EXISTS `otp_codes` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `email` varchar(255) NOT NULL,
-  `code` varchar(6) NOT NULL,
+  `code` varchar(50) NOT NULL,
   `expires_at` datetime NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `user_data` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_otp_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `system_settings`
 CREATE TABLE IF NOT EXISTS `system_settings` (
-  `setting_key` varchar(100) NOT NULL,
-  `setting_value` text DEFAULT NULL,
-  `description` text DEFAULT NULL,
+  `key` varchar(100) NOT NULL,
+  `value` text DEFAULT NULL,
+  `description` varchar(255) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`setting_key`)
+  PRIMARY KEY (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Seed system configuration defaults - ON DUPLICATE KEY UPDATE protects live configured values
-INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) VALUES
+INSERT INTO `system_settings` (`key`, `value`, `description`) VALUES
 ('jwt_access_ttl', '3600', 'Access token lifetime in seconds (default: 1 hour)'),
 ('jwt_refresh_ttl', '604800', 'Refresh token lifetime in seconds (default: 7 days)'),
 ('resend_api_key', '', 'API Key for Resend email notification service'),

@@ -35,6 +35,7 @@ This directory contains the safe, non-destructive schema update scripts for the 
    - Click **Choose File** (or "Browse") and select `gso_db_dump.sql`.
    - Character Set: `utf-8` / `utf8mb4`.
    - Format: `SQL`.
+   - **Other options**: You can uncheck **"Enable foreign key checks"** (recommended for live updaters to prevent order-of-insertion warnings, though the script also includes `SET FOREIGN_KEY_CHECKS = 0;` internally).
    - Click **Import** (or **Go**) at the bottom.
 
 5. **Confirmation**:

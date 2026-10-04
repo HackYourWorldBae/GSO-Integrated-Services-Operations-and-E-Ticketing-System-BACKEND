@@ -181,6 +181,17 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
         $routes->get('superadmin/account-activity-logs',  'SuperadminController::accountActivityLogs', ['filter' => 'role:superadmin']);
 
+        // -- System Backup & Disaster Recovery (Superadmin) --
+        $routes->get('superadmin/backups',                     'BackupController::index',                    ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups',                    'BackupController::create',                   ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups/(:num)/restore',     'BackupController::restore/$1',               ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups/restore-upload',      'BackupController::restoreUpload',            ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/backups/(:num)/download',     'BackupController::download/$1',              ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups/(:num)/sync-gdrive', 'BackupController::syncGoogleDrive/$1',        ['filter' => 'role:superadmin']);
+        $routes->delete('superadmin/backups/(:num)',           'BackupController::delete/$1',                 ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/backups/gdrive-status',        'BackupController::getGoogleDriveStatus',     ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups/gdrive-config',       'BackupController::updateGoogleDriveConfig',  ['filter' => 'role:superadmin']);
+
         // -- System Settings & Resend.com Email Integration (Superadmin) --
         $routes->get('settings/resend',        'SystemSettingController::getResendConfig',    ['filter' => 'role:superadmin']);
         $routes->post('settings/resend',       'SystemSettingController::updateResendConfig', ['filter' => 'role:superadmin']);

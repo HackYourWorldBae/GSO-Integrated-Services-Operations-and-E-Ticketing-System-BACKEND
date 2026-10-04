@@ -61,6 +61,11 @@ writable/session/*
 writable/uploads/*
 !writable/uploads/index.html
 
+writable/backups/*
+!writable/backups/index.html
+
+writable/google_service_account.json
+
 writable/debugbar/*
 !writable/debugbar/index.html
 
@@ -126,6 +131,10 @@ _modules/*
 /results/
 /phpunit*.xml
 writable/gcp-credentials.json
+writable/google_service_account.json
+writable/backups/*
+!writable/backups/index.html
 
 # Database dumps & DDL files
 *.sql
+!gso_db_dump.sql

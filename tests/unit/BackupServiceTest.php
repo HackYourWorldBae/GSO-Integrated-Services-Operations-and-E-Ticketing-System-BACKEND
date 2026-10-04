@@ -90,6 +90,19 @@ final class BackupServiceTest extends CIUnitTestCase
         }
     }
 
+    public function testGetBackupsWithUserDoesNotReferenceObsoleteNameColumn(): void
+    {
+        $backupModelReflection = new ReflectionClass(SystemBackupModel::class);
+        $method = $backupModelReflection->getMethod('getBackupsWithUser');
+
+        $this->assertNotNull($method);
+
+        // Read source code of getBackupsWithUser to ensure users.name is not referenced
+        $filename = $backupModelReflection->getFileName();
+        $source = file_get_contents($filename);
+        $this->assertStringNotContainsString('users.name', $source, "Must not query 'users.name'; use CONCAT of users.first_name and users.last_name instead.");
+    }
+
     // =========================================================================
     // GoogleDriveService Contract & Resilience Tests
     // =========================================================================

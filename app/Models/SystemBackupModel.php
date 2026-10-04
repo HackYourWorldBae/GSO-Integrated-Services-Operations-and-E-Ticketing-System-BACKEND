@@ -37,7 +37,7 @@ class SystemBackupModel extends Model
      */
     public function getBackupsWithUser(): array
     {
-        return $this->select('system_backups.*, users.name as creator_name, users.email as creator_email')
+        return $this->select("system_backups.*, NULLIF(TRIM(CONCAT(COALESCE(users.first_name, ''), ' ', COALESCE(users.last_name, ''))), '') as creator_name, users.first_name, users.last_name, users.email as creator_email")
             ->join('users', 'users.id = system_backups.created_by', 'left')
             ->orderBy('system_backups.created_at', 'DESC')
             ->findAll();

@@ -55,10 +55,11 @@ class BackupController extends BaseController
                 'backups'      => $backups,
                 'stats'        => $stats,
                 'google_drive' => [
-                    'is_configured' => $this->driveService->isConfigured(),
-                    'connected'     => $gdriveTest['success'] ?? false,
-                    'message'       => $gdriveTest['message'] ?? 'Not connected',
-                    'folder_id'     => $folderId,
+                    'is_configured'         => $this->driveService->isConfigured(),
+                    'connected'             => $gdriveTest['success'] ?? false,
+                    'message'               => $gdriveTest['message'] ?? 'Not connected',
+                    'folder_id'             => $folderId,
+                    'service_account_email' => $this->driveService->getServiceAccountEmail(),
                 ],
             ]);
         } catch (Throwable $e) {

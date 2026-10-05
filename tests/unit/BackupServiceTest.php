@@ -328,4 +328,64 @@ final class BackupServiceTest extends CIUnitTestCase
         $this->assertDirectoryExists($backupDir);
         $this->assertIsWritable($backupDir);
     }
+
+    public function testFormatGoogleDriveErrorParsesStorageQuotaExceededJson(): void
+    {
+        $rawGoogleJson = json_encode([
+            'error' => [
+                'code' => 403,
+                'message' => 'Service Accounts do not have storage. Leverage shared drives or use OAuth delegation instead',
+                'errors' => [
+                    [
+                        'message' => 'Service Accounts do not have storage.',
+                        'domain'  => 'usageLimits',
+                        'reason'  => 'storageQuotaExceeded',
+                    ]
+                ]
+            ]
+        ]);
+
+        $exception = new Exception($rawGoogleJson, 403);
+        $formatted = $this->driveService->formatGoogleDriveError($exception);
+
+        $this->assertStringContainsString('Google Drive storage quota error', $formatted);
+        $this->assertStringContainsString('Service Accounts do not have private drive storage', $formatted);
+        $this->assertStringContainsString('Editor', $formatted);
+    }
+
+    public function testFormatGoogleDriveErrorHandlesFolderNotFound(): void
+    {
+        $rawGoogleJson = json_encode([
+            'error' => [
+                'code' => 404,
+                'message' => 'File not found: 1invalidFolderId',
+            ]
+        ]);
+
+        $exception = new Exception($rawGoogleJson, 404);
+        $formatted = $this->driveService->formatGoogleDriveError($exception);
+
+        $this->assertStringContainsString('Google Drive target folder was not found', $formatted);
+    }
+
+    public function testUploadFileWithoutFolderIdReturnsDescriptiveServiceAccountWarning(): void
+    {
+        // When initialized without folder ID, uploadFile must reject before attempting root upload
+        $reflection = new ReflectionClass($this->driveService);
+        $folderProp = $reflection->getProperty('folderId');
+        $initProp   = $reflection->getProperty('initialized');
+        $serviceProp = $reflection->getProperty('service');
+
+        $folderProp->setValue($this->driveService, null);
+        $initProp->setValue($this->driveService, true);
+        $serviceProp->setValue($this->driveService, $this->createMock(\Google\Service\Drive::class));
+
+        $tempSql = $this->createTempFile('-- sample sql');
+        $result = $this->driveService->uploadFile($tempSql, 'backup.sql');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Google Drive Folder ID is required', $result['error']);
+        $this->assertStringContainsString('Service accounts do not have private drive storage', $result['error']);
+    }
 }
+

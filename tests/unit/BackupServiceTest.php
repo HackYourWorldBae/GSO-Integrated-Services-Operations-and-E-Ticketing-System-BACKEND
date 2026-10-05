@@ -350,7 +350,7 @@ final class BackupServiceTest extends CIUnitTestCase
 
         $this->assertStringContainsString('Google Drive storage quota error', $formatted);
         $this->assertStringContainsString('Service Accounts do not have private drive storage', $formatted);
-        $this->assertStringContainsString('Editor', $formatted);
+        $this->assertStringContainsString('Personal Google Drive (OAuth 2.0)', $formatted);
     }
 
     public function testFormatGoogleDriveErrorHandlesFolderNotFound(): void
@@ -384,8 +384,50 @@ final class BackupServiceTest extends CIUnitTestCase
         $result = $this->driveService->uploadFile($tempSql, 'backup.sql');
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('Google Drive Folder ID is required', $result['error']);
-        $this->assertStringContainsString('Service accounts do not have private drive storage', $result['error']);
+        $this->assertStringContainsString('Google Drive Folder ID is required for Service Accounts', $result['error']);
+    }
+
+    public function testCreateOAuthAuthUrlGeneratesValidGoogleConsentUrl(): void
+    {
+        $url = $this->driveService->createOAuthAuthUrl(
+            'test-client-id.apps.googleusercontent.com',
+            'test-secret',
+            'https://backend.hywb.online/api/v1/superadmin/backups/google-oauth-callback',
+            'state123'
+        );
+
+        $this->assertStringContainsString('accounts.google.com', $url);
+        $this->assertStringContainsString('test-client-id.apps.googleusercontent.com', $url);
+        $this->assertStringContainsString('google-oauth-callback', $url);
+        $this->assertStringContainsString('access_type=offline', $url);
+    }
+
+    public function testUploadFileWithOAuthAllowsUploadWithoutFolderId(): void
+    {
+        $reflection = new ReflectionClass($this->driveService);
+        $folderProp   = $reflection->getProperty('folderId');
+        $initProp     = $reflection->getProperty('initialized');
+        $authTypeProp = $reflection->getProperty('authType');
+        $serviceProp  = $reflection->getProperty('service');
+
+        $folderProp->setValue($this->driveService, null);
+        $initProp->setValue($this->driveService, true);
+        $authTypeProp->setValue($this->driveService, 'oauth');
+
+        // Mock Drive service with files resource
+        $mockFiles = $this->createMock(\Google\Service\Drive\Resource\Files::class);
+        $mockDriveFile = new \Google\Service\Drive\DriveFile(['id' => 'oauth_uploaded_id', 'webViewLink' => 'https://drive.google.com/file/d/test']);
+        $mockFiles->method('create')->willReturn($mockDriveFile);
+
+        $mockService = $this->createMock(\Google\Service\Drive::class);
+        $mockService->files = $mockFiles;
+        $serviceProp->setValue($this->driveService, $mockService);
+
+        $tempSql = $this->createTempFile('-- sample sql');
+        $result = $this->driveService->uploadFile($tempSql, 'backup.sql');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('oauth_uploaded_id', $result['file_id']);
     }
 }
 

@@ -11,8 +11,10 @@ use Throwable;
 /**
  * GoogleDriveService
  *
- * Handles Google Drive cloud backups, downloads, and connection verification
- * using a Google Cloud Service Account.
+ * Handles Google Drive cloud backups, downloads, and connection verification.
+ * Supports both:
+ * 1. OAuth 2.0 (Direct personal @gmail.com accounts using user storage quota)
+ * 2. Google Cloud Service Accounts (for Google Workspace Shared Drives)
  */
 class GoogleDriveService
 {
@@ -20,7 +22,12 @@ class GoogleDriveService
     private ?GoogleClient $client = null;
     private ?GoogleDrive $service = null;
     private ?string $folderId = null;
+    private string $authType = 'service_account'; // 'oauth' | 'service_account'
     private ?string $serviceAccountEmail = null;
+    private ?string $accountEmail = null;
+    private ?string $accountName = null;
+    private ?int $storageLimit = null;
+    private ?int $storageUsage = null;
     private bool $initialized = false;
     private ?string $initError = null;
 
@@ -41,49 +48,123 @@ class GoogleDriveService
                 return;
             }
 
-            // Retrieve credentials either from setting or file
+            $authType        = $this->settingModel->getSetting('google_drive_auth_type');
+            $refreshToken    = $this->settingModel->getSetting('google_drive_refresh_token');
+            $clientId        = $this->settingModel->getSetting('google_drive_client_id');
+            $clientSecret    = $this->settingModel->getSetting('google_drive_client_secret');
             $credentialsJson = $this->settingModel->getSetting('google_drive_credentials_json');
-            $customPath      = $this->settingModel->getSetting('google_drive_credentials_path');
-            $defaultPath     = WRITEPATH . 'google_service_account.json';
 
-            $client = new GoogleClient();
-            $client->setApplicationName('GSO E-Ticketing System Backup');
-            $client->addScope(GoogleDrive::DRIVE);
-
-            $authConfig = null;
-            if (!empty($credentialsJson)) {
-                $config = json_decode($credentialsJson, true);
-                if (json_last_error() !== JSON_ERROR_NONE || empty($config['type'])) {
-                    $this->initError = 'Stored Google Service Account JSON is invalid.';
-                    return;
-                }
-                $authConfig = $config;
-                $client->setAuthConfig($config);
-            } elseif (!empty($customPath) && file_exists($customPath)) {
-                $client->setAuthConfig($customPath);
-                $fileContents = file_get_contents($customPath);
-                $authConfig = json_decode($fileContents, true);
-            } elseif (file_exists($defaultPath)) {
-                $client->setAuthConfig($defaultPath);
-                $fileContents = file_get_contents($defaultPath);
-                $authConfig = json_decode($fileContents, true);
-            } else {
-                $this->initError = 'Google Drive service account credentials not found. Configure in Settings or place google_service_account.json in writable/ directory.';
-                return;
+            // Auto-detect authType if not explicitly set
+            if (empty($authType)) {
+                $authType = (!empty($refreshToken) && !empty($clientId)) ? 'oauth' : 'service_account';
             }
-
-            if (is_array($authConfig) && !empty($authConfig['client_email'])) {
-                $this->serviceAccountEmail = $authConfig['client_email'];
-            }
-
-            $this->client = $client;
-            $this->service = new GoogleDrive($client);
+            $this->authType = $authType;
             $this->folderId = $this->settingModel->getSetting('google_drive_folder_id', env('GOOGLE_DRIVE_FOLDER_ID'));
-            $this->initialized = true;
+
+            if ($this->authType === 'oauth') {
+                $this->initializeOAuthClient($clientId, $clientSecret, $refreshToken);
+            } else {
+                $this->initializeServiceAccountClient($credentialsJson);
+            }
         } catch (Throwable $e) {
             $this->initError = $this->formatGoogleDriveError($e);
             $this->initialized = false;
         }
+    }
+
+    /**
+     * Initialize Google Client using OAuth 2.0 Refresh Token.
+     */
+    private function initializeOAuthClient(?string $clientId, ?string $clientSecret, ?string $refreshToken): void
+    {
+        if (empty($clientId) || empty($clientSecret) || empty($refreshToken)) {
+            $this->initError = 'Google Drive OAuth credentials incomplete. Please configure Client ID, Client Secret, and authorize your Google account.';
+            return;
+        }
+
+        $client = new GoogleClient();
+        $client->setApplicationName('GSO E-Ticketing System Backup');
+        $client->setClientId($clientId);
+        $client->setClientSecret($clientSecret);
+        $client->setAccessType('offline');
+        $client->addScope([
+            GoogleDrive::DRIVE,
+            'openid',
+            'email',
+            'profile',
+        ]);
+
+        $token = $client->fetchAccessTokenWithRefreshToken($refreshToken);
+        if (isset($token['error'])) {
+            $this->initError = 'Google OAuth token refresh failed: ' . ($token['error_description'] ?? $token['error']);
+            return;
+        }
+
+        $client->setAccessToken($token);
+        $this->client = $client;
+        $this->service = new GoogleDrive($client);
+        $this->accountEmail = $this->settingModel->getSetting('google_drive_account_email');
+        $this->initialized = true;
+
+        // Fetch user email and quota
+        try {
+            $about = $this->service->about->get([
+                'fields' => 'user(emailAddress, displayName), storageQuota',
+            ]);
+            if ($about->getUser()) {
+                $this->accountEmail = $about->getUser()->getEmailAddress();
+                $this->accountName  = $about->getUser()->getDisplayName();
+                if (!empty($this->accountEmail)) {
+                    $this->settingModel->setSetting('google_drive_account_email', $this->accountEmail);
+                }
+            }
+            if ($about->getStorageQuota()) {
+                $this->storageLimit = (int) $about->getStorageQuota()->getLimit();
+                $this->storageUsage = (int) $about->getStorageQuota()->getUsage();
+            }
+        } catch (Throwable $ignore) {
+        }
+    }
+
+    /**
+     * Initialize Google Client using a Service Account JSON.
+     */
+    private function initializeServiceAccountClient(?string $credentialsJson): void
+    {
+        $customPath  = $this->settingModel->getSetting('google_drive_credentials_path');
+        $defaultPath = WRITEPATH . 'google_service_account.json';
+
+        $client = new GoogleClient();
+        $client->setApplicationName('GSO E-Ticketing System Backup');
+        $client->addScope(GoogleDrive::DRIVE);
+
+        $authConfig = null;
+        if (!empty($credentialsJson)) {
+            $config = json_decode($credentialsJson, true);
+            if (json_last_error() !== JSON_ERROR_NONE || empty($config['type'])) {
+                $this->initError = 'Stored Google Service Account JSON is invalid.';
+                return;
+            }
+            $authConfig = $config;
+            $client->setAuthConfig($config);
+        } elseif (!empty($customPath) && file_exists($customPath)) {
+            $client->setAuthConfig($customPath);
+            $authConfig = json_decode(file_get_contents($customPath), true);
+        } elseif (file_exists($defaultPath)) {
+            $client->setAuthConfig($defaultPath);
+            $authConfig = json_decode(file_get_contents($defaultPath), true);
+        } else {
+            $this->initError = 'Google Drive credentials not found. Configure OAuth 2.0 or Service Account in Drive Settings.';
+            return;
+        }
+
+        if (is_array($authConfig) && !empty($authConfig['client_email'])) {
+            $this->serviceAccountEmail = $authConfig['client_email'];
+        }
+
+        $this->client = $client;
+        $this->service = new GoogleDrive($client);
+        $this->initialized = true;
     }
 
     /**
@@ -103,11 +184,51 @@ class GoogleDriveService
     }
 
     /**
+     * Get active authentication type ('oauth' or 'service_account').
+     */
+    public function getAuthType(): string
+    {
+        return $this->authType;
+    }
+
+    /**
      * Get the service account email if credentials have been parsed.
      */
     public function getServiceAccountEmail(): ?string
     {
         return $this->serviceAccountEmail;
+    }
+
+    /**
+     * Get user email for OAuth authentication.
+     */
+    public function getAccountEmail(): ?string
+    {
+        return $this->accountEmail;
+    }
+
+    /**
+     * Get user display name for OAuth authentication.
+     */
+    public function getAccountName(): ?string
+    {
+        return $this->accountName;
+    }
+
+    /**
+     * Get storage quota limit in bytes (OAuth).
+     */
+    public function getStorageLimit(): ?int
+    {
+        return $this->storageLimit;
+    }
+
+    /**
+     * Get storage quota usage in bytes (OAuth).
+     */
+    public function getStorageUsage(): ?int
+    {
+        return $this->storageUsage;
     }
 
     /**
@@ -119,6 +240,41 @@ class GoogleDriveService
     }
 
     /**
+     * Generate an OAuth Authorization URL for the user to log into Google.
+     */
+    public function createOAuthAuthUrl(string $clientId, string $clientSecret, string $redirectUri, string $state = ''): string
+    {
+        $client = new GoogleClient();
+        $client->setClientId($clientId);
+        $client->setClientSecret($clientSecret);
+        $client->setRedirectUri($redirectUri);
+        $client->setAccessType('offline');
+        $client->setPrompt('consent');
+        $client->addScope([
+            GoogleDrive::DRIVE,
+            'openid',
+            'email',
+            'profile',
+        ]);
+        if (!empty($state)) {
+            $client->setState($state);
+        }
+        return $client->createAuthUrl();
+    }
+
+    /**
+     * Exchange an OAuth authorization code for tokens.
+     */
+    public function exchangeOAuthCode(string $clientId, string $clientSecret, string $redirectUri, string $code): array
+    {
+        $client = new GoogleClient();
+        $client->setClientId($clientId);
+        $client->setClientSecret($clientSecret);
+        $client->setRedirectUri($redirectUri);
+        return $client->fetchAccessTokenWithAuthCode($code);
+    }
+
+    /**
      * Test connection to Google Drive.
      */
     public function testConnection(): array
@@ -127,7 +283,12 @@ class GoogleDriveService
             return [
                 'success'               => false,
                 'message'               => $this->initError ?? 'Google Drive credentials are not configured.',
+                'auth_type'             => $this->authType,
                 'service_account_email' => $this->serviceAccountEmail,
+                'account_email'         => $this->accountEmail,
+                'account_name'          => $this->accountName,
+                'storage_limit'         => $this->storageLimit,
+                'storage_usage'         => $this->storageUsage,
                 'folder_id'             => $this->folderId ?: '',
             ];
         }
@@ -147,18 +308,48 @@ class GoogleDriveService
             $results = $this->service->files->listFiles($optParams);
             $fileCount = count($results->getFiles());
 
+            // Try to refresh about/quota info
+            try {
+                $about = $this->service->about->get([
+                    'fields' => 'user(emailAddress, displayName), storageQuota',
+                ]);
+                if ($about->getUser()) {
+                    $this->accountEmail = $about->getUser()->getEmailAddress();
+                    $this->accountName  = $about->getUser()->getDisplayName();
+                }
+                if ($about->getStorageQuota()) {
+                    $this->storageLimit = (int) $about->getStorageQuota()->getLimit();
+                    $this->storageUsage = (int) $about->getStorageQuota()->getUsage();
+                }
+            } catch (Throwable $ignore) {
+            }
+
+            $successMsg = $this->authType === 'oauth'
+                ? 'Connected to personal Google Drive (' . ($this->accountEmail ?: 'OAuth') . ') successfully.'
+                : 'Connected to Google Drive successfully.';
+
             return [
                 'success'               => true,
-                'message'               => 'Connected to Google Drive successfully.',
+                'message'               => $successMsg,
+                'auth_type'             => $this->authType,
                 'folder_id'             => $this->folderId ?: '',
                 'service_account_email' => $this->serviceAccountEmail,
+                'account_email'         => $this->accountEmail,
+                'account_name'          => $this->accountName,
+                'storage_limit'         => $this->storageLimit,
+                'storage_usage'         => $this->storageUsage,
                 'files_in_folder'       => $fileCount,
             ];
         } catch (Throwable $e) {
             return [
                 'success'               => false,
                 'message'               => $this->formatGoogleDriveError($e),
+                'auth_type'             => $this->authType,
                 'service_account_email' => $this->serviceAccountEmail,
+                'account_email'         => $this->accountEmail,
+                'account_name'          => $this->accountName,
+                'storage_limit'         => $this->storageLimit,
+                'storage_usage'         => $this->storageUsage,
                 'folder_id'             => $this->folderId ?: '',
             ];
         }
@@ -182,13 +373,14 @@ class GoogleDriveService
             ];
         }
 
-        if (empty($this->folderId)) {
+        // Folder ID is mandatory only for Service Accounts due to 0-byte quota in My Drive
+        if ($this->authType === 'service_account' && empty($this->folderId)) {
             $emailHint = $this->serviceAccountEmail ? " ({$this->serviceAccountEmail})" : '';
             return [
                 'success'  => false,
                 'file_id'  => null,
                 'web_link' => null,
-                'error'    => "Google Drive Folder ID is required. Service accounts do not have private drive storage. Please create a folder in your Google Drive, share it with your service account{$emailHint} as 'Editor', and configure the Folder ID in Drive Settings.",
+                'error'    => "Google Drive Folder ID is required for Service Accounts. Service accounts do not have private drive storage. Please create a folder in your Google Drive, share it with your service account{$emailHint} as 'Editor', and configure the Folder ID in Drive Settings.",
             ];
         }
 
@@ -204,11 +396,15 @@ class GoogleDriveService
         try {
             $fileName = !empty($customFileName) ? $customFileName : basename($localFilePath);
 
-            $fileMetadata = new DriveFile([
+            $fileMetadataProps = [
                 'name'        => $fileName,
                 'description' => 'GSO E-Ticketing System Database Backup',
-                'parents'     => [$this->folderId],
-            ]);
+            ];
+            if (!empty($this->folderId)) {
+                $fileMetadataProps['parents'] = [$this->folderId];
+            }
+
+            $fileMetadata = new DriveFile($fileMetadataProps);
 
             $content = file_get_contents($localFilePath);
 
@@ -237,10 +433,10 @@ class GoogleDriveService
     }
 
     /**
-     * Download a file from Google Drive to a local destination.
+     * Download a file from Google Drive to local storage.
      *
      * @param string $driveFileId The Google Drive file ID
-     * @param string $destinationPath Local absolute path to save the downloaded file
+     * @param string $destinationPath Absolute local path where file will be written
      * @return array ['success' => bool, 'bytes' => int, 'error' => ?string]
      */
     public function downloadFile(string $driveFileId, string $destinationPath): array
@@ -270,7 +466,7 @@ class GoogleDriveService
                 return [
                     'success' => false,
                     'bytes'   => 0,
-                    'error'   => "Failed to write content to {$destinationPath}",
+                    'error'   => 'Failed writing Google Drive file to disk.',
                 ];
             }
 
@@ -290,10 +486,13 @@ class GoogleDriveService
 
     /**
      * Delete a file from Google Drive.
+     *
+     * @param string $driveFileId The Google Drive file ID
+     * @return bool True if deleted or already gone
      */
     public function deleteFile(string $driveFileId): bool
     {
-        if (!$this->isConfigured() || empty($driveFileId)) {
+        if (!$this->isConfigured()) {
             return false;
         }
 
@@ -337,21 +536,27 @@ class GoogleDriveService
         if ($reason === 'storageQuotaExceeded'
             || stripos($rawMessage, 'storageQuotaExceeded') !== false
             || stripos($rawMessage, 'Service Accounts do not have storage') !== false) {
-            return "Google Drive storage quota error: Service Accounts do not have private drive storage. Please create a folder in your Google Drive, share it with your service account{$emailHint} with 'Editor' permissions, and paste its Folder ID into Drive Settings.";
+            if ($this->authType === 'oauth') {
+                return "Google Drive storage quota error: Your personal Google Drive storage is full. Please free up space in your Google Account.";
+            }
+            return "Google Drive storage quota error: Service Accounts do not have private drive storage. Please switch to 'Personal Google Drive (OAuth 2.0)' in Drive Settings, or use a Google Workspace Shared Drive.";
         }
 
         // Specific handling for Folder/File not found (404)
         if ($code === 404 || stripos($rawMessage, 'File not found') !== false) {
-            return "Google Drive target folder was not found (Folder ID: " . ($this->folderId ?: 'None') . "). Please verify the Folder ID exists in your Google Drive and is shared with your service account{$emailHint}.";
+            return "Google Drive target folder was not found (Folder ID: " . ($this->folderId ?: 'None') . "). Please verify the Folder ID exists in your Google Drive.";
         }
 
         // Specific handling for Forbidden / permission issues (403)
         if ($code === 403 || stripos($rawMessage, 'insufficientFilePermissions') !== false) {
-            return "Google Drive permission denied. Please verify your service account{$emailHint} has been added as an 'Editor' to the backup folder.";
+            return "Google Drive permission denied. Please verify your account has 'Editor' permissions.";
         }
 
         // Specific handling for invalid credentials / unauthorized (401)
         if ($code === 401 || stripos($rawMessage, 'invalid_grant') !== false || stripos($rawMessage, 'unauthorized') !== false) {
+            if ($this->authType === 'oauth') {
+                return "Google OAuth token expired or revoked. Please re-authorize your Google Account in Drive Settings.";
+            }
             return "Google Cloud authentication failed. Please re-upload or update your Service Account JSON credentials.";
         }
 

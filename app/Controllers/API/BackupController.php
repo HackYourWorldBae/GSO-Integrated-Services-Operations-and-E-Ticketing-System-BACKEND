@@ -48,8 +48,11 @@ class BackupController extends BaseController
             }
             unset($b);
 
-            $gdriveTest = $this->driveService->testConnection();
-            $folderId   = $this->settingModel->getSetting('google_drive_folder_id', env('GOOGLE_DRIVE_FOLDER_ID') ?: '');
+            $gdriveTest  = $this->driveService->testConnection();
+            $folderId    = $this->settingModel->getSetting('google_drive_folder_id', env('GOOGLE_DRIVE_FOLDER_ID') ?: '');
+            $authType    = $this->driveService->getAuthType();
+            $backendUrl  = rtrim(env('app.baseURL', config('App')->baseURL ?? 'http://localhost:8080'), '/');
+            $redirectUri = $backendUrl . '/api/v1/superadmin/backups/google-oauth-callback';
 
             return $this->successResponse('Backups retrieved successfully.', [
                 'backups'      => $backups,
@@ -58,8 +61,15 @@ class BackupController extends BaseController
                     'is_configured'         => $this->driveService->isConfigured(),
                     'connected'             => $gdriveTest['success'] ?? false,
                     'message'               => $gdriveTest['message'] ?? 'Not connected',
+                    'auth_type'             => $authType,
                     'folder_id'             => $folderId,
                     'service_account_email' => $this->driveService->getServiceAccountEmail(),
+                    'account_email'         => $this->driveService->getAccountEmail(),
+                    'account_name'          => $this->driveService->getAccountName(),
+                    'storage_limit'         => $this->driveService->getStorageLimit(),
+                    'storage_usage'         => $this->driveService->getStorageUsage(),
+                    'client_id'             => $this->settingModel->getSetting('google_drive_client_id') ?: '',
+                    'redirect_uri'          => $redirectUri,
                 ],
             ]);
         } catch (Throwable $e) {
@@ -263,27 +273,181 @@ class BackupController extends BaseController
     }
 
     /**
-     * Update Google Drive Configuration (Folder ID and/or Service Account JSON).
+     * Generate Google OAuth Authorization URL for Superadmin to authenticate personal Google Drive.
+     * GET /api/v1/superadmin/backups/gdrive-oauth-url
+     */
+    public function getGoogleOAuthUrl(): ResponseInterface
+    {
+        try {
+            $clientId     = trim((string) ($this->request->getGet('client_id') ?? ''));
+            $clientSecret = trim((string) ($this->request->getGet('client_secret') ?? ''));
+            $folderId     = trim((string) ($this->request->getGet('folder_id') ?? ''));
+
+            if (empty($clientId)) {
+                $clientId = (string) ($this->settingModel->getSetting('google_drive_client_id') ?? '');
+            }
+            if (empty($clientSecret)) {
+                $clientSecret = (string) ($this->settingModel->getSetting('google_drive_client_secret') ?? '');
+            }
+            if (empty($folderId)) {
+                $folderId = (string) ($this->settingModel->getSetting('google_drive_folder_id') ?? '');
+            }
+
+            if (empty($clientId) || empty($clientSecret)) {
+                return $this->errorResponse('Google OAuth Client ID and Client Secret are required before authorizing.', [], ResponseInterface::HTTP_BAD_REQUEST);
+            }
+
+            // Persist clientId and clientSecret so callback can use them
+            $this->settingModel->setSetting('google_drive_client_id', $clientId, 'Google OAuth 2.0 Client ID');
+            $this->settingModel->setSetting('google_drive_client_secret', $clientSecret, 'Google OAuth 2.0 Client Secret');
+            if (!empty($folderId)) {
+                $this->settingModel->setSetting('google_drive_folder_id', $folderId, 'Target Google Drive Folder ID');
+            }
+
+            $backendUrl  = rtrim(env('app.baseURL', config('App')->baseURL ?? 'http://localhost:8080'), '/');
+            $redirectUri = $backendUrl . '/api/v1/superadmin/backups/google-oauth-callback';
+
+            $stateData = json_encode([
+                'folder_id' => $folderId,
+                'time'      => time(),
+            ]);
+            $state = base64_encode($stateData);
+
+            $authUrl = $this->driveService->createOAuthAuthUrl($clientId, $clientSecret, $redirectUri, $state);
+
+            return $this->successResponse('OAuth URL generated successfully.', [
+                'auth_url'     => $authUrl,
+                'redirect_uri' => $redirectUri,
+            ]);
+        } catch (Throwable $e) {
+            return $this->errorResponse('Failed generating OAuth URL: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Google OAuth 2.0 Callback endpoint.
+     * GET /api/v1/superadmin/backups/google-oauth-callback
+     */
+    public function googleOAuthCallback(): ResponseInterface
+    {
+        $frontendUrl = rtrim(env('APP_FRONTEND_URL', 'http://localhost:5173'), '/');
+
+        $error = $this->request->getGet('error');
+        if (!empty($error)) {
+            $desc = $this->request->getGet('error_description') ?: $error;
+            return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode($desc));
+        }
+
+        $code  = $this->request->getGet('code');
+        $state = $this->request->getGet('state');
+
+        if (empty($code)) {
+            return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode('Missing OAuth authorization code from Google.'));
+        }
+
+        try {
+            $clientId     = (string) $this->settingModel->getSetting('google_drive_client_id');
+            $clientSecret = (string) $this->settingModel->getSetting('google_drive_client_secret');
+            $backendUrl   = rtrim(env('app.baseURL', config('App')->baseURL ?? 'http://localhost:8080'), '/');
+            $redirectUri  = $backendUrl . '/api/v1/superadmin/backups/google-oauth-callback';
+
+            if (empty($clientId) || empty($clientSecret)) {
+                return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode('Stored OAuth Client ID or Secret was not found.'));
+            }
+
+            $tokens = $this->driveService->exchangeOAuthCode($clientId, $clientSecret, $redirectUri, $code);
+
+            if (isset($tokens['error'])) {
+                $errDesc = $tokens['error_description'] ?? $tokens['error'];
+                return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode($errDesc));
+            }
+
+            if (!empty($tokens['refresh_token'])) {
+                $this->settingModel->setSetting('google_drive_refresh_token', $tokens['refresh_token'], 'Google Drive OAuth 2.0 Refresh Token');
+            } elseif (!$this->settingModel->getSetting('google_drive_refresh_token')) {
+                return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode('Google did not return a refresh token. Please re-authorize with consent prompt.'));
+            }
+
+            $this->settingModel->setSetting('google_drive_auth_type', 'oauth', 'Active Google Drive Authentication Method');
+
+            // Parse state for folder_id if present
+            if (!empty($state)) {
+                $decodedState = json_decode(base64_decode($state), true);
+                if (is_array($decodedState) && !empty($decodedState['folder_id'])) {
+                    $this->settingModel->setSetting('google_drive_folder_id', trim($decodedState['folder_id']), 'Target Google Drive Folder ID');
+                }
+            }
+
+            // Test connection to populate account email
+            $newService   = new GoogleDriveService();
+            $test         = $newService->testConnection();
+            $accountEmail = $test['account_email'] ?? '';
+
+            $redirectParam = 'oauth_success=1';
+            if (!empty($accountEmail)) {
+                $redirectParam .= '&account_email=' . urlencode($accountEmail);
+            }
+
+            return redirect()->to($frontendUrl . '/superadmin/backups?' . $redirectParam);
+        } catch (Throwable $e) {
+            return redirect()->to($frontendUrl . '/superadmin/backups?oauth_error=' . urlencode($e->getMessage()));
+        }
+    }
+
+    /**
+     * Update Google Drive Configuration (OAuth or Service Account).
      * POST /api/v1/superadmin/backups/gdrive-config
      */
     public function updateGoogleDriveConfig(): ResponseInterface
     {
         try {
-            // Check for JSON upload or raw JSON / folder_id input
-            $folderId = $this->request->getPost('folder_id');
-            $jsonRaw  = $this->request->getPost('credentials_json');
+            $authType     = $this->request->getPost('auth_type');
+            $folderId     = $this->request->getPost('folder_id');
+            $clientId     = $this->request->getPost('client_id');
+            $clientSecret = $this->request->getPost('client_secret');
+            $refreshToken = $this->request->getPost('refresh_token');
+            $jsonRaw      = $this->request->getPost('credentials_json');
 
             // Also support JSON request payload
-            if ($folderId === null && $jsonRaw === null) {
-                $body     = $this->request->getJSON(true) ?? [];
-                $folderId = $body['folder_id'] ?? null;
-                $jsonRaw  = $body['credentials_json'] ?? null;
+            if ($folderId === null && $jsonRaw === null && $clientId === null) {
+                $body         = $this->request->getJSON(true) ?? [];
+                $authType     = $body['auth_type'] ?? null;
+                $folderId     = $body['folder_id'] ?? null;
+                $clientId     = $body['client_id'] ?? null;
+                $clientSecret = $body['client_secret'] ?? null;
+                $refreshToken = $body['refresh_token'] ?? null;
+                $jsonRaw      = $body['credentials_json'] ?? null;
             }
 
             // Check if file was uploaded
             $uploadedKeyFile = $this->request->getFile('credentials_file');
             if ($uploadedKeyFile && $uploadedKeyFile->isValid()) {
                 $jsonRaw = file_get_contents($uploadedKeyFile->getTempName());
+            }
+
+            // Auto-detect JSON format (Service Account vs OAuth Client JSON)
+            if (!empty($jsonRaw)) {
+                $decoded = json_decode($jsonRaw, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    if (!empty($decoded['type']) && $decoded['type'] === 'service_account') {
+                        $authType = 'service_account';
+                        $this->settingModel->setSetting(
+                            'google_drive_credentials_json',
+                            $jsonRaw,
+                            'Google Cloud Service Account JSON credentials'
+                        );
+                        file_put_contents(WRITEPATH . 'google_service_account.json', $jsonRaw);
+                    } elseif (!empty($decoded['web']) || !empty($decoded['installed'])) {
+                        $oauthData    = $decoded['web'] ?? $decoded['installed'];
+                        $authType     = 'oauth';
+                        $clientId     = $oauthData['client_id'] ?? $clientId;
+                        $clientSecret = $oauthData['client_secret'] ?? $clientSecret;
+                    }
+                }
+            }
+
+            if (!empty($authType)) {
+                $this->settingModel->setSetting('google_drive_auth_type', $authType, 'Active Google Drive Authentication Method');
             }
 
             if ($folderId !== null) {
@@ -294,20 +458,17 @@ class BackupController extends BaseController
                 );
             }
 
-            if (!empty($jsonRaw)) {
-                $decoded = json_decode($jsonRaw, true);
-                if (json_last_error() !== JSON_ERROR_NONE || empty($decoded['client_email'])) {
-                    return $this->errorResponse('Invalid Service Account JSON format.', [], ResponseInterface::HTTP_BAD_REQUEST);
-                }
+            if (!empty($clientId)) {
+                $this->settingModel->setSetting('google_drive_client_id', trim($clientId), 'Google OAuth 2.0 Client ID');
+            }
 
-                $this->settingModel->setSetting(
-                    'google_drive_credentials_json',
-                    $jsonRaw,
-                    'Google Cloud Service Account JSON credentials'
-                );
+            if (!empty($clientSecret)) {
+                $this->settingModel->setSetting('google_drive_client_secret', trim($clientSecret), 'Google OAuth 2.0 Client Secret');
+            }
 
-                // Also write to default file for CLI/service access
-                file_put_contents(WRITEPATH . 'google_service_account.json', $jsonRaw);
+            if (!empty($refreshToken)) {
+                $this->settingModel->setSetting('google_drive_refresh_token', trim($refreshToken), 'Google OAuth 2.0 Refresh Token');
+                $this->settingModel->setSetting('google_drive_auth_type', 'oauth', 'Active Google Drive Authentication Method');
             }
 
             // Re-instantiate service to test

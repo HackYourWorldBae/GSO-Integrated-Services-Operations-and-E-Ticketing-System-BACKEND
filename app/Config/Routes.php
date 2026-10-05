@@ -191,6 +191,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->delete('superadmin/backups/(:num)',           'BackupController::delete/$1',                 ['filter' => 'role:superadmin']);
         $routes->get('superadmin/backups/gdrive-status',        'BackupController::getGoogleDriveStatus',     ['filter' => 'role:superadmin']);
         $routes->post('superadmin/backups/gdrive-config',       'BackupController::updateGoogleDriveConfig',  ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/backups/gdrive-oauth-url',     'BackupController::getGoogleOAuthUrl',        ['filter' => 'role:superadmin']);
+        $routes->get('superadmin/backups/google-oauth-callback','BackupController::googleOAuthCallback');
 
         // -- System Settings & Resend.com Email Integration (Superadmin) --
         $routes->get('settings/resend',        'SystemSettingController::getResendConfig',    ['filter' => 'role:superadmin']);

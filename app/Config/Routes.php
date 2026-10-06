@@ -36,6 +36,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->get('health', function() {
         return response()->setStatusCode(200)->setJSON([
             'status'    => 'ok',
+            'version'   => '1.0.8-personnel-fix',
             'timestamp' => time(),
             'service'   => 'GSO E-Ticketing System API'
         ]);

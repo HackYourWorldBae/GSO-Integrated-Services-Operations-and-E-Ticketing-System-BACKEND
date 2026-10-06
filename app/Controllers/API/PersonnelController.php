@@ -544,18 +544,80 @@ class PersonnelController extends BaseController
                                 ->get()->getRowArray();
                         }
 
-                        // Match B4: Check if personnel.id was set directly to user_id
+                        // Match B4: Unit + first name heuristic (e.g. roster name is "Maria" or "Maria Santos")
+                        if (!$personnel && $unitId && !empty($firstName) && mb_strlen($firstName) >= 2) {
+                            $personnel = $db->table('personnel')
+                                ->where('unit_id', $unitId)
+                                ->like('name', $firstName)
+                                ->get()->getRowArray();
+                        }
+
+                        // Match B5: Email username match (e.g. maria@personnel.com -> matches "Maria")
+                        $emailLocal = explode('@', $user['email'] ?? '')[0] ?? '';
+                        if (!$personnel && !empty($emailLocal) && mb_strlen($emailLocal) >= 3) {
+                            $builder = $db->table('personnel')->like('name', $emailLocal);
+                            if ($unitId) {
+                                $builder->where('unit_id', $unitId);
+                            }
+                            $personnel = $builder->get()->getRowArray();
+                        }
+
+                        // Match B6: First name match across ANY unit
+                        if (!$personnel && !empty($firstName) && mb_strlen($firstName) >= 3) {
+                            $personnel = $db->table('personnel')
+                                ->like('name', $firstName)
+                                ->get()->getRowArray();
+                        }
+
+                        // Match B7: Check if personnel.id was set directly to user_id
                         if (!$personnel) {
                             $personnel = $db->table('personnel')->where('id', $currentUserId)->get()->getRowArray();
                         }
 
-                        // Auto-heal: If located via name heuristics and user_id column exists, bind user_id to the personnel record
+                        // Match B8: If in this unit there is an unlinked personnel member
+                        if (!$personnel && $unitId) {
+                            $unlinkedQuery = $db->table('personnel')->where('unit_id', $unitId);
+                            if ($hasUserIdCol) {
+                                $unlinkedQuery->groupStart()
+                                    ->where('user_id IS NULL')
+                                    ->orWhere('user_id', '')
+                                ->groupEnd();
+                            }
+                            $unlinkedWorkers = $unlinkedQuery->get()->getResultArray();
+                            if (count($unlinkedWorkers) === 1) {
+                                $personnel = $unlinkedWorkers[0];
+                            }
+                        }
+
+                        // Match B9: Most recently dispatched personnel in this unit (e.g. newly dispatched test ticket)
+                        if (!$personnel && $unitId) {
+                            $recentAss = $db->table('ticket_assignments ta')
+                                ->select('p.*')
+                                ->join('personnel p', 'p.id = ta.personnel_id')
+                                ->where('p.unit_id', $unitId)
+                                ->orderBy('ta.assigned_at', 'DESC')
+                                ->limit(1)
+                                ->get()->getRowArray();
+                            if ($recentAss) {
+                                $personnel = $recentAss;
+                            }
+                        }
+
+                        // Auto-heal: If located via heuristics and user_id column exists, bind user_id to the personnel record
                         if ($personnel && $hasUserIdCol && empty($personnel['user_id'])) {
                             try {
                                 $db->table('personnel')
                                     ->where('id', $personnel['id'])
                                     ->update(['user_id' => $currentUserId]);
                                 $personnel['user_id'] = $currentUserId;
+                            } catch (\Throwable $ignored) {
+                            }
+                        }
+
+                        // Auto-sync: Update user unit_id if missing
+                        if ($personnel && empty($unitId) && !empty($personnel['unit_id'])) {
+                            try {
+                                $db->table('users')->where('id', $currentUserId)->update(['unit_id' => $personnel['unit_id']]);
                             } catch (\Throwable $ignored) {
                             }
                         }

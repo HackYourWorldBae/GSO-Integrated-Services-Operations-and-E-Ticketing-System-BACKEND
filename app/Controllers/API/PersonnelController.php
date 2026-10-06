@@ -317,19 +317,329 @@ class PersonnelController extends BaseController
             return $forbidden;
         }
 
-        $personnelId = generate_uuid();
+        $createAccount = !empty($body['create_account']) || !empty($body['has_device']);
+        $userId        = null;
 
-        $this->personnelModel->insert([
-            'id'             => $personnelId,
-            'unit_id'        => $unitId,
-            'name'           => $name,
-            'specialty'      => $specialty,
-            'status'         => 'available',
-        ]);
+        if ($createAccount) {
+            $email         = trim(sanitize_string($body['email'] ?? ''));
+            $password      = (string) ($body['password'] ?? '');
+            $contactNumber = trim(sanitize_string($body['contact_number'] ?? ''));
+
+            if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->errorResponse('A valid email address is required to create a personnel portal account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            if (mb_strlen($password) < 8) {
+                return $this->errorResponse('Password must be at least 8 characters long.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $userModel = new \App\Models\UserModel();
+            if ($userModel->where('email', $email)->first()) {
+                return $this->errorResponse('This email address is already registered to another account.', [], ResponseInterface::HTTP_CONFLICT);
+            }
+
+            $firstName = !empty($body['first_name']) ? sanitize_string($body['first_name']) : (explode(' ', $name)[0] ?? 'Staff');
+            $lastNameParts = !empty($body['last_name']) ? [sanitize_string($body['last_name'])] : array_slice(explode(' ', $name), 1);
+            if (!empty($body['name_extension'])) {
+                $lastNameParts[] = sanitize_string($body['name_extension']);
+            }
+            $lastName = !empty($lastNameParts) ? implode(' ', $lastNameParts) : 'Member';
+
+            $userId = generate_uuid();
+            $userData = [
+                'id'                          => $userId,
+                'first_name'                  => $firstName,
+                'last_name'                   => $lastName,
+                'email'                       => $email,
+                'password_hash'               => password_hash($password, PASSWORD_DEFAULT),
+                'contact_number'              => !empty($contactNumber) ? $contactNumber : null,
+                'role'                        => 'worker',
+                'unit_id'                     => $unitId,
+                'status'                      => 'Active',
+                'is_verified'                 => 1, // Directly provisioned by Unit Head
+                'email_notifications_enabled' => 1,
+            ];
+
+            if (!$userModel->skipValidation(true)->insert($userData)) {
+                return $this->errorResponse('Failed to provision personnel login account.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+        }
+
+        $personnelId = generate_uuid();
+        $insertPersonnel = [
+            'id'        => $personnelId,
+            'unit_id'   => $unitId,
+            'name'      => $name,
+            'specialty' => $specialty,
+            'status'    => 'available',
+        ];
+
+        if ($userId) {
+            $insertPersonnel['user_id'] = $userId;
+        }
+
+        $this->personnelModel->insert($insertPersonnel);
 
         return $this->successResponse('Personnel created successfully.', [
             'personnel_id' => $personnelId,
+            'user_id'      => $userId,
+            'has_account'  => (bool) $userId,
         ], ResponseInterface::HTTP_CREATED);
+    }
+
+    /**
+     * Provision a user login account for an existing personnel member who now has an accessible device.
+     * POST /api/v1/personnel/:id/create-account
+     */
+    public function createAccount(string $personnelId): ResponseInterface
+    {
+        $worker = $this->personnelModel->find($personnelId);
+        if (!$worker) {
+            return $this->notFoundResponse('Personnel');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $worker['unit_id'])) {
+            return $forbidden;
+        }
+
+        if (!empty($worker['user_id'])) {
+            return $this->errorResponse('This personnel already has an active portal account linked.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $body          = $this->request->getJSON(true) ?? [];
+        $email         = trim(sanitize_string($body['email'] ?? ''));
+        $password      = (string) ($body['password'] ?? '');
+        $contactNumber = trim(sanitize_string($body['contact_number'] ?? ''));
+
+        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->errorResponse('A valid email address is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (mb_strlen($password) < 8) {
+            return $this->errorResponse('Password must be at least 8 characters long.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $userModel = new \App\Models\UserModel();
+        if ($userModel->where('email', $email)->first()) {
+            return $this->errorResponse('This email address is already registered to another account.', [], ResponseInterface::HTTP_CONFLICT);
+        }
+
+        $nameParts = explode(' ', trim($worker['name']));
+        $firstName = $nameParts[0] ?? 'Staff';
+        $lastName  = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : 'Personnel';
+
+        $userId = generate_uuid();
+        $userData = [
+            'id'                          => $userId,
+            'first_name'                  => $firstName,
+            'last_name'                   => $lastName,
+            'email'                       => $email,
+            'password_hash'               => password_hash($password, PASSWORD_DEFAULT),
+            'contact_number'              => !empty($contactNumber) ? $contactNumber : null,
+            'role'                        => 'worker',
+            'unit_id'                     => (int) $worker['unit_id'],
+            'status'                      => 'Active',
+            'is_verified'                 => 1,
+            'email_notifications_enabled' => 1,
+        ];
+
+        if (!$userModel->skipValidation(true)->insert($userData)) {
+            return $this->errorResponse('Failed to create account in database.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $this->personnelModel->update($personnelId, [
+            'user_id'    => $userId,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return $this->successResponse('Personnel portal account created successfully.', [
+            'personnel_id' => $personnelId,
+            'user_id'      => $userId,
+            'email'        => $email,
+        ], ResponseInterface::HTTP_CREATED);
+    }
+
+    /**
+     * Personnel Dashboard: Returns only tickets assigned to this personnel,
+     * along with complete ticket info and the full work crew / team for that job.
+     * GET /api/v1/personnel/my-dashboard
+     * GET /api/v1/worker/dashboard
+     */
+    public function myDashboard(): ResponseInterface
+    {
+        $currentUserId = $this->currentUserId();
+        $currentRole   = $this->currentUserRole();
+        $db            = \Config\Database::connect();
+
+        $personnel = null;
+
+        // If worker role, strictly load their own assigned personnel profile
+        if ($currentRole === 'worker') {
+            $personnel = $this->personnelModel->findByUserId($currentUserId);
+            if (!$personnel) {
+                // Fallback attempt: find by matching user name
+                $user = (new \App\Models\UserModel())->find($currentUserId);
+                if ($user) {
+                    $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+                    $personnel = $this->personnelModel->where('name', $fullName)->first();
+                }
+            }
+        } else {
+            // Admin, Director, or Superadmin previewing a personnel's dashboard
+            $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
+            if (!empty($targetPersonnelId)) {
+                $personnel = $this->personnelModel->find($targetPersonnelId);
+            } else {
+                // If no specific worker requested, find worker linked to user or first available
+                $personnel = $this->personnelModel->findByUserId($currentUserId);
+                if (!$personnel) {
+                    $unitId = $this->currentUserUnitId();
+                    if ($unitId) {
+                        $personnel = $this->personnelModel->where('unit_id', $unitId)->first();
+                    } else {
+                        $personnel = $this->personnelModel->first();
+                    }
+                }
+            }
+        }
+
+        if (!$personnel) {
+            return $this->successResponse('No personnel profile linked to this account.', [
+                'personnel'       => null,
+                'assignments'     => [],
+                'active_count'    => 0,
+                'completed_count' => 0,
+                'total_count'     => 0,
+            ]);
+        }
+
+        // Fetch all assignments for this personnel
+        $rawAssignments = $db->table('ticket_assignments ta')
+            ->select('
+                ta.id as assignment_id,
+                ta.ticket_id,
+                ta.implementation_date,
+                ta.working_days,
+                ta.task_notes,
+                ta.dispatcher_notes,
+                ta.is_emergency,
+                ta.status as assignment_status,
+                ta.assigned_at,
+                ta.dispatched_at,
+                ta.completed_at,
+                t.service_type,
+                t.description,
+                t.status as ticket_status,
+                t.status_label,
+                t.location,
+                t.office_room,
+                t.submitted_at,
+                t.target_completion_date,
+                t.extended_completion_date,
+                t.is_project,
+                t.project_title,
+                t.eodb_tier,
+                u.name as unit_name,
+                u.code as unit_code,
+                req.first_name as requestor_first_name,
+                req.last_name as requestor_last_name,
+                req.contact_number as requestor_contact
+            ')
+            ->join('tickets t', 't.id = ta.ticket_id', 'inner')
+            ->join('units u', 'u.id = t.unit_id', 'left')
+            ->join('users req', 'req.id = t.user_id', 'left')
+            ->where('ta.personnel_id', $personnel['id'])
+            ->orderBy('ta.completed_at IS NOT NULL', 'ASC')
+            ->orderBy('ta.is_emergency', 'DESC')
+            ->orderBy('ta.assigned_at', 'DESC')
+            ->get()->getResultArray();
+
+        $ticketIds = array_values(array_unique(array_filter(array_column($rawAssignments, 'ticket_id'))));
+        $teamMembersByTicket = [];
+
+        if (!empty($ticketIds)) {
+            $allTeamRows = $db->table('ticket_assignments ta')
+                ->select('
+                    ta.ticket_id,
+                    ta.id as assignment_id,
+                    ta.task_notes,
+                    ta.assigned_at,
+                    ta.completed_at,
+                    p.id as personnel_id,
+                    p.name as personnel_name,
+                    p.specialty,
+                    p.status as personnel_status,
+                    u.code as unit_code
+                ')
+                ->join('personnel p', 'p.id = ta.personnel_id', 'inner')
+                ->join('units u', 'u.id = p.unit_id', 'left')
+                ->whereIn('ta.ticket_id', $ticketIds)
+                ->orderBy('p.id = ' . $db->escape($personnel['id']), 'DESC') // current worker first
+                ->orderBy('p.name', 'ASC')
+                ->get()->getResultArray();
+
+            foreach ($allTeamRows as $row) {
+                $row['is_you'] = ($row['personnel_id'] === $personnel['id']);
+                $teamMembersByTicket[$row['ticket_id']][] = $row;
+            }
+        }
+
+        $formattedAssignments = [];
+        $activeCount    = 0;
+        $completedCount = 0;
+
+        foreach ($rawAssignments as $a) {
+            $isCompleted = !empty($a['completed_at']);
+            if ($isCompleted) {
+                $completedCount++;
+            } else {
+                $activeCount++;
+            }
+
+            $reqParts = array_filter([$a['requestor_first_name'] ?? '', $a['requestor_last_name'] ?? '']);
+            $requestorName = !empty($reqParts) ? implode(' ', $reqParts) : 'BSU Client';
+
+            $team = $teamMembersByTicket[$a['ticket_id']] ?? [];
+
+            $formattedAssignments[] = [
+                'assignment_id'            => (int) $a['assignment_id'],
+                'ticket_id'                => $a['ticket_id'],
+                'service_type'             => $a['service_type'] ?: 'Facilities Maintenance',
+                'description'              => $a['description'] ?: 'No additional description provided.',
+                'ticket_status'            => $a['ticket_status'],
+                'status_label'             => $a['status_label'] ?: ucfirst((string)$a['ticket_status']),
+                'assignment_status'        => $a['assignment_status'],
+                'location'                 => $a['location'] ?: 'BSU Campus',
+                'office_room'              => $a['office_room'] ?: 'General Area',
+                'implementation_date'      => $a['implementation_date'],
+                'target_completion_date'   => $a['target_completion_date'],
+                'extended_completion_date' => $a['extended_completion_date'],
+                'working_days'             => (int) ($a['working_days'] ?? 1),
+                'is_emergency'             => (int) ($a['is_emergency'] ?? 0),
+                'is_project'               => (int) ($a['is_project'] ?? 0),
+                'project_title'            => $a['project_title'],
+                'eodb_tier'                => $a['eodb_tier'],
+                'dispatcher_notes'         => $a['dispatcher_notes'],
+                'task_notes'               => $a['task_notes'],
+                'assigned_at'              => $a['assigned_at'],
+                'dispatched_at'            => $a['dispatched_at'],
+                'completed_at'             => $a['completed_at'],
+                'unit_name'                => $a['unit_name'] ?: 'General Services Office',
+                'unit_code'                => $a['unit_code'] ?: 'GSO',
+                'requestor_name'           => $requestorName,
+                'requestor_contact'        => $a['requestor_contact'],
+                'team'                     => $team,
+                'team_count'               => count($team),
+            ];
+        }
+
+        return $this->successResponse('Personnel dashboard data retrieved.', [
+            'personnel'       => $personnel,
+            'assignments'     => $formattedAssignments,
+            'active_count'    => $activeCount,
+            'completed_count' => $completedCount,
+            'total_count'     => count($formattedAssignments),
+        ]);
     }
 
     /**

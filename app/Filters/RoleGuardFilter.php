@@ -74,7 +74,7 @@ class RoleGuardFilter implements FilterInterface
 
         // Check explicit feature restrictions if disabled in the matrix
         $uriPath = $request->getUri()->getPath();
-        if (str_contains($uriPath, 'personnel')) {
+        if (str_contains($uriPath, 'personnel') && !str_contains($uriPath, 'my-dashboard')) {
             $method = strtolower($request->getMethod());
 
             // Mutating personnel/roster operations require explicit management permissions

@@ -151,6 +151,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('personnel/categories/(:num)',     'PersonnelController::updateCategory/$1',  ['filter' => 'role:admin']);
         $routes->delete('personnel/categories/(:num)',    'PersonnelController::deleteCategory/$1',  ['filter' => 'role:admin']);
 
+        // -- Personnel Dashboard (Worker, Admin, Superadmin) --
+        // NOTE: Static routes must precede wildcard /personnel/(:segment)
+        $routes->get('personnel/my-dashboard',             'PersonnelController::myDashboard',        ['filter' => 'role:worker,admin,director,superadmin']);
+        $routes->get('worker/dashboard',                   'PersonnelController::myDashboard',        ['filter' => 'role:worker,admin,director,superadmin']);
+        $routes->post('personnel/(:segment)/create-account', 'PersonnelController::createAccount/$1', ['filter' => 'role:admin,superadmin']);
+
         // -- Personnel (Admin) --
         $routes->get('personnel/(:segment)',             'PersonnelController::byUnit/$1',      ['filter' => 'role:admin,director']);
         $routes->get('personnel/(:segment)/available',  'PersonnelController::available/$1',   ['filter' => 'role:admin']);

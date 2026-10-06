@@ -66,8 +66,8 @@ BEGIN
             ALTER TABLE `users` ADD COLUMN `email_notifications_enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-account opt-in for ticket/request email updates' AFTER `is_verified`;
         END IF;
 
-        -- Update Role ENUM to include 'staff'
-        ALTER TABLE `users` MODIFY COLUMN `role` ENUM('student','employee','admin','staff','director','superadmin') NOT NULL DEFAULT 'student';
+        -- Update Role ENUM to include 'staff' and 'worker'
+        ALTER TABLE `users` MODIFY COLUMN `role` ENUM('student','employee','admin','staff','director','superadmin','worker') NOT NULL DEFAULT 'student';
         
         -- Update Status ENUM to standard system values
         ALTER TABLE `users` MODIFY COLUMN `status` ENUM('Active','Pending','Rejected','Suspended') NOT NULL DEFAULT 'Active';
@@ -79,6 +79,10 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'personnel') THEN
         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'personnel' AND column_name = 'contact_number') THEN
             ALTER TABLE `personnel` DROP COLUMN `contact_number`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'personnel' AND column_name = 'user_id') THEN
+            ALTER TABLE `personnel` ADD COLUMN `user_id` VARCHAR(36) NULL DEFAULT NULL AFTER `unit_id`;
         END IF;
     END IF;
 

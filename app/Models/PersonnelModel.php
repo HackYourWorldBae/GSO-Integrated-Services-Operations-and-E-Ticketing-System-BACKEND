@@ -21,6 +21,7 @@ class PersonnelModel extends Model
     protected $updatedField  = 'updated_at';
     protected $allowedFields = [
         'id',
+        'user_id',
         'unit_id',
         'name',
         'specialty',
@@ -46,7 +47,19 @@ class PersonnelModel extends Model
         }
 
         $personnelIds = array_column($personnel, 'id');
+        $userIds = array_values(array_filter(array_column($personnel, 'user_id')));
         
+        $userMap = [];
+        if (!empty($userIds)) {
+            $users = $db->table('users')
+                ->select('id, email, contact_number, status as user_status')
+                ->whereIn('id', $userIds)
+                ->get()->getResultArray();
+            foreach ($users as $u) {
+                $userMap[$u['id']] = $u;
+            }
+        }
+
         $assignments = $db->table('ticket_assignments ta')
             ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status, t.eodb_tier, t.target_completion_date')
             ->join('tickets t', 't.id = ta.ticket_id', 'left')
@@ -90,6 +103,11 @@ class PersonnelModel extends Model
             $p['assignments']      = $formattedAssignments;
             $p['assignment_count'] = count($formattedAssignments);
 
+            // Portal device account linkage metadata
+            $p['has_account']  = !empty($p['user_id']);
+            $p['user_email']   = $userMap[$p['user_id']]['email'] ?? null;
+            $p['user_contact'] = $userMap[$p['user_id']]['contact_number'] ?? null;
+
             // Backward compatibility fields for current/next slots
             $p['assigned_ticket_id'] = $formattedAssignments[0]['ticket_id'] ?? null;
             $p['is_project']         = $formattedAssignments[0]['is_project'] ?? 0;
@@ -111,6 +129,14 @@ class PersonnelModel extends Model
         unset($p);
 
         return $personnel;
+    }
+
+    /**
+     * Find personnel record linked to a given user ID.
+     */
+    public function findByUserId(string $userId): ?array
+    {
+        return $this->where('user_id', $userId)->first();
     }
 
     /**

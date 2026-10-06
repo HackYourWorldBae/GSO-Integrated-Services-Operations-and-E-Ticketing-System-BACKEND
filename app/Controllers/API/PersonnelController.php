@@ -472,34 +472,92 @@ class PersonnelController extends BaseController
         $db            = \Config\Database::connect();
 
         $personnel = null;
+        $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
 
-        // If worker role, strictly load their own assigned personnel profile
-        if ($currentRole === 'worker') {
-            $personnel = $this->personnelModel->findByUserId($currentUserId);
+        // 1. If an explicit personnel_id query param is passed by an administrator / director previewing
+        if (!empty($targetPersonnelId) && in_array($currentRole, ['admin', 'director', 'superadmin', 'staff'], true)) {
+            $personnel = $this->personnelModel->find($targetPersonnelId);
+        }
+
+        // 2. Resolve the personnel profile belonging to the authenticated account
+        if (!$personnel && !empty($currentUserId)) {
+            // Strategy A: Direct user_id foreign key link
+            try {
+                $personnel = $this->personnelModel->findByUserId($currentUserId);
+            } catch (\Throwable $e) {
+                $personnel = null;
+            }
+
+            // Strategy B: Fallback name, unit, and user profile heuristics
             if (!$personnel) {
-                // Fallback attempt: find by matching user name
                 $user = (new \App\Models\UserModel())->find($currentUserId);
                 if ($user) {
-                    $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
-                    $personnel = $this->personnelModel->where('name', $fullName)->first();
-                }
-            }
-        } else {
-            // Admin, Director, or Superadmin previewing a personnel's dashboard
-            $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
-            if (!empty($targetPersonnelId)) {
-                $personnel = $this->personnelModel->find($targetPersonnelId);
-            } else {
-                // If no specific worker requested, find worker linked to user or first available
-                $personnel = $this->personnelModel->findByUserId($currentUserId);
-                if (!$personnel) {
-                    $unitId = $this->currentUserUnitId();
-                    if ($unitId) {
-                        $personnel = $this->personnelModel->where('unit_id', $unitId)->first();
-                    } else {
-                        $personnel = $this->personnelModel->first();
+                    $firstName = trim($user['first_name'] ?? '');
+                    $lastName  = trim($user['last_name'] ?? '');
+                    $fullName  = trim($firstName . ' ' . $lastName);
+                    $unitId    = !empty($user['unit_id']) ? (int) $user['unit_id'] : null;
+
+                    // Match B1: Exact full name
+                    if (!empty($fullName)) {
+                        $builder = $this->personnelModel->where('name', $fullName);
+                        if ($unitId) {
+                            $builder->where('unit_id', $unitId);
+                        }
+                        $personnel = $builder->first();
+
+                        if (!$personnel) {
+                            $personnel = $this->personnelModel->where('name', $fullName)->first();
+                        }
+                    }
+
+                    // Match B2: Personnel name contains both first name and last name (e.g. middle initials or suffixes)
+                    if (!$personnel && !empty($firstName) && !empty($lastName)) {
+                        $builder = $this->personnelModel
+                            ->like('name', $firstName)
+                            ->like('name', $lastName);
+                        if ($unitId) {
+                            $builder->where('unit_id', $unitId);
+                        }
+                        $personnel = $builder->first();
+
+                        if (!$personnel) {
+                            $personnel = $this->personnelModel
+                                ->like('name', $firstName)
+                                ->like('name', $lastName)
+                                ->first();
+                        }
+                    }
+
+                    // Match B3: Unit + last name heuristic
+                    if (!$personnel && $unitId && !empty($lastName)) {
+                        $personnel = $this->personnelModel
+                            ->where('unit_id', $unitId)
+                            ->like('name', $lastName)
+                            ->first();
+                    }
+
+                    // Auto-heal: If located via name heuristics, bind user_id to the personnel record for instantaneous future queries
+                    if ($personnel && empty($personnel['user_id'])) {
+                        try {
+                            $db->table('personnel')
+                                ->where('id', $personnel['id'])
+                                ->update(['user_id' => $currentUserId]);
+                            $personnel['user_id'] = $currentUserId;
+                        } catch (\Throwable $ignored) {
+                            // Column might not exist in un-migrated database
+                        }
                     }
                 }
+            }
+        }
+
+        // 3. Fallback for privileged preview accounts (Admin/Director/Superadmin) who didn't supply ?personnel_id
+        if (!$personnel && in_array($currentRole, ['admin', 'director', 'superadmin'], true)) {
+            $unitId = $this->currentUserUnitId();
+            if ($unitId) {
+                $personnel = $this->personnelModel->where('unit_id', $unitId)->first();
+            } else {
+                $personnel = $this->personnelModel->first();
             }
         }
 
@@ -513,7 +571,14 @@ class PersonnelController extends BaseController
             ]);
         }
 
-        // Fetch all assignments for this personnel
+        // Identify all possible ID aliases for this worker (personnel table UUID and authentication user UUID)
+        $targetIds = array_values(array_unique(array_filter([
+            $personnel['id'],
+            $personnel['user_id'] ?? null,
+            $currentUserId ?? null,
+        ])));
+
+        // Fetch all assignments for this personnel using LEFT JOIN on tickets to safeguard against missing ticket metadata
         $rawAssignments = $db->table('ticket_assignments ta')
             ->select('
                 ta.id as assignment_id,
@@ -545,10 +610,10 @@ class PersonnelController extends BaseController
                 req.last_name as requestor_last_name,
                 req.contact_number as requestor_contact
             ')
-            ->join('tickets t', 't.id = ta.ticket_id', 'inner')
+            ->join('tickets t', 't.id = ta.ticket_id', 'left')
             ->join('units u', 'u.id = t.unit_id', 'left')
             ->join('users req', 'req.id = t.user_id', 'left')
-            ->where('ta.personnel_id', $personnel['id'])
+            ->whereIn('ta.personnel_id', $targetIds)
             ->orderBy('ta.completed_at IS NOT NULL', 'ASC')
             ->orderBy('ta.is_emergency', 'DESC')
             ->orderBy('ta.assigned_at', 'DESC')
@@ -565,13 +630,14 @@ class PersonnelController extends BaseController
                     ta.task_notes,
                     ta.assigned_at,
                     ta.completed_at,
-                    p.id as personnel_id,
-                    p.name as personnel_name,
-                    p.specialty,
-                    p.status as personnel_status,
-                    u.code as unit_code
+                    COALESCE(p.id, ta.personnel_id) as personnel_id,
+                    COALESCE(p.name, CONCAT(COALESCE(u_staff.first_name, ""), " ", COALESCE(u_staff.last_name, ""))) as personnel_name,
+                    COALESCE(p.specialty, "Field Operations Specialist") as specialty,
+                    COALESCE(p.status, "working") as personnel_status,
+                    COALESCE(u.code, "GSO") as unit_code
                 ')
-                ->join('personnel p', 'p.id = ta.personnel_id', 'inner')
+                ->join('personnel p', 'p.id = ta.personnel_id', 'left')
+                ->join('users u_staff', 'u_staff.id = ta.personnel_id', 'left')
                 ->join('units u', 'u.id = p.unit_id', 'left')
                 ->whereIn('ta.ticket_id', $ticketIds)
                 ->orderBy('p.id = ' . $db->escape($personnel['id']), 'DESC') // current worker first
@@ -579,7 +645,9 @@ class PersonnelController extends BaseController
                 ->get()->getResultArray();
 
             foreach ($allTeamRows as $row) {
-                $row['is_you'] = ($row['personnel_id'] === $personnel['id']);
+                $cleanedName = trim((string)$row['personnel_name']);
+                $row['personnel_name'] = !empty($cleanedName) ? $cleanedName : 'Team Member';
+                $row['is_you'] = in_array($row['personnel_id'], $targetIds, true);
                 $teamMembersByTicket[$row['ticket_id']][] = $row;
             }
         }
@@ -589,7 +657,11 @@ class PersonnelController extends BaseController
         $completedCount = 0;
 
         foreach ($rawAssignments as $a) {
-            $isCompleted = !empty($a['completed_at']);
+            $rawCompleted = $a['completed_at'] ?? null;
+            $isCompleted  = !empty($rawCompleted)
+                && $rawCompleted !== '0000-00-00 00:00:00'
+                && !str_starts_with((string)$rawCompleted, '0000-00-00');
+
             if ($isCompleted) {
                 $completedCount++;
             } else {
@@ -623,7 +695,7 @@ class PersonnelController extends BaseController
                 'task_notes'               => $a['task_notes'],
                 'assigned_at'              => $a['assigned_at'],
                 'dispatched_at'            => $a['dispatched_at'],
-                'completed_at'             => $a['completed_at'],
+                'completed_at'             => $isCompleted ? $a['completed_at'] : null,
                 'unit_name'                => $a['unit_name'] ?: 'General Services Office',
                 'unit_code'                => $a['unit_code'] ?: 'GSO',
                 'requestor_name'           => $requestorName,

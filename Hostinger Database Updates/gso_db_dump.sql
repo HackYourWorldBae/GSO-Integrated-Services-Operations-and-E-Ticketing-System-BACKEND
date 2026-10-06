@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` varchar(255) NOT NULL,
   `password_hash` text NOT NULL,
   `contact_number` varchar(30) DEFAULT NULL,
-  `role` enum('student','employee','admin','staff','director','superadmin') NOT NULL DEFAULT 'student',
+  `role` enum('student','employee','admin','staff','director','superadmin','worker') NOT NULL DEFAULT 'student',
   `unit_id` int(11) UNSIGNED DEFAULT NULL,
   `student_id_number` varchar(50) DEFAULT NULL,
   `student_type` varchar(50) DEFAULT NULL,
@@ -764,6 +764,22 @@ CREATE TABLE IF NOT EXISTS `ticket_collaborations` (
   CONSTRAINT `fk_collab_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_collab_req_unit` FOREIGN KEY (`requesting_unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_collab_collab_unit` FOREIGN KEY (`collaborating_unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `personnel`
+CREATE TABLE IF NOT EXISTS `personnel` (
+  `id` varchar(36) NOT NULL,
+  `user_id` varchar(36) DEFAULT NULL,
+  `unit_id` int(11) UNSIGNED NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `specialty` varchar(100) NOT NULL,
+  `status` enum('available','working','on_leave') NOT NULL DEFAULT 'available',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_personnel_user` (`user_id`),
+  KEY `idx_personnel_unit_status` (`unit_id`,`status`),
+  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `ticket_assignments`

@@ -153,8 +153,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
 
         // -- Personnel Dashboard (Worker, Admin, Superadmin) --
         // NOTE: Static routes must precede wildcard /personnel/(:segment)
-        $routes->get('personnel/my-dashboard',             'PersonnelController::myDashboard',        ['filter' => 'role:worker,admin,director,superadmin']);
-        $routes->get('worker/dashboard',                   'PersonnelController::myDashboard',        ['filter' => 'role:worker,admin,director,superadmin']);
+        $routes->get('personnel/my-dashboard',             'PersonnelController::myDashboard',        ['filter' => 'role:worker,employee,staff,student,admin,director,superadmin']);
+        $routes->get('worker/dashboard',                   'PersonnelController::myDashboard',        ['filter' => 'role:worker,employee,staff,student,admin,director,superadmin']);
         $routes->post('personnel/(:segment)/create-account', 'PersonnelController::createAccount/$1', ['filter' => 'role:admin,superadmin']);
 
         // -- Personnel (Admin) --

@@ -26,6 +26,7 @@ class PersonnelModel extends Model
         'name',
         'specialty',
         'status',
+        'updated_at',
     ];
 
     protected $validationRules = [];

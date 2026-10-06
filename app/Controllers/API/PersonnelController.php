@@ -467,251 +467,332 @@ class PersonnelController extends BaseController
      */
     public function myDashboard(): ResponseInterface
     {
-        $currentUserId = $this->currentUserId();
-        $currentRole   = $this->currentUserRole();
-        $db            = \Config\Database::connect();
+        try {
+            $currentUserId = $this->currentUserId();
+            $currentRole   = $this->currentUserRole();
+            $db            = \Config\Database::connect();
 
-        $personnel = null;
-        $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
+            $personnel = null;
+            $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
 
-        // 1. If an explicit personnel_id query param is passed by an administrator / director previewing
-        if (!empty($targetPersonnelId) && in_array($currentRole, ['admin', 'director', 'superadmin', 'staff'], true)) {
-            $personnel = $this->personnelModel->find($targetPersonnelId);
-        }
-
-        // 2. Resolve the personnel profile belonging to the authenticated account
-        if (!$personnel && !empty($currentUserId)) {
-            // Strategy A: Direct user_id foreign key link
-            try {
-                $personnel = $this->personnelModel->findByUserId($currentUserId);
-            } catch (\Throwable $e) {
-                $personnel = null;
+            // 1. If an explicit personnel_id query param is passed by an administrator / director previewing
+            if (!empty($targetPersonnelId) && in_array($currentRole, ['admin', 'director', 'superadmin', 'staff'], true)) {
+                $personnel = $db->table('personnel')->where('id', $targetPersonnelId)->get()->getRowArray();
             }
 
-            // Strategy B: Fallback name, unit, and user profile heuristics
-            if (!$personnel) {
-                $user = (new \App\Models\UserModel())->find($currentUserId);
-                if ($user) {
-                    $firstName = trim($user['first_name'] ?? '');
-                    $lastName  = trim($user['last_name'] ?? '');
-                    $fullName  = trim($firstName . ' ' . $lastName);
-                    $unitId    = !empty($user['unit_id']) ? (int) $user['unit_id'] : null;
+            // 2. Resolve the personnel profile belonging to the authenticated account
+            if (!$personnel && !empty($currentUserId)) {
+                $hasUserIdCol = $db->fieldExists('user_id', 'personnel');
 
-                    // Match B1: Exact full name
-                    if (!empty($fullName)) {
-                        $builder = $this->personnelModel->where('name', $fullName);
-                        if ($unitId) {
-                            $builder->where('unit_id', $unitId);
-                        }
-                        $personnel = $builder->first();
-
-                        if (!$personnel) {
-                            $personnel = $this->personnelModel->where('name', $fullName)->first();
-                        }
+                // Strategy A: Direct user_id foreign key link (if column exists)
+                if ($hasUserIdCol) {
+                    try {
+                        $personnel = $db->table('personnel')
+                            ->where('user_id', $currentUserId)
+                            ->get()
+                            ->getRowArray();
+                    } catch (\Throwable $ignored) {
+                        $personnel = null;
                     }
+                }
 
-                    // Match B2: Personnel name contains both first name and last name (e.g. middle initials or suffixes)
-                    if (!$personnel && !empty($firstName) && !empty($lastName)) {
-                        $builder = $this->personnelModel
-                            ->like('name', $firstName)
-                            ->like('name', $lastName);
-                        if ($unitId) {
-                            $builder->where('unit_id', $unitId);
+                // Strategy B: Fallback name, unit, and user profile heuristics
+                if (!$personnel) {
+                    $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
+                    if ($user) {
+                        $firstName = trim($user['first_name'] ?? '');
+                        $lastName  = trim($user['last_name'] ?? '');
+                        $fullName  = trim($firstName . ' ' . $lastName);
+                        $unitId    = !empty($user['unit_id']) ? (int) $user['unit_id'] : null;
+
+                        // Match B1: Exact full name
+                        if (!empty($fullName)) {
+                            $builder = $db->table('personnel')->where('name', $fullName);
+                            if ($unitId) {
+                                $builder->where('unit_id', $unitId);
+                            }
+                            $personnel = $builder->get()->getRowArray();
+
+                            if (!$personnel) {
+                                $personnel = $db->table('personnel')->where('name', $fullName)->get()->getRowArray();
+                            }
                         }
-                        $personnel = $builder->first();
 
-                        if (!$personnel) {
-                            $personnel = $this->personnelModel
+                        // Match B2: Personnel name contains both first name and last name
+                        if (!$personnel && !empty($firstName) && !empty($lastName)) {
+                            $builder = $db->table('personnel')
                                 ->like('name', $firstName)
-                                ->like('name', $lastName)
-                                ->first();
+                                ->like('name', $lastName);
+                            if ($unitId) {
+                                $builder->where('unit_id', $unitId);
+                            }
+                            $personnel = $builder->get()->getRowArray();
+
+                            if (!$personnel) {
+                                $personnel = $db->table('personnel')
+                                    ->like('name', $firstName)
+                                    ->like('name', $lastName)
+                                    ->get()->getRowArray();
+                            }
                         }
-                    }
 
-                    // Match B3: Unit + last name heuristic
-                    if (!$personnel && $unitId && !empty($lastName)) {
-                        $personnel = $this->personnelModel
-                            ->where('unit_id', $unitId)
-                            ->like('name', $lastName)
-                            ->first();
-                    }
+                        // Match B3: Unit + last name heuristic
+                        if (!$personnel && $unitId && !empty($lastName)) {
+                            $personnel = $db->table('personnel')
+                                ->where('unit_id', $unitId)
+                                ->like('name', $lastName)
+                                ->get()->getRowArray();
+                        }
 
-                    // Auto-heal: If located via name heuristics, bind user_id to the personnel record for instantaneous future queries
-                    if ($personnel && empty($personnel['user_id'])) {
-                        try {
-                            $db->table('personnel')
-                                ->where('id', $personnel['id'])
-                                ->update(['user_id' => $currentUserId]);
-                            $personnel['user_id'] = $currentUserId;
-                        } catch (\Throwable $ignored) {
-                            // Column might not exist in un-migrated database
+                        // Match B4: Check if personnel.id was set directly to user_id
+                        if (!$personnel) {
+                            $personnel = $db->table('personnel')->where('id', $currentUserId)->get()->getRowArray();
+                        }
+
+                        // Auto-heal: If located via name heuristics and user_id column exists, bind user_id to the personnel record
+                        if ($personnel && $hasUserIdCol && empty($personnel['user_id'])) {
+                            try {
+                                $db->table('personnel')
+                                    ->where('id', $personnel['id'])
+                                    ->update(['user_id' => $currentUserId]);
+                                $personnel['user_id'] = $currentUserId;
+                            } catch (\Throwable $ignored) {
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 3. Fallback for privileged preview accounts (Admin/Director/Superadmin) who didn't supply ?personnel_id
-        if (!$personnel && in_array($currentRole, ['admin', 'director', 'superadmin'], true)) {
-            $unitId = $this->currentUserUnitId();
-            if ($unitId) {
-                $personnel = $this->personnelModel->where('unit_id', $unitId)->first();
-            } else {
-                $personnel = $this->personnelModel->first();
+            // 3. Fallback: If still no personnel profile found, but the user is an authenticated worker, synthesize a profile
+            if (!$personnel && !empty($currentUserId)) {
+                $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
+                if ($user) {
+                    $firstName = trim($user['first_name'] ?? '');
+                    $lastName  = trim($user['last_name'] ?? '');
+                    $fullName  = trim($firstName . ' ' . $lastName);
+                    if (empty($fullName)) {
+                        $fullName = $user['email'] ?? 'Field Worker';
+                    }
+                    $personnel = [
+                        'id'        => $currentUserId,
+                        'user_id'   => $currentUserId,
+                        'unit_id'   => !empty($user['unit_id']) ? (int) $user['unit_id'] : 1,
+                        'name'      => $fullName,
+                        'specialty' => 'Field Operations Specialist',
+                        'status'    => 'available',
+                    ];
+                }
             }
-        }
 
-        if (!$personnel) {
-            return $this->successResponse('No personnel profile linked to this account.', [
-                'personnel'       => null,
-                'assignments'     => [],
-                'active_count'    => 0,
-                'completed_count' => 0,
-                'total_count'     => 0,
-            ]);
-        }
+            // 4. Fallback for privileged preview accounts (Admin/Director/Superadmin) who didn't supply ?personnel_id
+            if (!$personnel && in_array($currentRole, ['admin', 'director', 'superadmin'], true)) {
+                $unitId = $this->currentUserUnitId();
+                if ($unitId) {
+                    $personnel = $db->table('personnel')->where('unit_id', $unitId)->get()->getRowArray();
+                } else {
+                    $personnel = $db->table('personnel')->get()->getRowArray();
+                }
+            }
 
-        // Identify all possible ID aliases for this worker (personnel table UUID and authentication user UUID)
-        $targetIds = array_values(array_unique(array_filter([
-            $personnel['id'],
-            $personnel['user_id'] ?? null,
-            $currentUserId ?? null,
-        ])));
+            if (!$personnel) {
+                return $this->successResponse('No personnel profile linked to this account.', [
+                    'personnel'       => null,
+                    'assignments'     => [],
+                    'active_count'    => 0,
+                    'completed_count' => 0,
+                    'total_count'     => 0,
+                ]);
+            }
 
-        // Fetch all assignments for this personnel using LEFT JOIN on tickets to safeguard against missing ticket metadata
-        $rawAssignments = $db->table('ticket_assignments ta')
-            ->select('
-                ta.id as assignment_id,
-                ta.ticket_id,
-                ta.implementation_date,
-                ta.working_days,
-                ta.task_notes,
-                ta.dispatcher_notes,
-                ta.is_emergency,
-                ta.status as assignment_status,
-                ta.assigned_at,
-                ta.dispatched_at,
-                ta.completed_at,
-                t.service_type,
-                t.description,
-                t.status as ticket_status,
-                t.status_label,
-                t.location,
-                t.office_room,
-                t.submitted_at,
-                t.target_completion_date,
-                t.extended_completion_date,
-                t.is_project,
-                t.project_title,
-                t.eodb_tier,
-                u.name as unit_name,
-                u.code as unit_code,
-                req.first_name as requestor_first_name,
-                req.last_name as requestor_last_name,
-                req.contact_number as requestor_contact
-            ')
-            ->join('tickets t', 't.id = ta.ticket_id', 'left')
-            ->join('units u', 'u.id = t.unit_id', 'left')
-            ->join('users req', 'req.id = t.user_id', 'left')
-            ->whereIn('ta.personnel_id', $targetIds)
-            ->orderBy('ta.completed_at IS NOT NULL', 'ASC')
-            ->orderBy('ta.is_emergency', 'DESC')
-            ->orderBy('ta.assigned_at', 'DESC')
-            ->get()->getResultArray();
+            // Identify all possible ID aliases for this worker (personnel table UUID and authentication user UUID)
+            $targetIds = array_values(array_unique(array_filter([
+                $personnel['id'] ?? null,
+                $personnel['user_id'] ?? null,
+                $currentUserId ?? null,
+            ])));
 
-        $ticketIds = array_values(array_unique(array_filter(array_column($rawAssignments, 'ticket_id'))));
-        $teamMembersByTicket = [];
+            if (empty($targetIds)) {
+                return $this->successResponse('Personnel dashboard data retrieved.', [
+                    'personnel'       => $personnel,
+                    'assignments'     => [],
+                    'active_count'    => 0,
+                    'completed_count' => 0,
+                    'total_count'     => 0,
+                ]);
+            }
 
-        if (!empty($ticketIds)) {
-            $allTeamRows = $db->table('ticket_assignments ta')
+            // Fetch all assignments for this personnel using LEFT JOIN on tickets to safeguard against missing ticket metadata
+            $rawAssignments = $db->table('ticket_assignments ta')
                 ->select('
-                    ta.ticket_id,
                     ta.id as assignment_id,
+                    ta.ticket_id,
+                    ta.personnel_id,
+                    ta.implementation_date,
+                    ta.working_days,
                     ta.task_notes,
+                    ta.dispatcher_notes,
+                    ta.is_emergency,
+                    ta.status as assignment_status,
                     ta.assigned_at,
+                    ta.dispatched_at,
                     ta.completed_at,
-                    COALESCE(p.id, ta.personnel_id) as personnel_id,
-                    COALESCE(p.name, CONCAT(COALESCE(u_staff.first_name, ""), " ", COALESCE(u_staff.last_name, ""))) as personnel_name,
-                    COALESCE(p.specialty, "Field Operations Specialist") as specialty,
-                    COALESCE(p.status, "working") as personnel_status,
-                    COALESCE(u.code, "GSO") as unit_code
+                    t.service_type,
+                    t.description,
+                    t.status as ticket_status,
+                    t.status_label,
+                    t.location,
+                    t.office_room,
+                    t.submitted_at,
+                    t.target_completion_date,
+                    t.extended_completion_date,
+                    t.is_project,
+                    t.project_title,
+                    t.eodb_tier,
+                    u.name as unit_name,
+                    u.code as unit_code,
+                    req.first_name as requestor_first_name,
+                    req.last_name as requestor_last_name,
+                    req.contact_number as requestor_contact
                 ')
-                ->join('personnel p', 'p.id = ta.personnel_id', 'left')
-                ->join('users u_staff', 'u_staff.id = ta.personnel_id', 'left')
-                ->join('units u', 'u.id = p.unit_id', 'left')
-                ->whereIn('ta.ticket_id', $ticketIds)
-                ->orderBy('p.id = ' . $db->escape($personnel['id']), 'DESC') // current worker first
-                ->orderBy('p.name', 'ASC')
+                ->join('tickets t', 't.id = ta.ticket_id', 'left')
+                ->join('units u', 'u.id = t.unit_id', 'left')
+                ->join('users req', 'req.id = t.user_id', 'left')
+                ->whereIn('ta.personnel_id', $targetIds)
+                ->orderBy('ta.assigned_at', 'DESC')
                 ->get()->getResultArray();
 
-            foreach ($allTeamRows as $row) {
-                $cleanedName = trim((string)$row['personnel_name']);
-                $row['personnel_name'] = !empty($cleanedName) ? $cleanedName : 'Team Member';
-                $row['is_you'] = in_array($row['personnel_id'], $targetIds, true);
-                $teamMembersByTicket[$row['ticket_id']][] = $row;
+            // Safe in-memory sorting: Incomplete/active first, emergency first, then newest assigned_at
+            usort($rawAssignments, function ($a, $b) {
+                $aRawCompleted = $a['completed_at'] ?? null;
+                $bRawCompleted = $b['completed_at'] ?? null;
+                $aCompleted = !empty($aRawCompleted) && $aRawCompleted !== '0000-00-00 00:00:00' && !str_starts_with((string)$aRawCompleted, '0000-00-00');
+                $bCompleted = !empty($bRawCompleted) && $bRawCompleted !== '0000-00-00 00:00:00' && !str_starts_with((string)$bRawCompleted, '0000-00-00');
+
+                // Incomplete jobs come before completed jobs
+                if ($aCompleted !== $bCompleted) {
+                    return $aCompleted ? 1 : -1;
+                }
+
+                // For active jobs, emergency comes first
+                if (!$aCompleted) {
+                    $aEmerg = !empty($a['is_emergency']) ? 1 : 0;
+                    $bEmerg = !empty($b['is_emergency']) ? 1 : 0;
+                    if ($aEmerg !== $bEmerg) {
+                        return $bEmerg <=> $aEmerg;
+                    }
+                }
+
+                // Then newest assigned_at first
+                return strcmp((string)($b['assigned_at'] ?? ''), (string)($a['assigned_at'] ?? ''));
+            });
+
+            $ticketIds = array_values(array_unique(array_filter(array_column($rawAssignments, 'ticket_id'))));
+            $teamMembersByTicket = [];
+
+            if (!empty($ticketIds)) {
+                $allTeamRows = $db->table('ticket_assignments ta')
+                    ->select('
+                        ta.ticket_id,
+                        ta.id as assignment_id,
+                        ta.task_notes,
+                        ta.assigned_at,
+                        ta.completed_at,
+                        COALESCE(p.id, ta.personnel_id) as personnel_id,
+                        COALESCE(p.name, CONCAT(COALESCE(u_staff.first_name, ""), " ", COALESCE(u_staff.last_name, ""))) as personnel_name,
+                        COALESCE(p.specialty, "Field Operations Specialist") as specialty,
+                        COALESCE(p.status, "working") as personnel_status,
+                        COALESCE(u.code, "GSO") as unit_code
+                    ')
+                    ->join('personnel p', 'p.id = ta.personnel_id', 'left')
+                    ->join('users u_staff', 'u_staff.id = ta.personnel_id', 'left')
+                    ->join('units u', 'u.id = p.unit_id', 'left')
+                    ->whereIn('ta.ticket_id', $ticketIds)
+                    ->orderBy('ta.assigned_at', 'ASC')
+                    ->get()->getResultArray();
+
+                foreach ($allTeamRows as $row) {
+                    $cleanedName = trim((string)$row['personnel_name']);
+                    $row['personnel_name'] = !empty($cleanedName) ? $cleanedName : 'Team Member';
+                    $row['is_you'] = in_array($row['personnel_id'], $targetIds, true);
+                    $teamMembersByTicket[$row['ticket_id']][] = $row;
+                }
+
+                // Current worker first, then alphabetized
+                foreach ($teamMembersByTicket as $tId => &$members) {
+                    usort($members, function ($m1, $m2) {
+                        if ($m1['is_you'] !== $m2['is_you']) {
+                            return $m1['is_you'] ? -1 : 1;
+                        }
+                        return strcasecmp((string)$m1['personnel_name'], (string)$m2['personnel_name']);
+                    });
+                }
+                unset($members);
             }
-        }
 
-        $formattedAssignments = [];
-        $activeCount    = 0;
-        $completedCount = 0;
+            $formattedAssignments = [];
+            $activeCount    = 0;
+            $completedCount = 0;
 
-        foreach ($rawAssignments as $a) {
-            $rawCompleted = $a['completed_at'] ?? null;
-            $isCompleted  = !empty($rawCompleted)
-                && $rawCompleted !== '0000-00-00 00:00:00'
-                && !str_starts_with((string)$rawCompleted, '0000-00-00');
+            foreach ($rawAssignments as $a) {
+                $rawCompleted = $a['completed_at'] ?? null;
+                $isCompleted  = !empty($rawCompleted)
+                    && $rawCompleted !== '0000-00-00 00:00:00'
+                    && !str_starts_with((string)$rawCompleted, '0000-00-00');
 
-            if ($isCompleted) {
-                $completedCount++;
-            } else {
-                $activeCount++;
+                if ($isCompleted) {
+                    $completedCount++;
+                } else {
+                    $activeCount++;
+                }
+
+                $reqParts = array_filter([$a['requestor_first_name'] ?? '', $a['requestor_last_name'] ?? '']);
+                $requestorName = !empty($reqParts) ? implode(' ', $reqParts) : 'BSU Client';
+
+                $team = $teamMembersByTicket[$a['ticket_id']] ?? [];
+
+                $formattedAssignments[] = [
+                    'assignment_id'            => (int) $a['assignment_id'],
+                    'ticket_id'                => $a['ticket_id'],
+                    'service_type'             => $a['service_type'] ?: 'Facilities Maintenance',
+                    'description'              => $a['description'] ?: 'No additional description provided.',
+                    'ticket_status'            => $a['ticket_status'],
+                    'status_label'             => $a['status_label'] ?: ucfirst((string)$a['ticket_status']),
+                    'assignment_status'        => $a['assignment_status'],
+                    'location'                 => $a['location'] ?: 'BSU Campus',
+                    'office_room'              => $a['office_room'] ?: 'General Area',
+                    'implementation_date'      => $a['implementation_date'],
+                    'target_completion_date'   => $a['target_completion_date'],
+                    'extended_completion_date' => $a['extended_completion_date'],
+                    'working_days'             => (int) ($a['working_days'] ?? 1),
+                    'is_emergency'             => (int) ($a['is_emergency'] ?? 0),
+                    'is_project'               => (int) ($a['is_project'] ?? 0),
+                    'project_title'            => $a['project_title'],
+                    'eodb_tier'                => $a['eodb_tier'],
+                    'dispatcher_notes'         => $a['dispatcher_notes'],
+                    'task_notes'               => $a['task_notes'],
+                    'assigned_at'              => $a['assigned_at'],
+                    'dispatched_at'            => $a['dispatched_at'],
+                    'completed_at'             => $isCompleted ? $a['completed_at'] : null,
+                    'unit_name'                => $a['unit_name'] ?: 'General Services Office',
+                    'unit_code'                => $a['unit_code'] ?: 'GSO',
+                    'requestor_name'           => $requestorName,
+                    'requestor_contact'        => $a['requestor_contact'],
+                    'team'                     => $team,
+                    'team_count'               => count($team),
+                ];
             }
 
-            $reqParts = array_filter([$a['requestor_first_name'] ?? '', $a['requestor_last_name'] ?? '']);
-            $requestorName = !empty($reqParts) ? implode(' ', $reqParts) : 'BSU Client';
-
-            $team = $teamMembersByTicket[$a['ticket_id']] ?? [];
-
-            $formattedAssignments[] = [
-                'assignment_id'            => (int) $a['assignment_id'],
-                'ticket_id'                => $a['ticket_id'],
-                'service_type'             => $a['service_type'] ?: 'Facilities Maintenance',
-                'description'              => $a['description'] ?: 'No additional description provided.',
-                'ticket_status'            => $a['ticket_status'],
-                'status_label'             => $a['status_label'] ?: ucfirst((string)$a['ticket_status']),
-                'assignment_status'        => $a['assignment_status'],
-                'location'                 => $a['location'] ?: 'BSU Campus',
-                'office_room'              => $a['office_room'] ?: 'General Area',
-                'implementation_date'      => $a['implementation_date'],
-                'target_completion_date'   => $a['target_completion_date'],
-                'extended_completion_date' => $a['extended_completion_date'],
-                'working_days'             => (int) ($a['working_days'] ?? 1),
-                'is_emergency'             => (int) ($a['is_emergency'] ?? 0),
-                'is_project'               => (int) ($a['is_project'] ?? 0),
-                'project_title'            => $a['project_title'],
-                'eodb_tier'                => $a['eodb_tier'],
-                'dispatcher_notes'         => $a['dispatcher_notes'],
-                'task_notes'               => $a['task_notes'],
-                'assigned_at'              => $a['assigned_at'],
-                'dispatched_at'            => $a['dispatched_at'],
-                'completed_at'             => $isCompleted ? $a['completed_at'] : null,
-                'unit_name'                => $a['unit_name'] ?: 'General Services Office',
-                'unit_code'                => $a['unit_code'] ?: 'GSO',
-                'requestor_name'           => $requestorName,
-                'requestor_contact'        => $a['requestor_contact'],
-                'team'                     => $team,
-                'team_count'               => count($team),
-            ];
+            return $this->successResponse('Personnel dashboard data retrieved.', [
+                'personnel'       => $personnel,
+                'assignments'     => $formattedAssignments,
+                'active_count'    => $activeCount,
+                'completed_count' => $completedCount,
+                'total_count'     => count($formattedAssignments),
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', 'myDashboard error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return $this->errorResponse('Failed to load personnel dashboard: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
-
-        return $this->successResponse('Personnel dashboard data retrieved.', [
-            'personnel'       => $personnel,
-            'assignments'     => $formattedAssignments,
-            'active_count'    => $activeCount,
-            'completed_count' => $completedCount,
-            'total_count'     => count($formattedAssignments),
-        ]);
     }
 
     /**

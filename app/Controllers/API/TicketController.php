@@ -336,7 +336,7 @@ class TicketController extends BaseController
                 if (!empty($servicesList)) {
                     $serviceString = $this->formatServicesList($servicesList);
                     if (empty($serviceString)) {
-                        $serviceString = 'Janitorial & Landscaping';
+                        $serviceString = 'Landscaping';
                     }
 
                     $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], 0);

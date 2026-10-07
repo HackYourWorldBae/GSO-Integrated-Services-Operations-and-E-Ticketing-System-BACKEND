@@ -54,6 +54,18 @@ class PersonnelCategorySeeder extends Seeder
                 'is_system'          => 1,
                 'supported_services' => json_encode(['Mechanical Works']),
             ],
+            [
+                'unit_id'            => 1,
+                'name'               => 'Janitorial',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Cleaning/ Grubbing', 'Disinfection']),
+            ],
+            [
+                'unit_id'            => 1,
+                'name'               => 'Disinfection / Pest Control',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Disinfection']),
+            ],
 
             // LEAU (Unit ID: 2)
             [
@@ -64,21 +76,21 @@ class PersonnelCategorySeeder extends Seeder
             ],
             [
                 'unit_id'            => 2,
-                'name'               => 'Janitorial',
-                'is_system'          => 1,
-                'supported_services' => json_encode(['Cleaning/ Grubbing', 'Disinfection']),
-            ],
-            [
-                'unit_id'            => 2,
-                'name'               => 'Disinfection / Pest Control',
-                'is_system'          => 1,
-                'supported_services' => json_encode(['Disinfection']),
-            ],
-            [
-                'unit_id'            => 2,
                 'name'               => 'Grass Cutting / Groundskeeping',
                 'is_system'          => 1,
                 'supported_services' => json_encode(['Mowing/ Weeding', 'Pruning/ Cutting']),
+            ],
+            [
+                'unit_id'            => 2,
+                'name'               => 'Hauling & Event Setup',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Hauling', 'Stage & Hall Decoration']),
+            ],
+            [
+                'unit_id'            => 2,
+                'name'               => 'Borrowing Services',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Borrowing of plants', 'Borrowing of tools/ equipment']),
             ],
 
             // SSU (Unit ID: 3)

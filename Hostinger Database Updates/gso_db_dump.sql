@@ -141,6 +141,23 @@ BEGIN
             ALTER TABLE `tickets` ADD COLUMN `approval_delayed_by` VARCHAR(36) DEFAULT NULL AFTER `approval_delayed_at`;
         END IF;
 
+        -- Director Escalation fields (Unit Head direct approval vs Director escalation)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'is_escalated_to_director') THEN
+            ALTER TABLE `tickets` ADD COLUMN `is_escalated_to_director` TINYINT(1) NOT NULL DEFAULT 0 AFTER `approval_delayed_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'escalation_reason') THEN
+            ALTER TABLE `tickets` ADD COLUMN `escalation_reason` TEXT DEFAULT NULL AFTER `is_escalated_to_director`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'escalated_at') THEN
+            ALTER TABLE `tickets` ADD COLUMN `escalated_at` DATETIME DEFAULT NULL AFTER `escalation_reason`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'escalated_by') THEN
+            ALTER TABLE `tickets` ADD COLUMN `escalated_by` VARCHAR(36) DEFAULT NULL AFTER `escalated_at`;
+        END IF;
+
         -- Materials & Labor Only fields
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'is_labor_only') THEN
             ALTER TABLE `tickets` ADD COLUMN `is_labor_only` TINYINT(1) NOT NULL DEFAULT 0 AFTER `materials_logged`;
@@ -162,6 +179,10 @@ BEGIN
         -- Indexes
         IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'tickets' AND index_name = 'idx_tickets_approval_delayed') THEN
             ALTER TABLE `tickets` ADD INDEX `idx_tickets_approval_delayed` (`is_approval_delayed`);
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'tickets' AND index_name = 'idx_tickets_escalated') THEN
+            ALTER TABLE `tickets` ADD INDEX `idx_tickets_escalated` (`is_escalated_to_director`);
         END IF;
     END IF;
 
@@ -559,6 +580,10 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `approval_delay_reason` text DEFAULT NULL,
   `approval_delayed_at` datetime DEFAULT NULL,
   `approval_delayed_by` varchar(36) DEFAULT NULL,
+  `is_escalated_to_director` tinyint(1) NOT NULL DEFAULT 0,
+  `escalation_reason` text DEFAULT NULL,
+  `escalated_at` datetime DEFAULT NULL,
+  `escalated_by` varchar(36) DEFAULT NULL,
   `verification_status` enum('pending_report','pending_verification','verified_closed') NOT NULL DEFAULT 'pending_report',
   `accomplishment_report_path` varchar(255) DEFAULT NULL,
   `accomplishment_notes` text DEFAULT NULL,
@@ -600,12 +625,14 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   KEY `idx_tickets_archived` (`is_archived`),
   KEY `idx_tickets_approval_delayed` (`is_approval_delayed`),
+  KEY `idx_tickets_escalated` (`is_escalated_to_director`),
   KEY `idx_tickets_submitted` (`submitted_at`),
   CONSTRAINT `fk_tickets_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tickets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_tickets_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_tickets_verified_by` FOREIGN KEY (`verified_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_tickets_delayed_by` FOREIGN KEY (`approval_delayed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_tickets_delayed_by` FOREIGN KEY (`approval_delayed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_tickets_escalated_by` FOREIGN KEY (`escalated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `ticket_attachments`

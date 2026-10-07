@@ -436,7 +436,7 @@ class TicketController extends BaseController
                         'service_type'=> $serviceString,
                         'description' => sanitize_string($borrowingDetails['purpose_project'] ?? 'Borrowing request.'),
                         'status'      => 'pending',
-                        'status_label'=> 'Pending Director Approval',
+                        'status_label'=> 'Pending Approval',
                         'is_emergency'=> 0,
                         'current_step'=> 1,
                         'location'    => sanitize_string($borrowingDetails['department_major'] ?? ''),
@@ -597,18 +597,20 @@ class TicketController extends BaseController
                         'title'        => $t['title'],
                     ];
 
-                    // Role-Based Notification Policy:
-                    // All newly submitted tickets (FGMU, LEAU, SSU) require Director review & approval.
-                    // Unit admins do NOT receive notifications for newly submitted tickets; they only receive
-                    // notifications once a ticket has been approved by the Director and is queued for dispatch.
-                    $directors = $db->query("SELECT id FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
+                    // Role-Based Notification Policy (Approval Process Overhaul):
+                    // Route newly submitted tickets directly to the concerned Unit Head's dashboard
+                    // for their direct review and approval, or escalation to Director if heavy/important.
+                    $unitAdmins = $db->query(
+                        "SELECT id, email, first_name, last_name FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                        [(int) $t['unit_id']]
+                    )->getResultArray();
                     $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
-                    foreach ($directors as $director) {
+                    foreach ($unitAdmins as $uAdmin) {
                         $this->notificationModel->createNotification(
-                            $director['id'],
+                            $uAdmin['id'],
                             'info',
-                            "New Ticket Awaiting Approval",
-                            "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) requires your review and approval."
+                            "New Request Awaiting Review (#{$tId})",
+                            "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) has been routed to your unit for review and approval."
                         );
                     }
                 }
@@ -647,21 +649,32 @@ class TicketController extends BaseController
                 }
             }
 
-            // --- 3. New Request Email to Opted-In Directors (for FGMU / LEAU requests awaiting approval) ---
-            if (!$ssuTicketId && !empty($ticketSummaryList)) {
-                $directors = $db->query(
-                    "SELECT email FROM users WHERE role = 'director' AND status = 'Active' AND email IS NOT NULL AND email != ''" . ($db->fieldExists('email_notifications_enabled', 'users') ? " AND COALESCE(email_notifications_enabled, 1) = 1" : "")
-                )->getResultArray();
-                $directorEmails = array_values(array_filter(array_column($directors, 'email')));
-                if (!empty($directorEmails)) {
-                    $emailService->sendTicketStatusUpdate(
-                        $directorEmails,
-                        'GSO Director',
-                        implode(', #', $createdTickets),
-                        'New Service Request(s) Awaiting Approval',
-                        "One or more service requests have been submitted and require Director review and approval.",
-                        ['Tickets' => '#' . implode(', #', $createdTickets)]
-                    );
+            // --- 3. New Request Email to Opted-In Unit Heads (FGMU & LEAU Admins) ---
+            if (!empty($createdTickets)) {
+                $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+                $optInClause = $colExists ? "AND COALESCE(email_notifications_enabled, 1) = 1" : "";
+                foreach ($createdTickets as $tId) {
+                    $ticketRow = $this->ticketModel->find($tId);
+                    if ($ticketRow && in_array((int)$ticketRow['unit_id'], [1, 2], true)) {
+                        $unitAdmins = $db->query(
+                            "SELECT email, first_name FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}",
+                            [(int)$ticketRow['unit_id']]
+                        )->getResultArray();
+                        foreach ($unitAdmins as $uAdmin) {
+                            $adminEmail = $uAdmin['email'] ?? '';
+                            if ($adminEmail) {
+                                $adminName = $uAdmin['first_name'] ?? 'Unit Head';
+                                $emailService->sendTicketStatusUpdate(
+                                    $adminEmail,
+                                    $adminName,
+                                    $tId,
+                                    'New Request Awaiting Review',
+                                    "Ticket #{$tId} ({$ticketRow['service_type']}) has been submitted and is awaiting your review and approval.",
+                                    ['Ticket' => '#' . $tId, 'Service' => $ticketRow['service_type']]
+                                );
+                            }
+                        }
+                    }
                 }
             }
         } catch (\Throwable $notifEx) {

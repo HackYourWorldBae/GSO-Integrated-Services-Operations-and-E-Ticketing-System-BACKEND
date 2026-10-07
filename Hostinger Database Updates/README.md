@@ -5,7 +5,8 @@ This directory contains the safe, non-destructive schema update scripts for the 
 ---
 
 ## Files in this Directory
-- **`gso_db_dump.sql`**: Production schema updater script compatible with MySQL 8.0+ and MariaDB 10.4+.
+- **`gso_db_dump.sql`**: Complete production schema updater script compatible with MySQL 8.0+ and MariaDB 10.4+. Includes full table creations, safe column migration stored procedure (`sp_gso_upgrade_schema` with director escalation patches), and reference seeds.
+- **`2026_10_07_add_director_escalation.sql`**: Standalone patch script for the Approval Process Overhaul. Adds director escalation tracking columns (`is_escalated_to_director`, `escalation_reason`, `escalated_at`, `escalated_by`) to `tickets`.
 
 ---
 

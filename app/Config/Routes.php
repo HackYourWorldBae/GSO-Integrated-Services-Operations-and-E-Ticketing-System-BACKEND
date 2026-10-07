@@ -83,6 +83,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
 
         // -- Ticket Actions (Admin & Director Roles) --
         $routes->patch('tickets/(:segment)/approve',        'TicketActionController::approve/$1',               ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/escalate-to-director', 'TicketActionController::escalateToDirector/$1', ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/deescalate',     'TicketActionController::deescalateFromDirector/$1', ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/delay-approval', 'TicketActionController::delayApproval/$1',        ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/resume-approval','TicketActionController::resumeApproval/$1',       ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/recategorize',   'TicketActionController::recategorize/$1',          ['filter' => 'role:admin,director']);
@@ -116,8 +118,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
         $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,student,employee,superadmin']);
         $routes->post('borrowing/mark-overdue',        'BorrowingController::markOverdue',       ['filter' => 'role:admin']);
-        $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,superadmin']);
-        $routes->patch('borrowing/(:segment)/director-reject',  'BorrowingController::directorReject/$1',  ['filter' => 'role:director,superadmin']);
+        $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,admin,superadmin']);
+        $routes->patch('borrowing/(:segment)/director-reject',  'BorrowingController::directorReject/$1',  ['filter' => 'role:director,admin,superadmin']);
         $routes->post('borrowing/(:segment)/assign-inventory',   'BorrowingController::assignInventory/$1',   ['filter' => 'role:admin']);
         $routes->post('borrowing/(:segment)/unassign-inventory', 'BorrowingController::unassignInventory/$1', ['filter' => 'role:admin']);
         $routes->patch('borrowing/(:segment)/ready-for-pickup',  'BorrowingController::readyForPickup/$1',   ['filter' => 'role:admin']);

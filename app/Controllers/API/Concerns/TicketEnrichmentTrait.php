@@ -45,8 +45,11 @@ trait TicketEnrichmentTrait
         // lists + full-info modals can show item / purpose / schedule.
         $borrowingMap    = $this->buildDetailMap($db, 'borrowing_requests',     'ticket_id', $ticketIds);
 
-        // Load user/requester profiles in bulk for tickets
-        $userIds = array_filter(array_unique(array_column($tickets, 'user_id')));
+        // Load user/requester profiles in bulk for tickets (including staff who escalated)
+        $userIds = array_filter(array_unique(array_merge(
+            array_column($tickets, 'user_id'),
+            array_column($tickets, 'escalated_by')
+        )));
         $usersMap = [];
         if (!empty($userIds)) {
             $userRows = $db->table('users')
@@ -180,6 +183,14 @@ trait TicketEnrichmentTrait
                 ? $ticket['materials_stage']
                 : ($ticket['is_labor_only'] ? 'assessment' : (!empty($ticket['materials']) ? ($ticket['materials'][0]['stage'] ?? 'assessment') : 'none'));
             $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']) || $ticket['is_labor_only'];
+
+            // Director Escalation tracking
+            $ticket['is_escalated_to_director'] = !empty($ticket['is_escalated_to_director']) ? 1 : 0;
+            $ticket['escalation_reason']        = $ticket['escalation_reason'] ?? null;
+            $ticket['escalated_at']             = $ticket['escalated_at'] ?? null;
+            $ticket['escalated_by']             = $ticket['escalated_by'] ?? null;
+            $escUser = !empty($ticket['escalated_by']) ? ($usersMap[$ticket['escalated_by']] ?? null) : null;
+            $ticket['escalated_by_name']        = $escUser ? trim(($escUser['first_name'] ?? '') . ' ' . ($escUser['last_name'] ?? '')) : null;
 
             // Defensively normalize borrowing ticket status_label so it never shows "Queued for Dispatch"
             $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));

@@ -70,8 +70,8 @@ class BorrowingController extends BaseController
         }
 
         $role = $this->currentUserRole();
-        if (!in_array($role, ['director', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only Director or Superadmin can approve borrowing requests.');
+        if (!in_array($role, ['admin', 'director', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to approve borrowing requests.');
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -80,11 +80,12 @@ class BorrowingController extends BaseController
         }
 
         if ($borrowing['status'] !== 'pending_director') {
-            return $this->errorResponse("Borrowing request is not pending director approval. Current status: {$borrowing['status']}.");
+            return $this->errorResponse("Borrowing request is not pending approval. Current status: {$borrowing['status']}.");
         }
 
         $body = $this->request->getJSON(true) ?? [];
         $notes = sanitize_string($body['notes'] ?? '');
+        $approverTitle = in_array($role, ['director', 'superadmin'], true) ? 'Director' : 'LEAU Unit Head';
 
         $this->borrowingModel->update($borrowing['id'], [
             'status'           => 'approved_director',
@@ -102,41 +103,43 @@ class BorrowingController extends BaseController
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Director Approved', "Director approved borrowing request. Notes: {$notes}");
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Approved', "Borrowing request approved by {$approverTitle}. Notes: {$notes}");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'success',
             "Borrowing Request Approved",
-            "Your borrowing request #{$ticketId} has been approved by the Director. LEAU Admin will now assign inventory."
+            "Your borrowing request #{$ticketId} has been approved by the {$approverTitle}. LEAU Admin will now assign inventory."
         );
 
-        // Notify destination Unit Admins (LEAU) that the borrowing request is approved and ready for inventory assignment
-        try {
-            $dbConn = \Config\Database::connect();
-            $leauAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = 2 AND status = 'Active'")->getResultArray();
-            foreach ($leauAdmins as $uAdmin) {
-                $this->notificationModel->createNotification(
-                    $uAdmin['id'],
-                    'info',
-                    "New Borrowing Ticket Approved (#{$ticketId})",
-                    "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
-                );
+        // Notify destination Unit Admins (LEAU) if approved by Director
+        if (in_array($role, ['director', 'superadmin'], true)) {
+            try {
+                $dbConn = \Config\Database::connect();
+                $leauAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = 2 AND status = 'Active'")->getResultArray();
+                foreach ($leauAdmins as $uAdmin) {
+                    $this->notificationModel->createNotification(
+                        $uAdmin['id'],
+                        'info',
+                        "New Borrowing Ticket Approved (#{$ticketId})",
+                        "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
+                    );
+                }
+            } catch (\Throwable $err) {
+                log_message('error', '[BorrowingController::directorApprove] Admin notification error: ' . $err->getMessage());
             }
-        } catch (\Throwable $err) {
-            log_message('error', '[BorrowingController::directorApprove] Admin notification error: ' . $err->getMessage());
         }
 
-        $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'approved_director', "Your borrowing request has been approved by the Director.");
+        $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'approved_director', "Your borrowing request has been approved by the {$approverTitle}.");
 
-        return $this->successResponse('Borrowing request approved by Director.', [
+        return $this->successResponse("Borrowing request approved by {$approverTitle}.", [
             'borrowing_id' => $borrowing['id'],
             'status'       => 'approved_director',
         ]);
     }
 
     /**
-     * Director rejects a borrowing request.
+     * Unit Head or Director rejects a borrowing request.
      * PATCH /api/v1/borrowing/{ticketId}/director-reject
      */
     public function directorReject(string $ticketId): ResponseInterface
@@ -152,8 +155,8 @@ class BorrowingController extends BaseController
         }
 
         $role = $this->currentUserRole();
-        if (!in_array($role, ['director', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only Director or Superadmin can reject borrowing requests.');
+        if (!in_array($role, ['admin', 'director', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to reject borrowing requests.');
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -162,11 +165,12 @@ class BorrowingController extends BaseController
         }
 
         if ($borrowing['status'] !== 'pending_director') {
-            return $this->errorResponse("Borrowing request is not pending director approval. Current status: {$borrowing['status']}.");
+            return $this->errorResponse("Borrowing request is not pending approval. Current status: {$borrowing['status']}.");
         }
 
         $body = $this->request->getJSON(true) ?? [];
-        $reason = sanitize_string($body['reason'] ?? 'Rejected by Director');
+        $rejectorTitle = in_array($role, ['director', 'superadmin'], true) ? 'Director' : 'LEAU Unit Head';
+        $reason = sanitize_string($body['reason'] ?? "Rejected by {$rejectorTitle}");
 
         $this->borrowingModel->update($borrowing['id'], [
             'status'           => 'cancelled',
@@ -175,7 +179,7 @@ class BorrowingController extends BaseController
 
         $this->ticketModel->update($ticketId, [
             'status'         => 'declined',
-            'status_label'   => 'Declined by Director',
+            'status_label'   => "Declined by {$rejectorTitle}",
             'decline_reason' => $reason,
             'is_archived'    => 1,
             'completed_at'   => date('Y-m-d H:i:s'),

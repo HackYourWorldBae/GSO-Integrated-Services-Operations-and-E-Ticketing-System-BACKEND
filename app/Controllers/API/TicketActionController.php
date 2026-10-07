@@ -80,7 +80,9 @@ class TicketActionController extends BaseController
     // -------------------------------------------------------------------------
 
     /**
-     * Admin approves a ticket (pending -> approved, step 1 -> 2).
+     * Admin or Director approves a ticket (pending -> approved, step 1 -> 2).
+     * Unit Heads can approve routine requests directly.
+     * Directors can approve escalated or campus-wide requests.
      */
     public function approve(string $ticketId): ResponseInterface
     {
@@ -101,16 +103,25 @@ class TicketActionController extends BaseController
         $unitId = (int) $ticket['unit_id'];
         $currentStep = 3;
         $newStatus   = 'approved';
+        $userRole    = $this->currentUserRole();
+        $userId      = $this->currentUserId();
+
+        $isExecutive = in_array($userRole, ['director', 'superadmin'], true);
+        $wasEscalated = !empty($ticket['is_escalated_to_director']);
 
         $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
         $isBorrowing  = str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools') || str_contains($serviceLower, 'borrowing request');
 
+        $approverTitle = $isExecutive ? 'Director' : 'Unit Head';
+
         if ($isBorrowing) {
             $statusLabel = 'Approved - Awaiting Inventory Assignment';
-            $logMessage  = 'Borrowing request approved by Director — awaiting inventory assignment.';
+            $logMessage  = "Borrowing request approved by {$approverTitle} — awaiting inventory assignment.";
         } else {
             $statusLabel = 'Queued for Dispatch';
-            $logMessage  = 'Ticket approved — queued for dispatch.';
+            $logMessage  = $wasEscalated
+                ? "Escalated ticket approved by {$approverTitle} — queued for dispatch."
+                : "Ticket approved by {$approverTitle} — queued for dispatch.";
         }
         // SSU Incident Reports are handled by /investigate, /notation, and /resolve endpoints.
 
@@ -118,22 +129,23 @@ class TicketActionController extends BaseController
         $isEmergency = isset($body['is_emergency']) ? (!empty($body['is_emergency']) ? 1 : 0) : null;
 
         $updateData = [
-            'status'                => $newStatus,
-            'status_label'          => $statusLabel,
-            'is_approval_delayed'   => 0,
-            'approval_delay_reason' => null,
-            'current_step'          => $currentStep,
-            'reviewed_at'           => date('Y-m-d H:i:s'),
-            'reviewed_by'           => $this->currentUserId(),
-            'updated_at'            => date('Y-m-d H:i:s'),
+            'status'                   => $newStatus,
+            'status_label'             => $statusLabel,
+            'is_approval_delayed'      => 0,
+            'approval_delay_reason'    => null,
+            'is_escalated_to_director' => 0,
+            'current_step'             => $currentStep,
+            'reviewed_at'              => date('Y-m-d H:i:s'),
+            'reviewed_by'              => $userId,
+            'updated_at'               => date('Y-m-d H:i:s'),
         ];
 
         if ($isEmergency !== null) {
             $updateData['is_emergency'] = $isEmergency;
             if ($isEmergency === 1) {
                 $logMessage = $isBorrowing
-                    ? 'Borrowing request approved as EMERGENCY PRIORITY by Director — awaiting immediate inventory assignment.'
-                    : 'Ticket approved as EMERGENCY PRIORITY by Director — queued for immediate dispatch.';
+                    ? "Borrowing request approved as EMERGENCY PRIORITY by {$approverTitle} — awaiting immediate inventory assignment."
+                    : "Ticket approved as EMERGENCY PRIORITY by {$approverTitle} — queued for immediate dispatch.";
             }
         }
 
@@ -148,20 +160,20 @@ class TicketActionController extends BaseController
                     ->where('ticket_id', $ticketId)
                     ->where('status', 'pending_director')
                     ->update(['status' => 'approved_director', 'updated_at' => date('Y-m-d H:i:s')]);
-                $logMessage .= ' Borrowing director approval synced.';
+                $logMessage .= " Borrowing {$approverTitle} approval synced.";
             }
         } catch (\Throwable $borrowSyncErr) {
             log_message('error', '[TicketActionController::approve] Borrowing sync failed: ' . $borrowSyncErr->getMessage());
         }
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Status Changed', $logMessage);
+        $this->logModel->logAction($ticketId, $userId, 'Status Changed', $logMessage);
 
         $notifTitle = ($isEmergency === 1) ? "Ticket #{$ticketId} Approved (Emergency Priority)" : "Ticket #{$ticketId} Approved";
         $notifBody  = ($isEmergency === 1)
-            ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the Director."
+            ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the {$approverTitle}."
             : ($isBorrowing
-                ? "Your borrowing request for {$ticket['service_type']} has been approved by the Director. LEAU Admin will assign inventory."
-                : "Your request for {$ticket['service_type']} has been approved.");
+                ? "Your borrowing request for {$ticket['service_type']} has been approved by the {$approverTitle}. LEAU Admin will assign inventory."
+                : "Your request for {$ticket['service_type']} has been approved by the {$approverTitle}.");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
@@ -177,34 +189,222 @@ class TicketActionController extends BaseController
             $notifBody
         );
 
-        // Notify destination Unit Admins that a ticket has been approved by the Director and is ready for dispatch
-        $dbConn = \Config\Database::connect();
-        $unitAdmins = $dbConn->query(
-            "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
-            [$unitId]
-        )->getResultArray();
-        $adminNotifTitle = ($isEmergency === 1)
-            ? "New Emergency Ticket Approved (#{$ticketId})"
-            : "New Ticket Approved (#{$ticketId})";
-        $adminNotifBody = ($isEmergency === 1)
-            ? "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved as EMERGENCY PRIORITY by the Director and requires immediate dispatch."
-            : ($isBorrowing
-                ? "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
-                : "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is ready for dispatch.");
+        // If approved by Director, notify destination Unit Admins that the ticket is ready for dispatch
+        if ($isExecutive) {
+            $dbConn = Database::connect();
+            $unitAdmins = $dbConn->query(
+                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                [$unitId]
+            )->getResultArray();
 
-        foreach ($unitAdmins as $uAdmin) {
-            $this->notificationModel->createNotification(
-                $uAdmin['id'],
-                'info',
-                $adminNotifTitle,
-                $adminNotifBody
-            );
+            $adminNotifTitle = ($isEmergency === 1)
+                ? "New Emergency Ticket Approved (#{$ticketId})"
+                : ($wasEscalated ? "Escalated Ticket Approved by Director (#{$ticketId})" : "New Ticket Approved (#{$ticketId})");
+
+            $adminNotifBody = ($isEmergency === 1)
+                ? "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved as EMERGENCY PRIORITY by the Director and requires immediate dispatch."
+                : ($isBorrowing
+                    ? "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
+                    : ($wasEscalated
+                        ? "The escalated ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is now queued for dispatch."
+                        : "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is ready for dispatch."));
+
+            foreach ($unitAdmins as $uAdmin) {
+                $this->notificationModel->createNotification(
+                    $uAdmin['id'],
+                    'info',
+                    $adminNotifTitle,
+                    $adminNotifBody
+                );
+            }
         }
 
         return $this->successResponse('Ticket approved successfully.', [
             'ticket_id'    => $ticketId, 
             'status'       => 'approved',
-            'is_emergency' => $isEmergency ?? (int) ($ticket['is_emergency'] ?? 0)
+            'is_emergency' => $isEmergency ?? (int) ($ticket['is_emergency'] ?? 0),
+            'approved_by'  => $approverTitle,
+        ]);
+    }
+
+    /**
+     * Unit Head requests Director approval for heavy, high-cost, or important tasks.
+     * PATCH /api/v1/tickets/{id}/escalate-to-director
+     */
+    public function escalateToDirector(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Only pending tickets can be escalated for Director approval. Current status: {$ticket['status']}.");
+        }
+
+        if (!empty($ticket['is_escalated_to_director'])) {
+            return $this->errorResponse("Ticket is already escalated to the Director.");
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $reason = sanitize_string($body['reason'] ?? $body['escalation_reason'] ?? '');
+
+        if (empty($reason)) {
+            return $this->errorResponse(
+                'An escalation reason or justification is required for Director approval.',
+                ['reason' => ['Please state why this request requires executive approval (e.g. heavy structural work, budget clearance, major university event).']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $userId = $this->currentUserId();
+        $db = Database::connect();
+        $staffRow = $db->query("SELECT first_name, last_name, role FROM users WHERE id = ?", [$userId])->getRowArray();
+        $staffName = $staffRow ? trim(($staffRow['first_name'] ?? '') . ' ' . ($staffRow['last_name'] ?? '')) : 'Unit Head';
+
+        $unitRow = $db->query("SELECT name, code FROM units WHERE id = ?", [$ticket['unit_id']])->getRowArray();
+        $unitName = $unitRow['name'] ?? ($unitRow['code'] ?? 'GSO Unit');
+
+        $this->ticketModel->update($ticketId, [
+            'is_escalated_to_director' => 1,
+            'escalation_reason'        => $reason,
+            'escalated_at'             => date('Y-m-d H:i:s'),
+            'escalated_by'             => $userId,
+            'status_label'             => 'Pending Director Approval',
+            'updated_at'               => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Escalated to Director',
+            "Escalated to Director by {$staffName} for executive approval. Justification: {$reason}"
+        );
+
+        // Notify all active Directors (In-App)
+        $directors = $db->query("SELECT id, email, first_name FROM users WHERE role = 'director' AND status = 'Active'")->getResultArray();
+        foreach ($directors as $director) {
+            $this->notificationModel->createNotification(
+                $director['id'],
+                'warning',
+                "Executive Approval Requested (#{$ticketId})",
+                "{$unitName} Head requested your executive approval for Ticket #{$ticketId} ({$ticket['service_type']}). Reason: {$reason}"
+            );
+        }
+
+        // Email alert to opted-in Directors
+        try {
+            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+            $optInClause = $colExists ? "AND COALESCE(email_notifications_enabled, 1) = 1" : "";
+            $optedDirectors = $db->query("SELECT email, first_name FROM users WHERE role = 'director' AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}")->getResultArray();
+            $emailService = new ResendEmailService();
+            foreach ($optedDirectors as $d) {
+                if (!empty($d['email'])) {
+                    $emailService->sendTicketStatusUpdate(
+                        $d['email'],
+                        $d['first_name'] ?? 'Director',
+                        $ticketId,
+                        'Executive Approval Requested',
+                        "Ticket #{$ticketId} ({$ticket['service_type']}) has been escalated by the {$unitName} Head for your review and approval.\n\nJustification: {$reason}",
+                        ['Unit' => $unitName, 'Service' => $ticket['service_type'], 'Reason' => $reason]
+                    );
+                }
+            }
+        } catch (\Throwable $emErr) {
+            log_message('error', '[TicketActionController::escalateToDirector] Director email failed: ' . $emErr->getMessage());
+        }
+
+        // Notify Requestor that their request has been endorsed to the Director
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Ticket #{$ticketId} Endorsed to Director",
+            "Your service request #{$ticketId} ({$ticket['service_type']}) has been endorsed by the Unit Head to the Director for executive approval."
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Pending Director Approval',
+            "Your service request has been endorsed by the Unit Head to the Director for executive approval."
+        );
+
+        return $this->successResponse('Ticket successfully escalated to the Director for approval.', [
+            'ticket_id'                => $ticketId,
+            'is_escalated_to_director' => 1,
+            'status_label'             => 'Pending Director Approval',
+            'escalation_reason'        => $reason,
+        ]);
+    }
+
+    /**
+     * Recall or return an escalated ticket back to the Unit Head for standard local handling.
+     * PATCH /api/v1/tickets/{id}/deescalate
+     */
+    public function deescalateFromDirector(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Ticket is not pending. Current status: {$ticket['status']}.");
+        }
+
+        if (empty($ticket['is_escalated_to_director'])) {
+            return $this->errorResponse("Ticket is not currently escalated to the Director.");
+        }
+
+        $userId   = $this->currentUserId();
+        $userRole = $this->currentUserRole();
+        $body     = $this->request->getJSON(true) ?? [];
+        $notes    = sanitize_string($body['notes'] ?? $body['reason'] ?? '');
+
+        $isReturnedByDirector = in_array($userRole, ['director', 'superadmin'], true);
+
+        $this->ticketModel->update($ticketId, [
+            'is_escalated_to_director' => 0,
+            'status_label'             => 'Pending Approval',
+            'updated_at'               => date('Y-m-d H:i:s'),
+        ]);
+
+        $logMsg = $isReturnedByDirector
+            ? "Director returned ticket to Unit Head for local handling. Notes: " . ($notes ?: 'Proceed with standard unit workflow.')
+            : "Unit Head recalled ticket escalation. Notes: " . ($notes ?: 'Recalled to unit queue.');
+
+        $this->logModel->logAction($ticketId, $userId, 'Escalation Cancelled', $logMsg);
+
+        if ($isReturnedByDirector) {
+            $db = Database::connect();
+            $unitAdmins = $db->query(
+                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                [(int) $ticket['unit_id']]
+            )->getResultArray();
+            foreach ($unitAdmins as $uAdmin) {
+                $this->notificationModel->createNotification(
+                    $uAdmin['id'],
+                    'info',
+                    "Ticket #{$ticketId} Returned by Director",
+                    "The Director returned Ticket #{$ticketId} ({$ticket['service_type']}) for Unit Head handling. Notes: " . ($notes ?: 'Proceed with unit discretion.')
+                );
+            }
+        }
+
+        return $this->successResponse('Escalation cancelled; ticket returned to Unit Head queue.', [
+            'ticket_id'                => $ticketId,
+            'is_escalated_to_director' => 0,
+            'status_label'             => 'Pending Approval',
         ]);
     }
 

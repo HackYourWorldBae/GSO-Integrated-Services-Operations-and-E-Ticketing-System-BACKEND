@@ -98,12 +98,17 @@ BEGIN
         UPDATE `personnel_categories` 
         SET `unit_id` = 1, `supported_services` = '["Cleaning/ Grubbing", "Disinfection"]' 
         WHERE `name` IN ('Janitor', 'Janitorial') AND `unit_id` = 2;
+
+        -- Ensure Hauler / Hauling category belongs to FGMU (unit_id 1)
+        UPDATE `personnel_categories` 
+        SET `unit_id` = 1, `name` = 'Hauler / Logistics', `supported_services` = '["Hauling"]' 
+        WHERE `name` IN ('Hauler', 'Hauler & Event Setup', 'Garbage Collector') AND `unit_id` = 2;
     END IF;
 
     -- Ensure Unit descriptions reflect current operational responsibilities
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'units') THEN
-        UPDATE `units` SET `description` = 'Manages structure, finishes, utilities, mechanical, electrical, carpentry repairs, janitorial sanitation, disinfection, and cleaning/grubbing across campus.' WHERE `code` = 'FGMU';
-        UPDATE `units` SET `description` = 'Responsible for campus landscaping, grounds maintenance, mowing, trimming, plant care, event decoration, hauling, and borrowing services.' WHERE `code` = 'LEAU';
+        UPDATE `units` SET `description` = 'Manages structure, finishes, utilities, mechanical, electrical, carpentry repairs, janitorial sanitation, disinfection, cleaning/grubbing, and hauling services across campus.' WHERE `code` = 'FGMU';
+        UPDATE `units` SET `description` = 'Responsible for campus landscaping, grounds maintenance, mowing, trimming, plant care, event decoration, and equipment/plant borrowing services.' WHERE `code` = 'LEAU';
     END IF;
 
     -- ------------------------------------------------------------------------
@@ -392,8 +397,8 @@ CREATE TABLE IF NOT EXISTS `units` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `units` (`id`, `code`, `name`, `description`) VALUES
-(1, 'FGMU', 'Facilities and Grounds Management Unit', 'Manages structure, finishes, utilities, mechanical, electrical, carpentry repairs, janitorial sanitation, disinfection, and cleaning/grubbing across campus.'),
-(2, 'LEAU', 'Landscape and Environment Aesthetics Unit', 'Responsible for campus landscaping, grounds maintenance, mowing, trimming, plant care, event decoration, hauling, and borrowing services.'),
+(1, 'FGMU', 'Facilities and Grounds Management Unit', 'Manages structure, finishes, utilities, mechanical, electrical, carpentry repairs, janitorial sanitation, disinfection, cleaning/grubbing, and hauling services across campus.'),
+(2, 'LEAU', 'Landscape and Environment Aesthetics Unit', 'Responsible for campus landscaping, grounds maintenance, mowing, trimming, plant care, event decoration, and equipment/plant borrowing services.'),
 (3, 'SSU', 'Security Service Unit', 'Coordinates campus security personnel, incident response, investigation, and physical campus safety.');
 
 -- Table structure for table `users`
@@ -476,8 +481,9 @@ INSERT IGNORE INTO `personnel_categories` (`id`, `unit_id`, `name`, `is_system`,
 (8, 2, 'Landscaper', 1, '["Planting/ Landscaping", "Borrowing of plants"]'),
 (9, 2, 'Groundskeeper', 1, '["Mowing/ Weeding", "Pruning/ Cutting"]'),
 (10, 1, 'Janitor', 1, '["Cleaning/ Grubbing", "Disinfection"]'),
-(11, 2, 'Hauler & Event Setup', 1, '["Hauling", "Stage & Hall Decoration"]'),
-(12, 2, 'Tool & Equipment Custodian', 1, '["Borrowing of tools/ equipment", "Borrowing of plants"]');
+(11, 1, 'Hauler / Logistics', 1, '["Hauling"]'),
+(12, 2, 'Stage & Hall Decorator', 1, '["Stage & Hall Decoration"]'),
+(13, 2, 'Tool & Equipment Custodian', 1, '["Borrowing of tools/ equipment", "Borrowing of plants"]');
 
 -- ----------------------------------------------------------------------------
 -- 2. BORROWING SYSTEM TABLES (LEAU)

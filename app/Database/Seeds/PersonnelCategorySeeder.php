@@ -66,6 +66,12 @@ class PersonnelCategorySeeder extends Seeder
                 'is_system'          => 1,
                 'supported_services' => json_encode(['Disinfection']),
             ],
+            [
+                'unit_id'            => 1,
+                'name'               => 'Hauling & Logistics',
+                'is_system'          => 1,
+                'supported_services' => json_encode(['Hauling']),
+            ],
 
             // LEAU (Unit ID: 2)
             [
@@ -82,9 +88,9 @@ class PersonnelCategorySeeder extends Seeder
             ],
             [
                 'unit_id'            => 2,
-                'name'               => 'Hauling & Event Setup',
+                'name'               => 'Stage & Hall Decoration',
                 'is_system'          => 1,
-                'supported_services' => json_encode(['Hauling', 'Stage & Hall Decoration']),
+                'supported_services' => json_encode(['Stage & Hall Decoration']),
             ],
             [
                 'unit_id'            => 2,

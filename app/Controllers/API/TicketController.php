@@ -214,13 +214,19 @@ class TicketController extends BaseController
 
         // Student Account Role Authorization Guard (RSO / SSG accounts)
         if ($user['role'] === 'student') {
-            // 1. Block FGMU completely for students
+            // 1. Validate FGMU services: students may only request Hauling under FGMU
             if (!empty($body['fgmu']['services'])) {
-                return $this->errorResponse(
-                    'Student accounts are not authorized to submit Facilities Management (FGMU) service requests. These requests must be submitted by university faculty or staff.',
-                    ['unauthorized_unit' => 'FGMU'],
-                    ResponseInterface::HTTP_FORBIDDEN
-                );
+                foreach ($body['fgmu']['services'] as $srv) {
+                    $rawService = trim((string)($srv['service'] ?? ''));
+                    $normalizedService = strtolower(preg_replace('/\s+/', ' ', $rawService));
+                    if ($normalizedService !== 'hauling') {
+                        return $this->errorResponse(
+                            'Student accounts are not authorized to submit Facilities Management (FGMU) service requests. Only Hauling is permitted for authorized student organizations.',
+                            ['unauthorized_unit' => 'FGMU', 'unauthorized_service' => $rawService],
+                            ResponseInterface::HTTP_FORBIDDEN
+                        );
+                    }
+                }
             }
 
             // 2. Validate LEAU services: only allowed 4 services

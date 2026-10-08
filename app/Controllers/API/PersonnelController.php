@@ -380,6 +380,15 @@ class PersonnelController extends BaseController
 
         $this->personnelModel->insert($insertPersonnel);
 
+        // Ensure user_id column is reliably persisted
+        if ($userId) {
+            try {
+                $db = \Config\Database::connect();
+                $db->table('personnel')->where('id', $personnelId)->update(['user_id' => $userId]);
+            } catch (\Throwable $ignored) {
+            }
+        }
+
         return $this->successResponse('Personnel created successfully.', [
             'personnel_id' => $personnelId,
             'user_id'      => $userId,
@@ -447,10 +456,26 @@ class PersonnelController extends BaseController
             return $this->errorResponse('Failed to create account in database.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        $this->personnelModel->update($personnelId, [
-            'user_id'    => $userId,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        // Direct DB update ensures user_id is persisted and all duplicate records in same unit are bound
+        $db = \Config\Database::connect();
+        try {
+            $db->table('personnel')->where('id', $personnelId)->update([
+                'user_id'    => $userId,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $db->table('personnel')
+                ->where('unit_id', (int)$worker['unit_id'])
+                ->where('name', $worker['name'])
+                ->groupStart()
+                    ->where('user_id IS NULL')
+                    ->orWhere('user_id', '')
+                ->groupEnd()
+                ->update([
+                    'user_id'    => $userId,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+        } catch (\Throwable $ignored) {
+        }
 
         return $this->successResponse('Personnel portal account created successfully.', [
             'personnel_id' => $personnelId,
@@ -472,188 +497,60 @@ class PersonnelController extends BaseController
             $currentRole   = $this->currentUserRole();
             $db            = \Config\Database::connect();
 
+            // Self-healing schema check: Ensure personnel.user_id column exists
+            if ($db->tableExists('personnel') && !$db->fieldExists('user_id', 'personnel')) {
+                try {
+                    $db->query("ALTER TABLE `personnel` ADD COLUMN `user_id` VARCHAR(36) NULL DEFAULT NULL AFTER `unit_id`");
+                } catch (\Throwable $ignored) {
+                }
+            }
+
             $personnel = null;
             $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
 
             // 1. If an explicit personnel_id query param is passed by an administrator / director previewing
             if (!empty($targetPersonnelId) && in_array($currentRole, ['admin', 'director', 'superadmin', 'staff'], true)) {
-                $personnel = $db->table('personnel')->where('id', $targetPersonnelId)->get()->getRowArray();
+                $personnel = $db->table('personnel')
+                    ->where('id', $targetPersonnelId)
+                    ->orWhere('user_id', $targetPersonnelId)
+                    ->get()->getRowArray();
             }
 
-            // 2. Resolve the personnel profile belonging to the authenticated account
+            // 2. Direct relational lookup: Find the personnel record linked to the authenticated user account
             if (!$personnel && !empty($currentUserId)) {
-                $hasUserIdCol = $db->fieldExists('user_id', 'personnel');
+                $personnel = $db->table('personnel')->where('user_id', $currentUserId)->get()->getRowArray();
 
-                // Strategy A: Direct user_id foreign key link (if column exists)
-                if ($hasUserIdCol) {
-                    try {
-                        $personnel = $db->table('personnel')
-                            ->where('user_id', $currentUserId)
-                            ->get()
-                            ->getRowArray();
-                    } catch (\Throwable $ignored) {
-                        $personnel = null;
-                    }
-                }
-
-                // Strategy B: Fallback name, unit, and user profile heuristics
+                // Graceful fallback for legacy records where user_id was NULL before account linkage
                 if (!$personnel) {
                     $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
                     if ($user) {
-                        $firstName = trim($user['first_name'] ?? '');
-                        $lastName  = trim($user['last_name'] ?? '');
-                        $fullName  = trim($firstName . ' ' . $lastName);
-                        $unitId    = !empty($user['unit_id']) ? (int) $user['unit_id'] : null;
+                        $fullName = trim("{$user['first_name']} {$user['last_name']}");
+                        $personnel = $db->table('personnel')
+                            ->where('name', $fullName)
+                            ->where('unit_id', $user['unit_id'] ?? 1)
+                            ->get()->getRowArray();
 
-                        // Match B1: Exact full name
-                        if (!empty($fullName)) {
-                            $builder = $db->table('personnel')->where('name', $fullName);
-                            if ($unitId) {
-                                $builder->where('unit_id', $unitId);
-                            }
-                            $personnel = $builder->get()->getRowArray();
-
-                            if (!$personnel) {
-                                $personnel = $db->table('personnel')->where('name', $fullName)->get()->getRowArray();
-                            }
-                        }
-
-                        // Match B2: Personnel name contains both first name and last name
-                        if (!$personnel && !empty($firstName) && !empty($lastName)) {
-                            $builder = $db->table('personnel')
-                                ->like('name', $firstName)
-                                ->like('name', $lastName);
-                            if ($unitId) {
-                                $builder->where('unit_id', $unitId);
-                            }
-                            $personnel = $builder->get()->getRowArray();
-
-                            if (!$personnel) {
-                                $personnel = $db->table('personnel')
-                                    ->like('name', $firstName)
-                                    ->like('name', $lastName)
-                                    ->get()->getRowArray();
-                            }
-                        }
-
-                        // Match B3: Unit + last name heuristic
-                        if (!$personnel && $unitId && !empty($lastName)) {
-                            $personnel = $db->table('personnel')
-                                ->where('unit_id', $unitId)
-                                ->like('name', $lastName)
-                                ->get()->getRowArray();
-                        }
-
-                        // Match B4: Unit + first name heuristic (e.g. roster name is "Maria" or "Maria Santos")
-                        if (!$personnel && $unitId && !empty($firstName) && mb_strlen($firstName) >= 2) {
-                            $personnel = $db->table('personnel')
-                                ->where('unit_id', $unitId)
-                                ->like('name', $firstName)
-                                ->get()->getRowArray();
-                        }
-
-                        // Match B5: Email username match (e.g. maria@personnel.com -> matches "Maria")
-                        $emailLocal = explode('@', $user['email'] ?? '')[0] ?? '';
-                        if (!$personnel && !empty($emailLocal) && mb_strlen($emailLocal) >= 3) {
-                            $builder = $db->table('personnel')->like('name', $emailLocal);
-                            if ($unitId) {
-                                $builder->where('unit_id', $unitId);
-                            }
-                            $personnel = $builder->get()->getRowArray();
-                        }
-
-                        // Match B6: First name match across ANY unit
-                        if (!$personnel && !empty($firstName) && mb_strlen($firstName) >= 3) {
-                            $personnel = $db->table('personnel')
-                                ->like('name', $firstName)
-                                ->get()->getRowArray();
-                        }
-
-                        // Match B7: Check if personnel.id was set directly to user_id
-                        if (!$personnel) {
-                            $personnel = $db->table('personnel')->where('id', $currentUserId)->get()->getRowArray();
-                        }
-
-                        // Match B8: If in this unit there is an unlinked personnel member
-                        if (!$personnel && $unitId) {
-                            $unlinkedQuery = $db->table('personnel')->where('unit_id', $unitId);
-                            if ($hasUserIdCol) {
-                                $unlinkedQuery->groupStart()
-                                    ->where('user_id IS NULL')
-                                    ->orWhere('user_id', '')
-                                ->groupEnd();
-                            }
-                            $unlinkedWorkers = $unlinkedQuery->get()->getResultArray();
-                            if (count($unlinkedWorkers) === 1) {
-                                $personnel = $unlinkedWorkers[0];
-                            }
-                        }
-
-                        // Match B9: Most recently dispatched personnel in this unit (e.g. newly dispatched test ticket)
-                        if (!$personnel && $unitId) {
-                            $recentAss = $db->table('ticket_assignments ta')
-                                ->select('p.*')
-                                ->join('personnel p', 'p.id = ta.personnel_id')
-                                ->where('p.unit_id', $unitId)
-                                ->orderBy('ta.assigned_at', 'DESC')
-                                ->limit(1)
-                                ->get()->getRowArray();
-                            if ($recentAss) {
-                                $personnel = $recentAss;
-                            }
-                        }
-
-                        // Auto-heal: If located via heuristics and user_id column exists, bind user_id to the personnel record
-                        if ($personnel && $hasUserIdCol && empty($personnel['user_id'])) {
+                        if ($personnel) {
+                            // Permanently bind the foreign key relation
                             try {
-                                $db->table('personnel')
-                                    ->where('id', $personnel['id'])
-                                    ->update(['user_id' => $currentUserId]);
+                                $db->table('personnel')->where('id', $personnel['id'])->update([
+                                    'user_id'    => $currentUserId,
+                                    'updated_at' => date('Y-m-d H:i:s'),
+                                ]);
                                 $personnel['user_id'] = $currentUserId;
                             } catch (\Throwable $ignored) {
                             }
                         }
-
-                        // Auto-sync: Update user unit_id if missing
-                        if ($personnel && empty($unitId) && !empty($personnel['unit_id'])) {
-                            try {
-                                $db->table('users')->where('id', $currentUserId)->update(['unit_id' => $personnel['unit_id']]);
-                            } catch (\Throwable $ignored) {
-                            }
-                        }
                     }
                 }
             }
 
-            // 3. Fallback: If still no personnel profile found, but the user is an authenticated worker, synthesize a profile
-            if (!$personnel && !empty($currentUserId)) {
-                $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
-                if ($user) {
-                    $firstName = trim($user['first_name'] ?? '');
-                    $lastName  = trim($user['last_name'] ?? '');
-                    $fullName  = trim($firstName . ' ' . $lastName);
-                    if (empty($fullName)) {
-                        $fullName = $user['email'] ?? 'Field Worker';
-                    }
-                    $personnel = [
-                        'id'        => $currentUserId,
-                        'user_id'   => $currentUserId,
-                        'unit_id'   => !empty($user['unit_id']) ? (int) $user['unit_id'] : 1,
-                        'name'      => $fullName,
-                        'specialty' => 'Field Operations Specialist',
-                        'status'    => 'available',
-                    ];
-                }
-            }
-
-            // 4. Fallback for privileged preview accounts (Admin/Director/Superadmin) who didn't supply ?personnel_id
+            // 3. Fallback for privileged preview accounts (Admin/Director/Superadmin) who didn't supply ?personnel_id
             if (!$personnel && in_array($currentRole, ['admin', 'director', 'superadmin'], true)) {
                 $unitId = $this->currentUserUnitId();
-                if ($unitId) {
-                    $personnel = $db->table('personnel')->where('unit_id', $unitId)->get()->getRowArray();
-                } else {
-                    $personnel = $db->table('personnel')->get()->getRowArray();
-                }
+                $personnel = $unitId
+                    ? $db->table('personnel')->where('unit_id', $unitId)->get()->getRowArray()
+                    : $db->table('personnel')->get()->getRowArray();
             }
 
             if (!$personnel) {
@@ -666,24 +563,7 @@ class PersonnelController extends BaseController
                 ]);
             }
 
-            // Identify all possible ID aliases for this worker (personnel table UUID and authentication user UUID)
-            $targetIds = array_values(array_unique(array_filter([
-                $personnel['id'] ?? null,
-                $personnel['user_id'] ?? null,
-                $currentUserId ?? null,
-            ])));
-
-            if (empty($targetIds)) {
-                return $this->successResponse('Personnel dashboard data retrieved.', [
-                    'personnel'       => $personnel,
-                    'assignments'     => [],
-                    'active_count'    => 0,
-                    'completed_count' => 0,
-                    'total_count'     => 0,
-                ]);
-            }
-
-            // Fetch all assignments for this personnel using LEFT JOIN on tickets to safeguard against missing ticket metadata
+            // 4. Pure relational query: Fetch all assignments directly via personnel.id foreign key
             $rawAssignments = $db->table('ticket_assignments ta')
                 ->select('
                     ta.id as assignment_id,
@@ -719,7 +599,7 @@ class PersonnelController extends BaseController
                 ->join('tickets t', 't.id = ta.ticket_id', 'left')
                 ->join('units u', 'u.id = t.unit_id', 'left')
                 ->join('users req', 'req.id = t.user_id', 'left')
-                ->whereIn('ta.personnel_id', $targetIds)
+                ->where('ta.personnel_id', $personnel['id'])
                 ->orderBy('ta.assigned_at', 'DESC')
                 ->get()->getResultArray();
 
@@ -775,7 +655,7 @@ class PersonnelController extends BaseController
                 foreach ($allTeamRows as $row) {
                     $cleanedName = trim((string)$row['personnel_name']);
                     $row['personnel_name'] = !empty($cleanedName) ? $cleanedName : 'Team Member';
-                    $row['is_you'] = in_array($row['personnel_id'], $targetIds, true);
+                    $row['is_you'] = ($row['personnel_id'] === $personnel['id'] || $row['personnel_id'] === ($personnel['user_id'] ?? null) || $row['personnel_id'] === $currentUserId);
                     $teamMembersByTicket[$row['ticket_id']][] = $row;
                 }
 

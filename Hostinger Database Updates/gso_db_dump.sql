@@ -446,6 +446,7 @@ INSERT IGNORE INTO `users` (`id`, `first_name`, `last_name`, `email`, `password_
 -- Table structure for table `personnel`
 CREATE TABLE IF NOT EXISTS `personnel` (
   `id` varchar(36) NOT NULL,
+  `user_id` varchar(36) DEFAULT NULL,
   `unit_id` int(11) UNSIGNED NOT NULL,
   `name` varchar(255) NOT NULL,
   `specialty` varchar(100) NOT NULL,
@@ -453,6 +454,7 @@ CREATE TABLE IF NOT EXISTS `personnel` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
+  KEY `idx_personnel_user` (`user_id`),
   KEY `idx_personnel_unit_status` (`unit_id`,`status`),
   CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

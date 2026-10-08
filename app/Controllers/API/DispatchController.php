@@ -107,7 +107,81 @@ class DispatchController extends BaseController
 
         $worker = $this->personnelModel->find($personnelId);
         if (!$worker) {
+            // Check if personnelId is actually a user_id of a worker account
+            $worker = $this->personnelModel->where('user_id', $personnelId)->first();
+            if ($worker) {
+                $personnelId = $worker['id'];
+            } else {
+                // Check if personnelId is an ID from users table with role worker/personnel
+                $userModel = new \App\Models\UserModel();
+                $matchedUser = $userModel->find($personnelId);
+                if ($matchedUser && in_array($matchedUser['role'], ['worker', 'personnel'], true)) {
+                    $fullName = trim("{$matchedUser['first_name']} {$matchedUser['last_name']}");
+                    $workerUnitId = (int) ($matchedUser['unit_id'] ?: $ticket['unit_id']);
+                    $existingPersonnel = $this->personnelModel
+                        ->where('unit_id', $workerUnitId)
+                        ->where('name', $fullName)
+                        ->first();
+
+                    if ($existingPersonnel) {
+                        $this->personnelModel->update($existingPersonnel['id'], [
+                            'user_id'    => $matchedUser['id'],
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                        $worker = $existingPersonnel;
+                        $personnelId = $existingPersonnel['id'];
+                    } else {
+                        $newPid = generate_uuid();
+                        $this->personnelModel->insert([
+                            'id'        => $newPid,
+                            'user_id'   => $matchedUser['id'],
+                            'unit_id'   => $workerUnitId,
+                            'name'      => $fullName,
+                            'specialty' => 'General Maintenance',
+                            'status'    => 'available',
+                        ]);
+                        $worker = $this->personnelModel->find($newPid);
+                        $personnelId = $newPid;
+                    }
+                }
+            }
+        }
+
+        if (!$worker) {
             return $this->notFoundResponse('Personnel');
+        }
+
+        // Auto-heal unlinked personnel record if a matching worker user exists
+        if (empty($worker['user_id'])) {
+            $userModel = new \App\Models\UserModel();
+            $workerName = trim($worker['name']);
+            $matchedUser = $userModel->groupStart()
+                ->where('role', 'worker')
+                ->orWhere('role', 'personnel')
+            ->groupEnd()
+            ->where('unit_id', (int) $worker['unit_id'])
+            ->where("CONCAT(TRIM(first_name), ' ', TRIM(last_name))", $workerName)
+            ->first();
+
+            if (!$matchedUser) {
+                $matchedUser = $userModel->groupStart()
+                    ->where('role', 'worker')
+                    ->orWhere('role', 'personnel')
+                ->groupEnd()
+                ->where("CONCAT(TRIM(first_name), ' ', TRIM(last_name))", $workerName)
+                ->first();
+            }
+
+            if ($matchedUser) {
+                try {
+                    $this->personnelModel->update($worker['id'], [
+                        'user_id'    => $matchedUser['id'],
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $worker['user_id'] = $matchedUser['id'];
+                } catch (\Throwable $ignored) {
+                }
+            }
         }
 
         if ((int) $worker['unit_id'] !== (int) $ticket['unit_id']) {

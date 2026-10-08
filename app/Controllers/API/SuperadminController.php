@@ -95,6 +95,25 @@ class SuperadminController extends BaseController
         $perPage = min(100, max(5, (int) ($this->request->getGet('per_page') ?? 15)));
         $offset  = ($page - 1) * $perPage;
 
+        // Auto-heal unlinked personnel records to worker user accounts
+        try {
+            $db = \Config\Database::connect();
+            if (!$db->fieldExists('user_id', 'personnel')) {
+                $db->query("ALTER TABLE personnel ADD COLUMN user_id VARCHAR(36) DEFAULT NULL AFTER id, ADD INDEX idx_personnel_user (user_id)");
+            }
+            $db->query("
+                UPDATE personnel p
+                INNER JOIN users u ON u.role IN ('worker', 'personnel') 
+                    AND (
+                        p.name = CONCAT(TRIM(u.first_name), ' ', TRIM(u.last_name))
+                        OR (p.unit_id = u.unit_id AND p.name LIKE CONCAT('%', TRIM(u.last_name), '%'))
+                    )
+                SET p.user_id = u.id
+                WHERE p.user_id IS NULL OR p.user_id = ''
+            ");
+        } catch (\Throwable $ignored) {
+        }
+
         $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
         $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
 
@@ -250,18 +269,44 @@ class SuperadminController extends BaseController
 
         if ($this->userModel->skipValidation(true)->insert($insertData)) {
             // If creating a Personnel (worker) account, ensure a linked personnel roster record exists
-            if ($body['role'] === 'worker') {
+            if ($body['role'] === 'worker' || $body['role'] === 'personnel') {
                 $personnelModel = new \App\Models\PersonnelModel();
                 $fullName = trim("{$firstName} {$lastName}");
                 $specialty = !empty($body['specialty']) ? trim((string) $body['specialty']) : 'General Maintenance';
-                $personnelModel->insert([
-                    'id'        => generate_uuid(),
-                    'user_id'   => $userId,
-                    'unit_id'   => $unitId,
-                    'name'      => $fullName,
-                    'specialty' => $specialty,
-                    'status'    => 'available',
-                ]);
+
+                // Check if an unlinked personnel record already exists with matching name / unit
+                $existingPersonnel = $personnelModel
+                    ->where('unit_id', $unitId)
+                    ->where('name', $fullName)
+                    ->first();
+
+                if ($existingPersonnel) {
+                    $personnelModel->update($existingPersonnel['id'], [
+                        'user_id'   => $userId,
+                        'name'      => $fullName,
+                        'unit_id'   => $unitId,
+                        'specialty' => $specialty,
+                    ]);
+                } else {
+                    $personnelModel->insert([
+                        'id'        => generate_uuid(),
+                        'user_id'   => $userId,
+                        'unit_id'   => $unitId,
+                        'name'      => $fullName,
+                        'specialty' => $specialty,
+                        'status'    => 'available',
+                    ]);
+                }
+
+                // Direct DB update ensures all matching records in unit have user_id set
+                try {
+                    $db = \Config\Database::connect();
+                    $db->table('personnel')
+                        ->where('unit_id', $unitId)
+                        ->where('name', $fullName)
+                        ->update(['user_id' => $userId, 'updated_at' => date('Y-m-d H:i:s')]);
+                } catch (\Throwable $ignored) {
+                }
             }
 
             $createdUser = $this->userModel->getSafeUser($userId);
@@ -377,15 +422,23 @@ class SuperadminController extends BaseController
 
         if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
             // If the account is a Personnel (worker), synchronize the linked personnel roster entry
-            if ($finalRole === 'worker') {
+            if ($finalRole === 'worker' || $finalRole === 'personnel') {
                 $personnelModel = new \App\Models\PersonnelModel();
-                $linkedPersonnel = $personnelModel->where('user_id', $id)->first();
                 $workerName = trim(($updateData['first_name'] ?? $existing['first_name']) . ' ' . ($updateData['last_name'] ?? $existing['last_name']));
                 $workerUnit = $finalUnitId;
                 $workerSpecialty = !empty($body['specialty']) ? trim((string) $body['specialty']) : null;
 
+                $linkedPersonnel = $personnelModel
+                    ->where('user_id', $id)
+                    ->orGroupStart()
+                        ->where('unit_id', $workerUnit)
+                        ->where('name', $workerName)
+                    ->groupEnd()
+                    ->first();
+
                 if ($linkedPersonnel) {
                     $pUpdate = [
+                        'user_id' => $id,
                         'name'    => $workerName,
                         'unit_id' => $workerUnit,
                     ];
@@ -402,6 +455,16 @@ class SuperadminController extends BaseController
                         'specialty' => $workerSpecialty ?? 'General Maintenance',
                         'status'    => 'available',
                     ]);
+                }
+
+                // Direct DB update ensures all matching records in unit have user_id set
+                try {
+                    $db = \Config\Database::connect();
+                    $db->table('personnel')
+                        ->where('unit_id', $workerUnit)
+                        ->where('name', $workerName)
+                        ->update(['user_id' => $id, 'updated_at' => date('Y-m-d H:i:s')]);
+                } catch (\Throwable $ignored) {
                 }
             }
 

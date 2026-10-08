@@ -141,8 +141,9 @@ class UserModel extends Model
      */
     public function getUsersList(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
     {
-        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
-                        ->join('units', 'units.id = users.unit_id', 'left');
+        $builder = $this->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, personnel.specialty as specialty, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
+                        ->join('units', 'units.id = users.unit_id', 'left')
+                        ->join('personnel', 'personnel.user_id = users.id', 'left');
 
         if (!empty($search)) {
             $builder->groupStart()
@@ -150,11 +151,16 @@ class UserModel extends Model
                     ->orLike('users.last_name', $search)
                     ->orLike('users.email', $search)
                     ->orLike('users.student_id_number', $search)
+                    ->orLike('personnel.specialty', $search)
                     ->groupEnd();
         }
 
         if (!empty($role) && $role !== 'all') {
-            $builder->where('users.role', $role);
+            if ($role === 'personnel' || $role === 'worker') {
+                $builder->where('users.role', 'worker');
+            } else {
+                $builder->where('users.role', $role);
+            }
         }
 
         if (!empty($unitId) && $unitId !== 'all') {
@@ -277,7 +283,8 @@ class UserModel extends Model
      */
     public function getUsersCount(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null): int
     {
-        $builder = $this->select('users.id');
+        $builder = $this->select('users.id')
+                        ->join('personnel', 'personnel.user_id = users.id', 'left');
 
         if (!empty($search)) {
             $builder->groupStart()
@@ -285,11 +292,16 @@ class UserModel extends Model
                     ->orLike('users.last_name', $search)
                     ->orLike('users.email', $search)
                     ->orLike('users.student_id_number', $search)
+                    ->orLike('personnel.specialty', $search)
                     ->groupEnd();
         }
 
         if (!empty($role) && $role !== 'all') {
-            $builder->where('users.role', $role);
+            if ($role === 'personnel' || $role === 'worker') {
+                $builder->where('users.role', 'worker');
+            } else {
+                $builder->where('users.role', $role);
+            }
         }
 
         if (!empty($unitId) && $unitId !== 'all') {
@@ -318,7 +330,7 @@ class UserModel extends Model
         $suspendedUsers = $this->where('status', 'Suspended')->countAllResults();
 
         // Role breakdown
-        $roles = ['superadmin', 'admin', 'staff', 'director', 'employee', 'student'];
+        $roles = ['superadmin', 'admin', 'staff', 'director', 'worker', 'employee', 'student'];
         $roleBreakdown = [];
         foreach ($roles as $r) {
             $roleBreakdown[$r] = $this->where('role', $r)->countAllResults();

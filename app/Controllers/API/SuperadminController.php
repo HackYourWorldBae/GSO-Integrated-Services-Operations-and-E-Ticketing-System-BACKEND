@@ -114,8 +114,9 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
+        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, personnel.specialty as specialty, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
                                 ->join('units', 'units.id = users.unit_id', 'left')
+                                ->join('personnel', 'personnel.user_id = users.id', 'left')
                                 ->where('users.id', $id)
                                 ->first();
 
@@ -147,11 +148,12 @@ class SuperadminController extends BaseController
             'email'             => 'required|valid_email|is_unique[users.email]',
             'password'          => 'required|min_length[6]',
             'confirm_password'  => 'permit_empty|matches[password]',
-            'role'              => 'required|in_list[student,employee,admin,staff,director,superadmin]',
+            'role'              => 'required|in_list[student,employee,admin,staff,director,superadmin,worker]',
             'status'            => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
             'unit_id'           => 'permit_empty',
             'contact_number'    => 'permit_empty|max_length[30]',
             'student_id_number' => 'permit_empty|max_length[50]',
+            'specialty'         => 'permit_empty|max_length[100]',
         ];
 
         if (!$this->validateData($body, $rules)) {
@@ -222,10 +224,10 @@ class SuperadminController extends BaseController
 
         $unitId = !empty($body['unit_id']) ? (int) $body['unit_id'] : null;
 
-        // Policy: Admin and Staff are always scoped to a sub-unit dashboard
-        if (in_array($body['role'], ['admin', 'staff'], true) && $unitId === null) {
-            return $this->errorResponse('Admin and Staff accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
-                'unit_id' => ['A sub-unit assignment is required for Admin and Staff accounts.']
+        // Policy: Admin, Staff, and Personnel (Worker) are always scoped to a sub-unit dashboard
+        if (in_array($body['role'], ['admin', 'staff', 'worker'], true) && $unitId === null) {
+            return $this->errorResponse('Admin, Staff, and Personnel accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
+                'unit_id' => ['A sub-unit assignment is required for Admin, Staff, and Personnel accounts.']
             ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
@@ -247,6 +249,21 @@ class SuperadminController extends BaseController
         ];
 
         if ($this->userModel->skipValidation(true)->insert($insertData)) {
+            // If creating a Personnel (worker) account, ensure a linked personnel roster record exists
+            if ($body['role'] === 'worker') {
+                $personnelModel = new \App\Models\PersonnelModel();
+                $fullName = trim("{$firstName} {$lastName}");
+                $specialty = !empty($body['specialty']) ? trim((string) $body['specialty']) : 'General Maintenance';
+                $personnelModel->insert([
+                    'id'        => generate_uuid(),
+                    'user_id'   => $userId,
+                    'unit_id'   => $unitId,
+                    'name'      => $fullName,
+                    'specialty' => $specialty,
+                    'status'    => 'available',
+                ]);
+            }
+
             $createdUser = $this->userModel->getSafeUser($userId);
 
             $this->activityLogModel->logEvent([
@@ -283,10 +300,11 @@ class SuperadminController extends BaseController
             'first_name'     => 'permit_empty|max_length[100]',
             'last_name'      => 'permit_empty|max_length[100]',
             'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
-            'role'           => 'permit_empty|in_list[student,employee,admin,staff,director,superadmin]',
+            'role'           => 'permit_empty|in_list[student,employee,admin,staff,director,superadmin,worker]',
             'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
             'contact_number' => 'permit_empty|max_length[30]',
             'unit_id'        => 'permit_empty',
+            'specialty'      => 'permit_empty|max_length[100]',
             'password'       => 'permit_empty|min_length[6]',
         ];
 
@@ -315,14 +333,14 @@ class SuperadminController extends BaseController
             return $this->errorResponse('You cannot demote your own Superadmin account.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
-        // Policy: Admin and Staff must always resolve to a sub-unit
+        // Policy: Admin, Staff, and Personnel (Worker) must always resolve to a sub-unit
         $finalRole = $body['role'] ?? $existing['role'];
         $finalUnitId = array_key_exists('unit_id', $body)
             ? (!empty($body['unit_id']) ? (int) $body['unit_id'] : null)
             : (isset($existing['unit_id']) ? (int) $existing['unit_id'] : null);
-        if (in_array($finalRole, ['admin', 'staff'], true) && $finalUnitId === null) {
-            return $this->errorResponse('Admin and Staff accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
-                'unit_id' => ['A sub-unit assignment is required for Admin and Staff accounts.']
+        if (in_array($finalRole, ['admin', 'staff', 'worker'], true) && $finalUnitId === null) {
+            return $this->errorResponse('Admin, Staff, and Personnel accounts must be assigned to a sub-unit (FGMU, LEAU, or SSU).', [
+                'unit_id' => ['A sub-unit assignment is required for Admin, Staff, and Personnel accounts.']
             ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
@@ -358,6 +376,35 @@ class SuperadminController extends BaseController
         }
 
         if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
+            // If the account is a Personnel (worker), synchronize the linked personnel roster entry
+            if ($finalRole === 'worker') {
+                $personnelModel = new \App\Models\PersonnelModel();
+                $linkedPersonnel = $personnelModel->where('user_id', $id)->first();
+                $workerName = trim(($updateData['first_name'] ?? $existing['first_name']) . ' ' . ($updateData['last_name'] ?? $existing['last_name']));
+                $workerUnit = $finalUnitId;
+                $workerSpecialty = !empty($body['specialty']) ? trim((string) $body['specialty']) : null;
+
+                if ($linkedPersonnel) {
+                    $pUpdate = [
+                        'name'    => $workerName,
+                        'unit_id' => $workerUnit,
+                    ];
+                    if ($workerSpecialty !== null) {
+                        $pUpdate['specialty'] = $workerSpecialty;
+                    }
+                    $personnelModel->update($linkedPersonnel['id'], $pUpdate);
+                } else {
+                    $personnelModel->insert([
+                        'id'        => generate_uuid(),
+                        'user_id'   => $id,
+                        'unit_id'   => $workerUnit,
+                        'name'      => $workerName,
+                        'specialty' => $workerSpecialty ?? 'General Maintenance',
+                        'status'    => 'available',
+                    ]);
+                }
+            }
+
             $safeUser = $this->userModel->getSafeUser($id);
 
             $this->activityLogModel->logEvent([
@@ -458,6 +505,11 @@ class SuperadminController extends BaseController
         // Clean up sessions before permanent deletion
         $sessionModel = new \App\Models\UserSessionModel();
         $sessionModel->where('user_id', $id)->delete();
+
+        // If user was a worker, decouple from personnel roster to prevent orphan FK
+        if ($existing['role'] === 'worker') {
+            (new \App\Models\PersonnelModel())->where('user_id', $id)->set(['user_id' => null])->update();
+        }
 
         $this->activityLogModel->logEvent([
             'event_type'     => 'ACCOUNT_DELETED',

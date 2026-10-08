@@ -155,22 +155,17 @@ class DispatchController extends BaseController
         if (empty($worker['user_id'])) {
             $userModel = new \App\Models\UserModel();
             $workerName = trim($worker['name']);
+            $db = \Config\Database::connect();
             $matchedUser = $userModel->groupStart()
                 ->where('role', 'worker')
                 ->orWhere('role', 'personnel')
+                ->orWhere('role', 'staff')
             ->groupEnd()
-            ->where('unit_id', (int) $worker['unit_id'])
-            ->where("CONCAT(TRIM(first_name), ' ', TRIM(last_name))", $workerName)
-            ->first();
-
-            if (!$matchedUser) {
-                $matchedUser = $userModel->groupStart()
-                    ->where('role', 'worker')
-                    ->orWhere('role', 'personnel')
-                ->groupEnd()
+            ->groupStart()
                 ->where("CONCAT(TRIM(first_name), ' ', TRIM(last_name))", $workerName)
-                ->first();
-            }
+                ->orWhere("REPLACE(LOWER(CONCAT(first_name, last_name)), ' ', '') = REPLACE(LOWER(" . $db->escape($workerName) . "), ' ', '')", null, false)
+            ->groupEnd()
+            ->first();
 
             if ($matchedUser) {
                 try {
@@ -179,6 +174,22 @@ class DispatchController extends BaseController
                         'updated_at' => date('Y-m-d H:i:s'),
                     ]);
                     $worker['user_id'] = $matchedUser['id'];
+
+                    // Also bind any duplicate personnel records for this worker
+                    $db->table('personnel')
+                        ->where('unit_id', (int) $worker['unit_id'])
+                        ->groupStart()
+                            ->where('name', $workerName)
+                            ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $db->escape($workerName) . "), ' ', '')", null, false)
+                        ->groupEnd()
+                        ->groupStart()
+                            ->where('user_id IS NULL')
+                            ->orWhere('user_id', '')
+                        ->groupEnd()
+                        ->update([
+                            'user_id'    => $matchedUser['id'],
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
                 } catch (\Throwable $ignored) {
                 }
             }

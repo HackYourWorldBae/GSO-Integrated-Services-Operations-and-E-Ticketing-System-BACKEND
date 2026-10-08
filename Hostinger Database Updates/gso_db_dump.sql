@@ -84,6 +84,20 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'personnel' AND column_name = 'user_id') THEN
             ALTER TABLE `personnel` ADD COLUMN `user_id` VARCHAR(36) NULL DEFAULT NULL AFTER `unit_id`;
         END IF;
+
+        -- Auto-heal and bind unlinked personnel records to existing worker accounts
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'users') THEN
+            UPDATE `personnel` p
+            INNER JOIN `users` u ON (
+                (p.user_id IS NULL OR p.user_id = '')
+                AND (
+                    TRIM(LOWER(p.name)) = TRIM(LOWER(CONCAT(u.first_name, ' ', u.last_name)))
+                    OR TRIM(LOWER(REPLACE(p.name, ' ', ''))) = TRIM(LOWER(REPLACE(CONCAT(u.first_name, u.last_name), ' ', '')))
+                )
+                AND u.role IN ('worker', 'personnel', 'employee', 'staff')
+            )
+            SET p.user_id = u.id;
+        END IF;
     END IF;
 
     -- ------------------------------------------------------------------------
@@ -365,7 +379,18 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------
-    -- 12. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
+    -- 12. TICKET ASSIGNMENTS UPGRADES & RE-LINKING
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_assignments')
+       AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'personnel') THEN
+        -- Re-link any assignments stored with a user_id to point to canonical personnel.id
+        UPDATE `ticket_assignments` ta
+        INNER JOIN `personnel` p ON ta.personnel_id = p.user_id
+        SET ta.personnel_id = p.id;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 13. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
     -- ------------------------------------------------------------------------
     DROP TABLE IF EXISTS `ci_sessions`;
     DROP TABLE IF EXISTS `role_permissions`;

@@ -47,6 +47,42 @@ class PersonnelModel extends Model
             return [];
         }
 
+        // Auto-heal unlinked personnel records if a matching worker user account exists
+        foreach ($personnel as &$p) {
+            if (empty($p['user_id'])) {
+                $pName = trim((string)($p['name'] ?? ''));
+                if (!empty($pName)) {
+                    $matchedUser = $db->table('users')
+                        ->groupStart()
+                            ->where('role', 'worker')
+                            ->orWhere('role', 'personnel')
+                            ->orWhere('role', 'staff')
+                        ->groupEnd()
+                        ->groupStart()
+                            ->where('unit_id', $unitId)
+                            ->orWhere('unit_id IS NULL')
+                        ->groupEnd()
+                        ->groupStart()
+                            ->where("TRIM(LOWER(CONCAT(first_name, ' ', last_name))) = " . $db->escape(strtolower($pName)), null, false)
+                            ->orWhere("REPLACE(LOWER(CONCAT(first_name, last_name)), ' ', '') = REPLACE(LOWER(" . $db->escape($pName) . "), ' ', '')", null, false)
+                        ->groupEnd()
+                        ->get()->getRowArray();
+
+                    if ($matchedUser) {
+                        try {
+                            $db->table('personnel')->where('id', $p['id'])->update([
+                                'user_id'    => $matchedUser['id'],
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                            $p['user_id'] = $matchedUser['id'];
+                        } catch (\Throwable $ignored) {
+                        }
+                    }
+                }
+            }
+        }
+        unset($p);
+
         $personnelIds = array_column($personnel, 'id');
         $userIds = array_values(array_filter(array_column($personnel, 'user_id')));
         

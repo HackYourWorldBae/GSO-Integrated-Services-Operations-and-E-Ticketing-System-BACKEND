@@ -276,34 +276,39 @@ class SuperadminController extends BaseController
 
                 // Check if an unlinked personnel record already exists with matching name / unit
                 $existingPersonnel = $personnelModel
-                    ->where('unit_id', $unitId)
-                    ->where('name', $fullName)
+                    ->where('user_id', $userId)
+                    ->orGroupStart()
+                        ->where('name', $fullName)
+                        ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $personnelModel->db->escape($fullName) . "), ' ', '')", null, false)
+                    ->groupEnd()
                     ->first();
 
                 if ($existingPersonnel) {
                     $personnelModel->update($existingPersonnel['id'], [
                         'user_id'   => $userId,
                         'name'      => $fullName,
-                        'unit_id'   => $unitId,
+                        'unit_id'   => $unitId ?: (int)($existingPersonnel['unit_id'] ?? 1),
                         'specialty' => $specialty,
                     ]);
                 } else {
                     $personnelModel->insert([
                         'id'        => generate_uuid(),
                         'user_id'   => $userId,
-                        'unit_id'   => $unitId,
+                        'unit_id'   => $unitId ?: 1,
                         'name'      => $fullName,
                         'specialty' => $specialty,
                         'status'    => 'available',
                     ]);
                 }
 
-                // Direct DB update ensures all matching records in unit have user_id set
+                // Direct DB update ensures all matching records have user_id set
                 try {
                     $db = \Config\Database::connect();
                     $db->table('personnel')
-                        ->where('unit_id', $unitId)
-                        ->where('name', $fullName)
+                        ->groupStart()
+                            ->where('name', $fullName)
+                            ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $db->escape($fullName) . "), ' ', '')", null, false)
+                        ->groupEnd()
                         ->update(['user_id' => $userId, 'updated_at' => date('Y-m-d H:i:s')]);
                 } catch (\Throwable $ignored) {
                 }
@@ -431,8 +436,8 @@ class SuperadminController extends BaseController
                 $linkedPersonnel = $personnelModel
                     ->where('user_id', $id)
                     ->orGroupStart()
-                        ->where('unit_id', $workerUnit)
                         ->where('name', $workerName)
+                        ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $personnelModel->db->escape($workerName) . "), ' ', '')", null, false)
                     ->groupEnd()
                     ->first();
 
@@ -440,7 +445,7 @@ class SuperadminController extends BaseController
                     $pUpdate = [
                         'user_id' => $id,
                         'name'    => $workerName,
-                        'unit_id' => $workerUnit,
+                        'unit_id' => $workerUnit ?: (int)($linkedPersonnel['unit_id'] ?? 1),
                     ];
                     if ($workerSpecialty !== null) {
                         $pUpdate['specialty'] = $workerSpecialty;
@@ -450,19 +455,21 @@ class SuperadminController extends BaseController
                     $personnelModel->insert([
                         'id'        => generate_uuid(),
                         'user_id'   => $id,
-                        'unit_id'   => $workerUnit,
+                        'unit_id'   => $workerUnit ?: 1,
                         'name'      => $workerName,
                         'specialty' => $workerSpecialty ?? 'General Maintenance',
                         'status'    => 'available',
                     ]);
                 }
 
-                // Direct DB update ensures all matching records in unit have user_id set
+                // Direct DB update ensures all matching records have user_id set
                 try {
                     $db = \Config\Database::connect();
                     $db->table('personnel')
-                        ->where('unit_id', $workerUnit)
-                        ->where('name', $workerName)
+                        ->groupStart()
+                            ->where('name', $workerName)
+                            ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $db->escape($workerName) . "), ' ', '')", null, false)
+                        ->groupEnd()
                         ->update(['user_id' => $id, 'updated_at' => date('Y-m-d H:i:s')]);
                 } catch (\Throwable $ignored) {
                 }

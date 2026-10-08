@@ -474,6 +474,10 @@ class PersonnelController extends BaseController
                     'user_id'    => $userId,
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
+            // Re-point any ticket assignments stored under this userId to personnelId
+            $db->table('ticket_assignments')
+                ->where('personnel_id', $userId)
+                ->update(['personnel_id' => $personnelId]);
         } catch (\Throwable $ignored) {
         }
 
@@ -507,6 +511,8 @@ class PersonnelController extends BaseController
 
             $personnel = null;
             $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
+            $candidatePersonnelIds = [];
+            $allMatchedPersonnel   = [];
 
             // 1. If an explicit personnel_id query param is passed by an administrator / director previewing
             if (!empty($targetPersonnelId) && in_array($currentRole, ['admin', 'director', 'superadmin', 'staff'], true)) {
@@ -514,33 +520,152 @@ class PersonnelController extends BaseController
                     ->where('id', $targetPersonnelId)
                     ->orWhere('user_id', $targetPersonnelId)
                     ->get()->getRowArray();
+
+                if (!$personnel) {
+                    // Check if target is a user_id from users table
+                    $targetUser = $db->table('users')->where('id', $targetPersonnelId)->get()->getRowArray();
+                    if ($targetUser) {
+                        $targetFullName = trim("{$targetUser['first_name']} {$targetUser['last_name']}");
+                        $personnel = $db->table('personnel')
+                            ->groupStart()
+                                ->where('user_id', $targetPersonnelId)
+                                ->orWhere('name', $targetFullName)
+                                ->orWhere("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $db->escape($targetFullName) . "), ' ', '')", null, false)
+                            ->groupEnd()
+                            ->get()->getRowArray();
+                    }
+                }
+
+                if ($personnel) {
+                    $allMatchedPersonnel[$personnel['id']] = $personnel;
+                    $candidatePersonnelIds[] = $personnel['id'];
+                    if (!empty($personnel['user_id'])) {
+                        $candidatePersonnelIds[] = $personnel['user_id'];
+                    }
+                    $candidatePersonnelIds[] = $targetPersonnelId;
+                }
             }
 
-            // 2. Direct relational lookup: Find the personnel record linked to the authenticated user account
+            // 2. Direct relational lookup & comprehensive fuzzy matching for the authenticated user
             if (!$personnel && !empty($currentUserId)) {
-                $personnel = $db->table('personnel')->where('user_id', $currentUserId)->get()->getRowArray();
+                $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
 
-                // Graceful fallback for legacy records where user_id was NULL before account linkage
-                if (!$personnel) {
-                    $user = $db->table('users')->where('id', $currentUserId)->get()->getRowArray();
-                    if ($user) {
-                        $fullName = trim("{$user['first_name']} {$user['last_name']}");
-                        $personnel = $db->table('personnel')
+                // 2a. Match all personnel rows directly bound to this user_id
+                $directRows = $db->table('personnel')->where('user_id', $currentUserId)->get()->getResultArray();
+                foreach ($directRows as $pRow) {
+                    $allMatchedPersonnel[$pRow['id']] = $pRow;
+                    $candidatePersonnelIds[] = $pRow['id'];
+                }
+
+                // 2b. Name-based and component matching to discover unlinked or duplicate records
+                if ($user) {
+                    $firstName   = trim((string)($user['first_name'] ?? ''));
+                    $lastName    = trim((string)($user['last_name'] ?? ''));
+                    $fullName    = trim("{$firstName} {$lastName}");
+                    $userUnitId  = !empty($user['unit_id']) ? (int)$user['unit_id'] : null;
+
+                    if (!empty($fullName)) {
+                        // Exact full name match
+                        $nameMatches = $db->table('personnel')
                             ->where('name', $fullName)
-                            ->where('unit_id', $user['unit_id'] ?? 1)
-                            ->get()->getRowArray();
-
-                        if ($personnel) {
-                            // Permanently bind the foreign key relation
-                            try {
-                                $db->table('personnel')->where('id', $personnel['id'])->update([
-                                    'user_id'    => $currentUserId,
-                                    'updated_at' => date('Y-m-d H:i:s'),
-                                ]);
-                                $personnel['user_id'] = $currentUserId;
-                            } catch (\Throwable $ignored) {
-                            }
+                            ->get()->getResultArray();
+                        foreach ($nameMatches as $pRow) {
+                            $allMatchedPersonnel[$pRow['id']] = $pRow;
+                            $candidatePersonnelIds[] = $pRow['id'];
                         }
+
+                        // Normalized whitespace & lowercased match (e.g. "Juan  Dela Cruz" vs "Juan Dela Cruz")
+                        $normMatches = $db->table('personnel')
+                            ->where("REPLACE(LOWER(name), ' ', '') = REPLACE(LOWER(" . $db->escape($fullName) . "), ' ', '')", null, false)
+                            ->get()->getResultArray();
+                        foreach ($normMatches as $pRow) {
+                            $allMatchedPersonnel[$pRow['id']] = $pRow;
+                            $candidatePersonnelIds[] = $pRow['id'];
+                        }
+                    }
+
+                    // Component matching (handles middle initials / suffixes / titles like 'Juan M. Dela Cruz' or 'Engr. Juan Dela Cruz')
+                    if (!empty($firstName) && !empty($lastName) && mb_strlen($firstName) >= 2 && mb_strlen($lastName) >= 2) {
+                        $builder = $db->table('personnel');
+                        $builder->like('name', $firstName);
+                        $builder->like('name', $lastName);
+                        $compMatches = $builder->get()->getResultArray();
+                        foreach ($compMatches as $pRow) {
+                            $allMatchedPersonnel[$pRow['id']] = $pRow;
+                            $candidatePersonnelIds[] = $pRow['id'];
+                        }
+                    }
+                }
+
+                // Always include the user's own UUID as a candidate ID (in case assignments used user_id)
+                $candidatePersonnelIds[] = $currentUserId;
+                $candidatePersonnelIds = array_values(array_unique(array_filter($candidatePersonnelIds)));
+
+                // 2c. Auto-heal: Ensure all matched personnel rows are bound to this user_id
+                foreach ($allMatchedPersonnel as $pId => $pRow) {
+                    if (empty($pRow['user_id']) || $pRow['user_id'] !== $currentUserId) {
+                        try {
+                            $db->table('personnel')->where('id', $pId)->update([
+                                'user_id'    => $currentUserId,
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                            $allMatchedPersonnel[$pId]['user_id'] = $currentUserId;
+                        } catch (\Throwable $ignored) {
+                        }
+                    }
+                }
+
+                // If user has no unit_id, sync it from the first matched personnel profile
+                if ($user && empty($user['unit_id']) && !empty($allMatchedPersonnel)) {
+                    $firstMatched = reset($allMatchedPersonnel);
+                    if (!empty($firstMatched['unit_id'])) {
+                        try {
+                            $db->table('users')->where('id', $currentUserId)->update([
+                                'unit_id' => (int) $firstMatched['unit_id'],
+                            ]);
+                        } catch (\Throwable $ignored) {
+                        }
+                    }
+                }
+
+                // 2d. Choose the canonical primary personnel record
+                if (!empty($allMatchedPersonnel)) {
+                    // If any matched personnel has existing assignments, prioritize it as the primary profile
+                    $assignedPIds = $db->table('ticket_assignments')
+                        ->select('personnel_id')
+                        ->whereIn('personnel_id', array_keys($allMatchedPersonnel))
+                        ->get()->getResultArray();
+                    $assignedPIdSet = array_column($assignedPIds, 'personnel_id');
+
+                    foreach ($allMatchedPersonnel as $pId => $pRow) {
+                        if (in_array($pId, $assignedPIdSet, true)) {
+                            $personnel = $pRow;
+                            break;
+                        }
+                    }
+                    if (!$personnel) {
+                        $personnel = reset($allMatchedPersonnel);
+                    }
+                }
+
+                // 2e. Auto-create personnel roster profile if user is a worker and no roster record existed
+                if (!$personnel && !empty($user) && in_array($user['role'], ['worker', 'personnel', 'employee', 'staff'], true)) {
+                    $newPid = generate_uuid();
+                    $unitId = !empty($user['unit_id']) ? (int) $user['unit_id'] : 1;
+                    $insertPersonnel = [
+                        'id'        => $newPid,
+                        'user_id'   => $currentUserId,
+                        'unit_id'   => $unitId,
+                        'name'      => !empty($fullName) ? $fullName : 'Responding Personnel',
+                        'specialty' => 'General Maintenance',
+                        'status'    => 'available',
+                    ];
+                    try {
+                        $db->table('personnel')->insert($insertPersonnel);
+                        $personnel = $insertPersonnel;
+                        $candidatePersonnelIds[] = $newPid;
+                        $candidatePersonnelIds = array_values(array_unique(array_filter($candidatePersonnelIds)));
+                    } catch (\Throwable $ignored) {
                     }
                 }
             }
@@ -551,6 +676,12 @@ class PersonnelController extends BaseController
                 $personnel = $unitId
                     ? $db->table('personnel')->where('unit_id', $unitId)->get()->getRowArray()
                     : $db->table('personnel')->get()->getRowArray();
+                if ($personnel) {
+                    $candidatePersonnelIds[] = $personnel['id'];
+                    if (!empty($personnel['user_id'])) {
+                        $candidatePersonnelIds[] = $personnel['user_id'];
+                    }
+                }
             }
 
             if (!$personnel) {
@@ -563,7 +694,27 @@ class PersonnelController extends BaseController
                 ]);
             }
 
-            // 4. Pure relational query: Fetch all assignments directly via personnel.id foreign key
+            // Ensure canonical primary personnel ID is in candidate IDs
+            $candidatePersonnelIds[] = $personnel['id'];
+            if (!empty($personnel['user_id'])) {
+                $candidatePersonnelIds[] = $personnel['user_id'];
+            }
+            $candidatePersonnelIds = array_values(array_unique(array_filter($candidatePersonnelIds)));
+
+            // Self-heal ticket_assignments: Unify any assignments stored under user_id or duplicate personnel IDs
+            if (count($candidatePersonnelIds) > 1 && !empty($personnel['id'])) {
+                $secondaryIds = array_values(array_diff($candidatePersonnelIds, [$personnel['id']]));
+                if (!empty($secondaryIds)) {
+                    try {
+                        $db->table('ticket_assignments')
+                            ->whereIn('personnel_id', $secondaryIds)
+                            ->update(['personnel_id' => $personnel['id']]);
+                    } catch (\Throwable $ignored) {
+                    }
+                }
+            }
+
+            // 4. Comprehensive relational query: Fetch all assignments matching ANY candidate ID for this worker
             $rawAssignments = $db->table('ticket_assignments ta')
                 ->select('
                     ta.id as assignment_id,
@@ -599,7 +750,9 @@ class PersonnelController extends BaseController
                 ->join('tickets t', 't.id = ta.ticket_id', 'left')
                 ->join('units u', 'u.id = t.unit_id', 'left')
                 ->join('users req', 'req.id = t.user_id', 'left')
-                ->where('ta.personnel_id', $personnel['id'])
+                ->groupStart()
+                    ->whereIn('ta.personnel_id', $candidatePersonnelIds)
+                ->groupEnd()
                 ->orderBy('ta.assigned_at', 'DESC')
                 ->get()->getResultArray();
 
@@ -655,7 +808,12 @@ class PersonnelController extends BaseController
                 foreach ($allTeamRows as $row) {
                     $cleanedName = trim((string)$row['personnel_name']);
                     $row['personnel_name'] = !empty($cleanedName) ? $cleanedName : 'Team Member';
-                    $row['is_you'] = ($row['personnel_id'] === $personnel['id'] || $row['personnel_id'] === ($personnel['user_id'] ?? null) || $row['personnel_id'] === $currentUserId);
+                    $row['is_you'] = (
+                        in_array($row['personnel_id'], $candidatePersonnelIds, true)
+                        || $row['personnel_id'] === $personnel['id']
+                        || $row['personnel_id'] === ($personnel['user_id'] ?? null)
+                        || $row['personnel_id'] === $currentUserId
+                    );
                     $teamMembersByTicket[$row['ticket_id']][] = $row;
                 }
 

@@ -165,6 +165,9 @@ class AccountActivityLogModel extends Model
     {
         try {
             $this->ensureTableExists();
+            try {
+                $this->db->query("SET time_zone = '+08:00'");
+            } catch (\Throwable $ignored) {}
 
             $userAgent = $params['user_agent'] ?? null;
             if (empty($userAgent) && function_exists('service')) {
@@ -216,6 +219,9 @@ class AccountActivityLogModel extends Model
     {
         $this->ensureTableExists();
         $db = $this->db;
+        try {
+            $db->query("SET time_zone = '+08:00'");
+        } catch (\Throwable $ignored) {}
 
         $builder = $db->table($this->table)
             ->select('

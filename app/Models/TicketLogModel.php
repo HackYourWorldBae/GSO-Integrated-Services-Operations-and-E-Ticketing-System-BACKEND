@@ -21,6 +21,10 @@ class TicketLogModel extends Model
     public function logAction(string $ticketId, ?string $userId, string $action, ?string $details = null): bool
     {
         try {
+            try {
+                $this->db->query("SET time_zone = '+08:00'");
+            } catch (\Throwable $ignored) {}
+
             return (bool) $this->insert([
                 'ticket_id'  => $ticketId,
                 'user_id'    => $userId,
@@ -40,6 +44,9 @@ class TicketLogModel extends Model
     public function getByTicket(string $ticketId): array
     {
         $db = \Config\Database::connect();
+        try {
+            $db->query("SET time_zone = '+08:00'");
+        } catch (\Throwable $ignored) {}
 
         return $db->query("
             SELECT tl.*, CONCAT(u.first_name, ' ', u.last_name) AS actor_name, u.role AS actor_role

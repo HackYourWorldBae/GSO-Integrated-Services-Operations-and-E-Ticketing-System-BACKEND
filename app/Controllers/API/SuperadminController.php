@@ -869,6 +869,9 @@ class SuperadminController extends BaseController
         $offset = max(0, (int) ($this->request->getGet('offset') ?? 0));
 
         $db = Database::connect();
+        try {
+            $db->query("SET time_zone = '+08:00'");
+        } catch (\Throwable $ignored) {}
 
         // Auto-seed/backfill initial ticket event logs if ticket_logs table is currently empty
         $countLogs = $db->table('ticket_logs')->countAllResults();

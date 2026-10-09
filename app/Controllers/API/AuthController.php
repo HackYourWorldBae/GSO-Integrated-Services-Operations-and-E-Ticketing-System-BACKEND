@@ -446,6 +446,23 @@ class AuthController extends BaseController
             );
         }
 
+        // --- Maintenance Mode Check ---
+        // Superadmins are exempt from maintenance lockouts so they can execute backups, restores, and recovery.
+        if (($user['role'] ?? '') !== 'superadmin') {
+            $systemSettingModel = new \App\Models\SystemSettingModel();
+            if ($systemSettingModel->isMaintenanceActive()) {
+                $maintDetails = $systemSettingModel->getMaintenanceDetails();
+                return $this->errorResponse(
+                    $maintDetails['message'] ?: 'The website is currently under emergency maintenance. Please try again later.',
+                    [
+                        'maintenance_mode'    => true,
+                        'maintenance_details' => $maintDetails,
+                    ],
+                    ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+                );
+            }
+        }
+
         // --- Account Lockout Check (5 failed attempts -> 15 min lock) ---
         if (!empty($user['lockout_until'])) {
             $lockoutTime = strtotime($user['lockout_until']);
@@ -703,13 +720,19 @@ class AuthController extends BaseController
             $permissions = array_values(array_diff($permissions, ['tickets.create']));
         }
 
+        $systemSettingModel = new \App\Models\SystemSettingModel();
+        $isMaintenance      = $systemSettingModel->isMaintenanceActive();
+        $maintDetails       = $isMaintenance ? $systemSettingModel->getMaintenanceDetails() : null;
+
         return $this->successResponse('Session is active and valid.', [
-            'valid'       => true,
-            'user_id'     => $userId,
-            'role'        => $role,
-            'status'      => $user['status'],
-            'is_verified' => (int) ($user['is_verified'] ?? 0),
-            'permissions' => $permissions,
+            'valid'               => true,
+            'user_id'             => $userId,
+            'role'                => $role,
+            'status'              => $user['status'],
+            'is_verified'         => (int) ($user['is_verified'] ?? 0),
+            'permissions'         => $permissions,
+            'maintenance_mode'    => $isMaintenance,
+            'maintenance_details' => $maintDetails,
         ]);
     }
 
@@ -1125,6 +1148,20 @@ class AuthController extends BaseController
         ]);
 
         return $this->successResponse('Password reset successfully. You can now log in with your new password.');
+    }
+
+    /**
+     * Public Maintenance Mode status endpoint.
+     * Used by the login page and client heartbeat when unauthenticated.
+     */
+    public function maintenanceStatus(): ResponseInterface
+    {
+        $systemSettingModel = new \App\Models\SystemSettingModel();
+        $details = $systemSettingModel->getMaintenanceDetails();
+
+        return $this->successResponse('Maintenance status retrieved.', [
+            'maintenance' => $details,
+        ]);
     }
 }
 

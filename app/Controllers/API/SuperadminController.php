@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\UserModel;
 use App\Models\TicketModel;
 use App\Models\AccountActivityLogModel;
+use App\Models\SystemSettingModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -23,18 +24,22 @@ use Config\Database;
  *  DELETE /api/v1/superadmin/users/(:segment)   - Deactivate or delete user account
  *  GET    /api/v1/superadmin/audit-logs         - System-wide business process and ticket log explorer
  *  GET    /api/v1/superadmin/account-activity-logs - Privacy-compliant user account & authentication activity explorer
+ *  GET    /api/v1/superadmin/maintenance        - Maintenance mode status
+ *  POST   /api/v1/superadmin/maintenance        - Activate or deactivate maintenance mode
  */
 class SuperadminController extends BaseController
 {
     private UserModel $userModel;
     private TicketModel $ticketModel;
     private AccountActivityLogModel $activityLogModel;
+    private SystemSettingModel $settingModel;
 
     public function __construct()
     {
         $this->userModel        = new UserModel();
         $this->ticketModel      = new TicketModel();
         $this->activityLogModel = new AccountActivityLogModel();
+        $this->settingModel     = new SystemSettingModel();
     }
 
     /**
@@ -1023,6 +1028,60 @@ class SuperadminController extends BaseController
             'logs'  => $result['logs'],
             'total' => $result['total'],
         ]);
+    }
+
+    /**
+     * Get system maintenance mode status.
+     * GET /api/v1/superadmin/maintenance
+     */
+    public function getMaintenanceStatus(): ResponseInterface
+    {
+        $details = $this->settingModel->getMaintenanceDetails();
+        return $this->successResponse('Maintenance status retrieved.', $details);
+    }
+
+    /**
+     * Toggle or update system emergency maintenance mode.
+     * POST /api/v1/superadmin/maintenance
+     */
+    public function updateMaintenanceStatus(): ResponseInterface
+    {
+        $body      = $this->request->getJSON(true) ?? [];
+        $active    = (bool) ($body['active'] ?? false);
+        $message   = trim((string) ($body['message'] ?? ''));
+        $countdown = (int) ($body['countdown_seconds'] ?? 30);
+        $userId    = $this->currentUserId();
+
+        $this->settingModel->setMaintenanceMode($active, $message, $countdown, $userId);
+
+        $eventType = $active ? 'MAINTENANCE_MODE_ACTIVATED' : 'MAINTENANCE_MODE_DEACTIVATED';
+        $severity  = $active ? 'warning' : 'notice';
+        $details   = $active
+            ? "Superadmin initiated Emergency Maintenance Mode (grace countdown: {$countdown}s). Active users alerted and new logins blocked."
+            : "Superadmin deactivated Emergency Maintenance Mode. Normal platform access restored.";
+
+        try {
+            $this->activityLogModel->insert([
+                'actor_id'       => $userId,
+                'event_type'     => $eventType,
+                'severity'       => $severity,
+                'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
+                'user_agent'     => (string) service('request')->getUserAgent(),
+                'device_summary' => 'System Governance',
+                'details'        => $details,
+                'metadata'       => json_encode([
+                    'active'            => $active,
+                    'countdown_seconds' => $countdown,
+                    'message'           => $message,
+                ]),
+                'created_at'     => date('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $ignored) {}
+
+        return $this->successResponse(
+            $active ? 'Maintenance mode has been activated.' : 'Maintenance mode has been deactivated.',
+            $this->settingModel->getMaintenanceDetails()
+        );
     }
 }
 

@@ -17,6 +17,7 @@ class SystemBackupModel extends Model
         'file_path',
         'file_size_bytes',
         'backup_type',
+        'backup_category',
         'tables_included',
         'google_drive_file_id',
         'google_drive_link',

@@ -32,6 +32,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->get('auth/id-card/(:segment)',   'AuthController::getIdCard/$1');
     $routes->get('auth/id-selfie/(:segment)', 'AuthController::getIdSelfie/$1');
 
+    // System Maintenance Status (Public)
+    $routes->get('auth/maintenance-status',   'AuthController::maintenanceStatus');
+
     // System Health & Connectivity Probe
     $routes->get('health', function() {
         return response()->setStatusCode(200)->setJSON([
@@ -191,6 +194,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('superadmin/users/(:segment)/unlock', 'SuperadminController::unlockUser/$1', ['filter' => 'role:superadmin']);
         $routes->get('superadmin/audit-logs',             'SuperadminController::auditLogs',      ['filter' => 'role:superadmin']);
         $routes->get('superadmin/account-activity-logs',  'SuperadminController::accountActivityLogs', ['filter' => 'role:superadmin']);
+
+        // -- Emergency Maintenance Mode (Superadmin) --
+        $routes->get('superadmin/maintenance',            'SuperadminController::getMaintenanceStatus',    ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/maintenance',           'SuperadminController::updateMaintenanceStatus', ['filter' => 'role:superadmin']);
 
         // -- System Backup & Disaster Recovery (Superadmin) --
         $routes->get('superadmin/backups',                     'BackupController::index',                    ['filter' => 'role:superadmin']);

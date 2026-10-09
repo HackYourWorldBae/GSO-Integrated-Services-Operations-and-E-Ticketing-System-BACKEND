@@ -85,11 +85,15 @@ class BackupController extends BaseController
     public function create(): ResponseInterface
     {
         try {
-            $userId = $this->currentUserId();
-            $body   = $this->request->getJSON(true) ?? [];
-            $notes  = trim($body['notes'] ?? 'Manual on-demand backup');
+            $userId   = $this->currentUserId();
+            $body     = $this->request->getJSON(true) ?? [];
+            $notes    = trim($body['notes'] ?? 'Manual on-demand backup');
+            $category = trim($body['category'] ?? 'database');
+            if (!in_array($category, ['database', 'media', 'full'], true)) {
+                $category = 'database';
+            }
 
-            $result = $this->backupService->createBackup($userId, 'manual', $notes);
+            $result = $this->backupService->createBackup($userId, 'manual', $notes, $category);
 
             if (!$result['success']) {
                 return $this->errorResponse($result['message'], [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);

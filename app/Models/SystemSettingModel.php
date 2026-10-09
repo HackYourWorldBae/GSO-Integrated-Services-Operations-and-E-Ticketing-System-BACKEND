@@ -104,4 +104,52 @@ class SystemSettingModel extends Model
         $suffix = substr($key, -4);
         return $prefix . str_repeat('•', max(4, $length - 7)) . $suffix;
     }
+
+    /**
+     * Determine if the system is currently under emergency or scheduled maintenance mode.
+     */
+    public function isMaintenanceActive(): bool
+    {
+        $val = $this->getSetting('maintenance_mode', '0');
+        return $val === '1' || $val === 'true' || $val === 1 || $val === true;
+    }
+
+    /**
+     * Retrieve structured maintenance mode metadata.
+     */
+    public function getMaintenanceDetails(): array
+    {
+        $active    = $this->isMaintenanceActive();
+        $message   = $this->getSetting('maintenance_message') ?: 'The GSO E-Ticketing System is currently undergoing maintenance and database synchronization. Please check back shortly.';
+        $countdown = (int) ($this->getSetting('maintenance_countdown_seconds') ?: 30);
+        $timestamp = $this->getSetting('maintenance_activated_at');
+
+        return [
+            'active'            => $active,
+            'message'           => $message,
+            'countdown_seconds' => max(5, min(300, $countdown)),
+            'activated_at'      => $timestamp,
+        ];
+    }
+
+    /**
+     * Set maintenance mode state and parameters.
+     */
+    public function setMaintenanceMode(bool $active, string $message = '', int $countdown = 30, ?string $actorId = null): bool
+    {
+        $val = $active ? '1' : '0';
+        $this->setSetting('maintenance_mode', $val, 'Emergency or scheduled maintenance mode switch (1=active, 0=inactive)');
+
+        if (!empty($message)) {
+            $this->setSetting('maintenance_message', trim($message), 'Announcement message displayed to users during maintenance mode');
+        }
+
+        $countdownVal = (string) max(5, min(300, $countdown));
+        $this->setSetting('maintenance_countdown_seconds', $countdownVal, 'Countdown in seconds provided to active users before automated session logout');
+
+        $now = $active ? date('Y-m-d H:i:s') : null;
+        $this->setSetting('maintenance_activated_at', $now, 'Timestamp when maintenance mode was initiated');
+
+        return true;
+    }
 }

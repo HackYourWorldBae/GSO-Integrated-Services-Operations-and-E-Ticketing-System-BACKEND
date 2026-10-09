@@ -356,13 +356,70 @@ class GoogleDriveService
     }
 
     /**
-     * Upload a local backup file to Google Drive.
+     * Locate or create a subfolder in Google Drive for clean asset organization (Databases vs Media).
+     */
+    public function getOrCreateSubfolder(string $folderName, ?string $parentFolderId = null): ?string
+    {
+        if (!$this->isConfigured() || !$this->service) {
+            return null;
+        }
+
+        try {
+            $parentId = $parentFolderId ?: $this->folderId;
+
+            // Search for existing subfolder under parent
+            $query = "mimeType = 'application/vnd.google-apps.folder' and name = '{$folderName}' and trashed = false";
+            if (!empty($parentId)) {
+                $query .= " and '{$parentId}' in parents";
+            }
+
+            $optParams = [
+                'q'                         => $query,
+                'fields'                    => 'files(id, name)',
+                'pageSize'                  => 1,
+                'supportsAllDrives'         => true,
+                'includeItemsFromAllDrives' => true,
+            ];
+
+            $response = $this->service->files->listFiles($optParams);
+            $files    = $response->getFiles();
+
+            if (!empty($files) && isset($files[0]->id)) {
+                return $files[0]->id;
+            }
+
+            // Create subfolder if not found
+            $folderMetadata = [
+                'name'     => $folderName,
+                'mimeType' => 'application/vnd.google-apps.folder',
+            ];
+            if (!empty($parentId)) {
+                $folderMetadata['parents'] = [$parentId];
+            }
+
+            $driveFolder = new DriveFile($folderMetadata);
+            $created = $this->service->files->create($driveFolder, [
+                'fields'            => 'id',
+                'supportsAllDrives' => true,
+            ]);
+
+            return $created->id;
+        } catch (Throwable $e) {
+            log_message('warning', '[GoogleDriveService::getOrCreateSubfolder] Subfolder lookup/creation fallback: ' . $e->getMessage());
+            return $parentFolderId ?: $this->folderId;
+        }
+    }
+
+    /**
+     * Upload a local backup file (SQL dump or Media ZIP) to Google Drive.
+     * Automatically organizes files into 'Databases' and 'Media' subfolders.
      *
-     * @param string $localFilePath Absolute path to SQL file
+     * @param string $localFilePath Absolute path to file
      * @param string $customFileName Display name for the file in Drive
+     * @param string $category 'database' | 'media' | 'full'
      * @return array ['success' => bool, 'file_id' => ?string, 'web_link' => ?string, 'error' => ?string]
      */
-    public function uploadFile(string $localFilePath, string $customFileName = ''): array
+    public function uploadFile(string $localFilePath, string $customFileName = '', string $category = 'database'): array
     {
         if (!$this->isConfigured()) {
             return [
@@ -395,22 +452,41 @@ class GoogleDriveService
 
         try {
             $fileName = !empty($customFileName) ? $customFileName : basename($localFilePath);
+            $ext      = strtolower(pathinfo($localFilePath, PATHINFO_EXTENSION));
+
+            // Auto-detect category from file extension if default was kept
+            if ($category === 'database' && $ext === 'zip') {
+                $category = str_contains($fileName, 'media') ? 'media' : 'full';
+            }
+
+            // Organize into 'Media' vs 'Databases' subfolder on Google Drive
+            $subfolderName  = ($category === 'media') ? 'Media' : 'Databases';
+            $targetFolderId = $this->getOrCreateSubfolder($subfolderName, $this->folderId);
+
+            $mimeType = ($ext === 'zip') ? 'application/zip' : 'application/sql';
+            $desc     = match ($category) {
+                'media' => 'GSO E-Ticketing System Uploaded Media & Documents Archive (ZIP)',
+                'full'  => 'GSO E-Ticketing System Full Disaster Recovery Archive (DB + Uploads)',
+                default => 'GSO E-Ticketing System Database Snapshot (SQL)',
+            };
 
             $fileMetadataProps = [
                 'name'        => $fileName,
-                'description' => 'GSO E-Ticketing System Database Backup',
+                'description' => $desc,
             ];
-            if (!empty($this->folderId)) {
+
+            if (!empty($targetFolderId)) {
+                $fileMetadataProps['parents'] = [$targetFolderId];
+            } elseif (!empty($this->folderId)) {
                 $fileMetadataProps['parents'] = [$this->folderId];
             }
 
             $fileMetadata = new DriveFile($fileMetadataProps);
-
-            $content = file_get_contents($localFilePath);
+            $content      = file_get_contents($localFilePath);
 
             $uploadedFile = $this->service->files->create($fileMetadata, [
                 'data'              => $content,
-                'mimeType'          => 'application/sql',
+                'mimeType'          => $mimeType,
                 'uploadType'        => 'multipart',
                 'fields'            => 'id, webViewLink, webContentLink, size',
                 'supportsAllDrives' => true,

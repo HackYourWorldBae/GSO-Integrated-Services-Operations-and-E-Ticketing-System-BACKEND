@@ -429,5 +429,45 @@ final class BackupServiceTest extends CIUnitTestCase
         $this->assertTrue($result['success']);
         $this->assertSame('oauth_uploaded_id', $result['file_id']);
     }
+
+    public function testSystemBackupModelAllowsBackupCategoryField(): void
+    {
+        $backupModel = (new ReflectionClass(SystemBackupModel::class))
+            ->newInstanceWithoutConstructor();
+
+        $this->assertContains('backup_category', $backupModel->allowedFields);
+    }
+
+    public function testMaintenanceModeSettingsWorkflow(): void
+    {
+        $settingModel = (new ReflectionClass(\App\Models\SystemSettingModel::class))
+            ->newInstanceWithoutConstructor();
+
+        // Validate method existence and signatures
+        $this->assertTrue(method_exists($settingModel, 'isMaintenanceActive'));
+        $this->assertTrue(method_exists($settingModel, 'getMaintenanceDetails'));
+        $this->assertTrue(method_exists($settingModel, 'setMaintenanceMode'));
+    }
+
+    public function testExecuteZipRestoreRejectsMaliciousZipSlipArchive(): void
+    {
+        // Create a zip with a traversal filename
+        $zipPath = tempnam(sys_get_temp_dir(), 'gso_zip_') . '.zip';
+        $this->tempFiles[] = $zipPath;
+
+        $zip = new \ZipArchive();
+        $this->assertTrue($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE));
+        $zip->addFromString('../../../malicious_file.txt', 'evil payload');
+        $zip->close();
+
+        $backupService = new BackupService();
+        $reflection = new ReflectionClass($backupService);
+        $method = $reflection->getMethod('executeZipRestore');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($backupService, $zipPath, 'malicious.zip');
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('malicious relative path', $result['message']);
+    }
 }
 

@@ -80,6 +80,30 @@ class JwtAuthFilter implements FilterInterface
             $userSessionModel->touchSession($userId, $sid);
         }
 
+        // 4. Enforce Maintenance Mode Lockout for non-superadmins
+        if (($payload['role'] ?? '') !== 'superadmin') {
+            $systemSettingModel = new \App\Models\SystemSettingModel();
+            if ($systemSettingModel->isMaintenanceActive()) {
+                $uriPath = $request->getUri()->getPath();
+                // Allow check-session, logout, and me so clients receive maintenance countdown and cleanly evict
+                $isAuthExempt = str_contains($uriPath, 'auth/check-session') ||
+                               str_contains($uriPath, 'auth/logout') ||
+                               str_contains($uriPath, 'auth/me');
+
+                if (!$isAuthExempt) {
+                    $maintDetails = $systemSettingModel->getMaintenanceDetails();
+                    return Services::response()
+                        ->setStatusCode(ResponseInterface::HTTP_SERVICE_UNAVAILABLE)
+                        ->setJSON([
+                            'status'      => false,
+                            'message'     => $maintDetails['message'] ?: 'The website is currently under emergency maintenance.',
+                            'code'        => 'MAINTENANCE_MODE_ACTIVE',
+                            'maintenance' => $maintDetails,
+                        ]);
+                }
+            }
+        }
+
         // Store the decoded JWT payload in the static RequestContext registry.
         RequestContext::setJwtPayload($payload);
 

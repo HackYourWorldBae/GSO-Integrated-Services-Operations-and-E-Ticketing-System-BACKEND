@@ -445,6 +445,15 @@ BEGIN
     DROP TABLE IF EXISTS `ci_sessions`;
     DROP TABLE IF EXISTS `role_permissions`;
 
+    -- ------------------------------------------------------------------------
+    -- 15. SYSTEM_BACKUPS TABLE UPGRADES (Media vs Database vs Full Categorization)
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'system_backups') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'system_backups' AND column_name = 'backup_category') THEN
+            ALTER TABLE `system_backups` ADD COLUMN `backup_category` ENUM('database','media','full') NOT NULL DEFAULT 'database' AFTER `backup_type`;
+        END IF;
+    END IF;
+
 END $$
 
 DELIMITER ;
@@ -1106,7 +1115,11 @@ INSERT INTO `system_settings` (`key`, `value`, `description`) VALUES
 ('resend_from_email', 'GSO E-Ticketing <onboarding@resend.dev>', 'Sender email address for outgoing system emails'),
 ('resend_notifications_enabled', '1', 'Global toggle for email notification dispatch (1 = active, 0 = paused)'),
 ('google_drive_folder_id', NULL, 'Target Google Drive folder ID for cloud database backups'),
-('google_drive_credentials_json', NULL, 'Google Cloud Service Account JSON credentials')
+('google_drive_credentials_json', NULL, 'Google Cloud Service Account JSON credentials'),
+('maintenance_mode', '0', 'Emergency or scheduled maintenance mode switch (1 = active, 0 = inactive)'),
+('maintenance_message', 'The GSO E-Ticketing System is currently undergoing maintenance and database synchronization. Please check back shortly.', 'Announcement message displayed to users during maintenance mode'),
+('maintenance_countdown_seconds', '30', 'Countdown in seconds provided to active users before automated session logout'),
+('maintenance_activated_at', NULL, 'Timestamp when maintenance mode was initiated')
 ON DUPLICATE KEY UPDATE `description` = VALUES(`description`);
 
 -- Table structure for table `password_resets`
@@ -1128,6 +1141,7 @@ CREATE TABLE IF NOT EXISTS `system_backups` (
   `file_path` varchar(500) NOT NULL,
   `file_size_bytes` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
   `backup_type` enum('manual','scheduled') NOT NULL DEFAULT 'manual',
+  `backup_category` enum('database','media','full') NOT NULL DEFAULT 'database',
   `tables_included` text DEFAULT NULL,
   `google_drive_file_id` varchar(255) DEFAULT NULL,
   `google_drive_link` text DEFAULT NULL,

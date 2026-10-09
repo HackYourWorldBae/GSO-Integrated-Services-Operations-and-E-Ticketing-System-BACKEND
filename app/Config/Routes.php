@@ -203,6 +203,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('superadmin/backups',                     'BackupController::index',                    ['filter' => 'role:superadmin']);
         $routes->post('superadmin/backups',                    'BackupController::create',                   ['filter' => 'role:superadmin']);
         $routes->post('superadmin/backups/(:num)/restore',     'BackupController::restore/$1',               ['filter' => 'role:superadmin']);
+        $routes->post('superadmin/backups/restore-latest',     'BackupController::restoreLatest',            ['filter' => 'role:superadmin']);
         $routes->post('superadmin/backups/restore-upload',      'BackupController::restoreUpload',            ['filter' => 'role:superadmin']);
         $routes->get('superadmin/backups/(:num)/download',     'BackupController::download/$1',              ['filter' => 'role:superadmin']);
         $routes->post('superadmin/backups/(:num)/sync-gdrive', 'BackupController::syncGoogleDrive/$1',        ['filter' => 'role:superadmin']);

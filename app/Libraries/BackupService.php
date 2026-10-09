@@ -106,27 +106,49 @@ class BackupService
             }
             $sourceLabel = 'Local Onsite Storage';
         } else {
-            // Auto mode: prefer local if exists, else download from Google Drive
-            if (!file_exists($filePath)) {
-                if (!empty($backup['google_drive_file_id']) && $this->driveService->isConfigured()) {
+            // Auto mode: always prefer the latest between Local onsite file and Google Drive cloud file
+            $localExists = file_exists($filePath);
+            $driveExists = !empty($backup['google_drive_file_id']) && $this->driveService->isConfigured();
+
+            if ($localExists && $driveExists) {
+                $localMtime = (int) filemtime($filePath);
+                $driveMeta  = $this->driveService->getFileMetadata($backup['google_drive_file_id']);
+                $driveMtime = !empty($driveMeta['modified_time']) ? (int) strtotime($driveMeta['modified_time']) : 0;
+
+                // If Google Drive has a newer file version, pull it; otherwise use the local copy
+                if ($driveMtime > $localMtime) {
                     $downloadResult = $this->driveService->downloadFile(
                         $backup['google_drive_file_id'],
                         $filePath
                     );
-
-                    if (!$downloadResult['success']) {
-                        return [
-                            'success' => false,
-                            'message' => 'Local backup missing and Google Drive download failed: ' . $downloadResult['error'],
-                        ];
+                    if ($downloadResult['success']) {
+                        $sourceLabel = 'Google Drive Cloud (Newer Version Detected)';
+                    } else {
+                        $sourceLabel = 'Local Onsite Storage (Drive download fallback)';
                     }
-                    $sourceLabel = 'Google Drive Cloud (Auto-downloaded)';
                 } else {
+                    $sourceLabel = 'Local Onsite Storage (Latest Version)';
+                }
+            } elseif ($localExists) {
+                $sourceLabel = 'Local Onsite Storage';
+            } elseif ($driveExists) {
+                $downloadResult = $this->driveService->downloadFile(
+                    $backup['google_drive_file_id'],
+                    $filePath
+                );
+
+                if (!$downloadResult['success']) {
                     return [
                         'success' => false,
-                        'message' => 'Backup file not found locally or on Google Drive.',
+                        'message' => 'Local backup missing and Google Drive download failed: ' . $downloadResult['error'],
                     ];
                 }
+                $sourceLabel = 'Google Drive Cloud (Auto-downloaded)';
+            } else {
+                return [
+                    'success' => false,
+                    'message' => 'Backup file not found locally or on Google Drive.',
+                ];
             }
         }
 
@@ -136,6 +158,22 @@ class BackupService
         }
 
         return $this->executeSqlRestore($filePath, "{$backup['file_name']} [{$sourceLabel}]", $userId);
+    }
+
+    /**
+     * Automatically restore the latest snapshot available in the repository.
+     */
+    public function restoreLatestSnapshot(?string $userId = null, string $source = 'auto'): array
+    {
+        $latest = $this->backupModel->getLatestBackup();
+        if (!$latest) {
+            return [
+                'success' => false,
+                'message' => 'No snapshot records found in the repository.',
+            ];
+        }
+
+        return $this->restoreBackup((int) $latest['id'], $userId, $source);
     }
 
     /**
@@ -511,7 +549,7 @@ class BackupService
         $dbPort = $db->port ?: 3306;
 
         $timestamp = date('Ymd_His');
-        $fileName  = "full_backup_{$dbName}_{$timestamp}.zip";
+        $fileName  = "snapshot_{$timestamp}.zip";
         $filePath  = $this->backupDir . $fileName;
         $tempSql   = $this->backupDir . "temp_dump_{$timestamp}.sql";
         $uploadsDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR;

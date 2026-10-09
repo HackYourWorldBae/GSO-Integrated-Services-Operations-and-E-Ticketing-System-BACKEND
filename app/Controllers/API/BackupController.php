@@ -131,6 +131,10 @@ class BackupController extends BaseController
      */
     public function restore(int $id): ResponseInterface
     {
+        if ($id <= 0) {
+            return $this->restoreLatest();
+        }
+
         try {
             $body         = $this->request->getJSON(true) ?? [];
             $confirmation = trim($body['confirmation'] ?? '');
@@ -154,6 +158,40 @@ class BackupController extends BaseController
             return $this->successResponse($result['message']);
         } catch (Throwable $e) {
             log_message('error', 'BackupController::restore error: ' . $e->getMessage());
+            return $this->errorResponse('Restoration failed: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Restore the latest database and media snapshot from selected storage (Local or Google Drive).
+     * Automatically extracts and restores the latest snapshot, preferring the newest file version.
+     * POST /api/v1/superadmin/backups/restore-latest
+     */
+    public function restoreLatest(): ResponseInterface
+    {
+        try {
+            $body         = $this->request->getJSON(true) ?? [];
+            $confirmation = trim($body['confirmation'] ?? '');
+            $source       = trim($body['source'] ?? 'auto'); // 'local' | 'google_drive' | 'auto'
+
+            if ($confirmation !== 'CONFIRM RESTORE') {
+                return $this->errorResponse(
+                    'Restoration aborted. You must type CONFIRM RESTORE to execute this operation.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
+            $userId = $this->currentUserId();
+            $result = $this->backupService->restoreLatestSnapshot($userId, $source);
+
+            if (!$result['success']) {
+                return $this->errorResponse($result['message'], [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            return $this->successResponse($result['message']);
+        } catch (Throwable $e) {
+            log_message('error', 'BackupController::restoreLatest error: ' . $e->getMessage());
             return $this->errorResponse('Restoration failed: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
     }

@@ -61,4 +61,12 @@ class SystemBackupModel extends Model
             'gdrive_synced_count'  => (int) $gdriveCount,
         ];
     }
+
+    /**
+     * Get the most recent snapshot record.
+     */
+    public function getLatestBackup(): ?array
+    {
+        return $this->orderBy('created_at', 'DESC')->first();
+    }
 }

@@ -514,5 +514,18 @@ final class BackupServiceTest extends CIUnitTestCase
         $this->assertFalse($result['success']);
         $this->assertStringContainsString('Google Drive cloud download failed', $result['message']);
     }
+
+    public function testRestoreLatestSnapshotReturnsErrorIfNoBackupsExist(): void
+    {
+        $mockModel = $this->createMock(SystemBackupModel::class);
+        $mockModel->method('getLatestBackup')->willReturn(null);
+
+        $service = new BackupService($mockModel, $this->driveService);
+        $result  = $service->restoreLatestSnapshot('superadmin-uuid');
+
+        $this->assertIsArray($result);
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('No snapshot records found', $result['message']);
+    }
 }
 

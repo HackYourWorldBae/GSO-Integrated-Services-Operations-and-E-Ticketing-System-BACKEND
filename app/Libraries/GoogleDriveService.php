@@ -454,30 +454,16 @@ class GoogleDriveService
             $fileName = !empty($customFileName) ? $customFileName : basename($localFilePath);
             $ext      = strtolower(pathinfo($localFilePath, PATHINFO_EXTENSION));
 
-            // Auto-detect category from file extension if default was kept
-            if ($category === 'database' && $ext === 'zip') {
-                $category = str_contains($fileName, 'media') ? 'media' : 'full';
-            }
-
-            // Organize into 'Media' vs 'Databases' subfolder on Google Drive
-            $subfolderName  = ($category === 'media') ? 'Media' : 'Databases';
-            $targetFolderId = $this->getOrCreateSubfolder($subfolderName, $this->folderId);
-
             $mimeType = ($ext === 'zip') ? 'application/zip' : 'application/sql';
-            $desc     = match ($category) {
-                'media' => 'GSO E-Ticketing System Uploaded Media & Documents Archive (ZIP)',
-                'full'  => 'GSO E-Ticketing System Full Disaster Recovery Archive (DB + Uploads)',
-                default => 'GSO E-Ticketing System Database Snapshot (SQL)',
-            };
+            $desc     = 'GSO E-Ticketing System Full Disaster Recovery Snapshot Archive (DB + Uploads)';
 
             $fileMetadataProps = [
                 'name'        => $fileName,
                 'description' => $desc,
             ];
 
-            if (!empty($targetFolderId)) {
-                $fileMetadataProps['parents'] = [$targetFolderId];
-            } elseif (!empty($this->folderId)) {
+            // Directly in the configured Google Drive main folder (no subfolder creation)
+            if (!empty($this->folderId)) {
                 $fileMetadataProps['parents'] = [$this->folderId];
             }
 
@@ -580,6 +566,81 @@ class GoogleDriveService
         } catch (Throwable $e) {
             log_message('error', 'Google Drive delete failed: ' . $this->formatGoogleDriveError($e));
             return false;
+        }
+    }
+
+    /**
+     * Get metadata of a specific file in Google Drive.
+     *
+     * @param string $driveFileId The Google Drive file ID
+     * @return ?array ['id' => string, 'name' => string, 'size' => int, 'modified_time' => string, 'created_time' => string]
+     */
+    public function getFileMetadata(string $driveFileId): ?array
+    {
+        if (!$this->isConfigured() || !$this->service) {
+            return null;
+        }
+
+        try {
+            $file = $this->service->files->get($driveFileId, [
+                'fields'            => 'id, name, size, modifiedTime, createdTime',
+                'supportsAllDrives' => true,
+            ]);
+
+            return [
+                'id'            => $file->id,
+                'name'          => $file->name,
+                'size'          => (int) $file->size,
+                'modified_time' => (string) $file->modifiedTime,
+                'created_time'  => (string) $file->createdTime,
+            ];
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * List snapshot files in the configured Google Drive folder, sorted by modified time descending.
+     *
+     * @return list<array{id: string, name: string, size: int, modified_time: string, created_time: string, web_link: ?string}>
+     */
+    public function listDriveSnapshots(): array
+    {
+        if (!$this->isConfigured() || !$this->service) {
+            return [];
+        }
+
+        try {
+            $optParams = [
+                'pageSize'                  => 30,
+                'fields'                    => 'files(id, name, size, modifiedTime, createdTime, webViewLink)',
+                'supportsAllDrives'         => true,
+                'includeItemsFromAllDrives' => true,
+                'orderBy'                   => 'modifiedTime desc',
+            ];
+
+            if (!empty($this->folderId)) {
+                $optParams['q'] = sprintf("'%s' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'", addslashes($this->folderId));
+            } else {
+                $optParams['q'] = "trashed = false and mimeType != 'application/vnd.google-apps.folder'";
+            }
+
+            $results = $this->service->files->listFiles($optParams);
+            $driveFiles = [];
+            foreach ($results->getFiles() as $file) {
+                $driveFiles[] = [
+                    'id'            => (string) $file->id,
+                    'name'          => (string) $file->name,
+                    'size'          => (int) $file->size,
+                    'modified_time' => (string) $file->modifiedTime,
+                    'created_time'  => (string) $file->createdTime,
+                    'web_link'      => (string) $file->webViewLink,
+                ];
+            }
+            return $driveFiles;
+        } catch (Throwable $e) {
+            log_message('warning', '[GoogleDriveService::listDriveSnapshots] Failed: ' . $e->getMessage());
+            return [];
         }
     }
 

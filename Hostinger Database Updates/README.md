@@ -11,8 +11,9 @@ This directory contains the safe, non-destructive schema update scripts for the 
 
 ## Zero-Data-Loss Safety Guarantees
 1. **Never Drops Existing Tables**: All `DROP TABLE IF EXISTS` statements have been removed and replaced with `CREATE TABLE IF NOT EXISTS`.
-2. **Automatic Column Patcher (`sp_gso_upgrade_schema`)**: A self-executing MySQL stored procedure inspects `information_schema.columns` and automatically applies missing columns (such as ticket recategorization fields, user security lockouts, email preferences, and delay reasons) without throwing duplicate column errors.
-3. **Protected Seed Inserts**: Core seed rows use `INSERT IGNORE` and `ON DUPLICATE KEY UPDATE` to preserve all live user accounts, passwords, test tickets, and saved settings.
+2. **Automatic Column Patcher (`sp_gso_upgrade_schema`)**: A self-executing MySQL stored procedure inspects `information_schema.columns` and automatically applies missing columns (such as user `last_login_at`, `'Archived'` status ENUM expansion, ticket recategorization fields, user security lockouts, email preferences, and delay reasons) without throwing duplicate column errors.
+3. **Canonical Session Enforcement (`user_sessions`)**: Automatically harmonizes session schemas to support "One Active Session Per User" concurrent session control and real-time session presence tracking (`online`, `idle`, `recent`, `offline`).
+4. **Protected Seed Inserts**: Core seed rows use `INSERT IGNORE` and `ON DUPLICATE KEY UPDATE` to preserve all live user accounts, passwords, test tickets, and saved settings.
 
 ---
 

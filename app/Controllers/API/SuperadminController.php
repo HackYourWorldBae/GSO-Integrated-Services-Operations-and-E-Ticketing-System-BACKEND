@@ -95,6 +95,8 @@ class SuperadminController extends BaseController
         $perPage = min(100, max(5, (int) ($this->request->getGet('per_page') ?? 15)));
         $offset  = ($page - 1) * $perPage;
 
+        $this->ensureUserSchema();
+
         // Auto-heal unlinked personnel records to worker user accounts
         try {
             $db = \Config\Database::connect();
@@ -116,15 +118,111 @@ class SuperadminController extends BaseController
 
         $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
         $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
+        $inactiveCount = $this->userModel->getInactiveCandidateUsers(true);
 
         return $this->successResponse('Users retrieved successfully.', [
-            'users'        => $users,
-            'pagination'   => [
+            'users'          => $users,
+            'inactive_count' => $inactiveCount,
+            'pagination'     => [
                 'total'        => $total,
                 'page'         => $page,
                 'per_page'     => $perPage,
                 'total_pages'  => (int) ceil($total / $perPage),
             ]
+        ]);
+    }
+
+    /**
+     * Idempotently ensure database schema supports last_login_at and Archived status.
+     */
+    protected function ensureUserSchema(): void
+    {
+        try {
+            $db = Database::connect();
+            if (!$db->fieldExists('last_login_at', 'users')) {
+                $db->query("ALTER TABLE users ADD COLUMN last_login_at DATETIME DEFAULT NULL AFTER lockout_until");
+            }
+            // Ensure status ENUM includes 'Archived'
+            $db->query("ALTER TABLE users MODIFY COLUMN status ENUM('Active','Pending','Rejected','Suspended','Archived') NOT NULL DEFAULT 'Active'");
+        } catch (\Throwable $ignored) {
+        }
+    }
+
+    /**
+     * Get summary count and list of inactive user account candidates (6+ months no requests or logins).
+     * Route: GET /api/v1/superadmin/users/inactive-summary
+     */
+    public function inactiveSummary(): ResponseInterface
+    {
+        $this->ensureUserSchema();
+        $candidates = $this->userModel->getInactiveCandidateUsers(false);
+
+        return $this->successResponse('Inactive accounts summary retrieved successfully.', [
+            'count'      => count($candidates),
+            'candidates' => $candidates,
+        ]);
+    }
+
+    /**
+     * Bulk archive inactive user accounts: accounts that have neither submitted
+     * a service request nor logged in for at least 6 months (180 days).
+     *
+     * Route: POST /api/v1/superadmin/users/archive-inactive
+     */
+    public function archiveInactiveUsers(): ResponseInterface
+    {
+        $this->ensureUserSchema();
+        $currentUserId = $this->currentUserId();
+
+        $candidates = $this->userModel->getInactiveCandidateUsers(false);
+        $count = count($candidates);
+
+        if ($count === 0) {
+            return $this->successResponse('No inactive accounts found meeting the 6-month threshold.', [
+                'archived_count' => 0,
+                'archived_users' => [],
+            ]);
+        }
+
+        $sessionModel = new \App\Models\UserSessionModel();
+        $archivedUsers = [];
+
+        foreach ($candidates as $user) {
+            $userId = $user['id'];
+            $this->userModel->skipValidation(true)->update($userId, [
+                'status' => 'Archived',
+            ]);
+
+            // Terminate any stale active sessions for this user
+            $sessionModel->where('user_id', $userId)->delete();
+
+            // Log account lifecycle event to audit trail
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_STATUS_CHANGED',
+                'severity'       => 'warning',
+                'actor_id'       => $currentUserId,
+                'target_user_id' => $userId,
+                'details'        => "Superadmin archived account for {$user['first_name']} {$user['last_name']} ({$user['email']}) due to 6+ months without requests or logins.",
+                'metadata'       => [
+                    'previous_status' => $user['status'],
+                    'new_status'      => 'Archived',
+                    'reason'          => 'Inactive for 6+ months',
+                    'inactive_months' => $user['inactive_months'] ?? 6,
+                ],
+            ]);
+
+            $archivedUsers[] = [
+                'id'         => $userId,
+                'name'       => trim($user['first_name'] . ' ' . $user['last_name']),
+                'email'      => $user['email'],
+                'role'       => $user['role'],
+                'created_at' => $user['created_at'],
+            ];
+        }
+
+        return $this->successResponse("Successfully archived {$count} inactive user accounts.", [
+            'archived_count' => $count,
+            'archived_users' => $archivedUsers,
         ]);
     }
 
@@ -168,7 +266,7 @@ class SuperadminController extends BaseController
             'password'          => 'required|min_length[6]',
             'confirm_password'  => 'permit_empty|matches[password]',
             'role'              => 'required|in_list[student,employee,admin,staff,director,superadmin,worker]',
-            'status'            => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
+            'status'            => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Archived]',
             'unit_id'           => 'permit_empty',
             'contact_number'    => 'permit_empty|max_length[30]',
             'student_id_number' => 'permit_empty|max_length[50]',
@@ -351,7 +449,7 @@ class SuperadminController extends BaseController
             'last_name'      => 'permit_empty|max_length[100]',
             'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
             'role'           => 'permit_empty|in_list[student,employee,admin,staff,director,superadmin,worker]',
-            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended]',
+            'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Archived]',
             'contact_number' => 'permit_empty|max_length[30]',
             'unit_id'        => 'permit_empty',
             'specialty'      => 'permit_empty|max_length[100]',
@@ -512,8 +610,8 @@ class SuperadminController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
         $newStatus = $body['status'] ?? null;
-        if (!in_array($newStatus, ['Active', 'Suspended', 'Rejected'])) {
-            return $this->errorResponse('Invalid status. Supported statuses: Active, Suspended, Rejected.');
+        if (!in_array($newStatus, ['Active', 'Suspended', 'Rejected', 'Archived'])) {
+            return $this->errorResponse('Invalid status. Supported statuses: Active, Suspended, Rejected, Archived.');
         }
 
         $updateData = ['status' => $newStatus];
@@ -522,7 +620,7 @@ class SuperadminController extends BaseController
         }
 
         if ($this->userModel->skipValidation(true)->update($id, $updateData)) {
-            if ($newStatus === 'Suspended') {
+            if (in_array($newStatus, ['Suspended', 'Archived'], true)) {
                 $sessionModel = new \App\Models\UserSessionModel();
                 $sessionModel->where('user_id', $id)->delete();
             }

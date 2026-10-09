@@ -62,6 +62,14 @@ BEGIN
             ALTER TABLE `users` ADD COLUMN `lockout_until` DATETIME NULL DEFAULT NULL AFTER `failed_login_attempts`;
         END IF;
 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'last_login_at') THEN
+            ALTER TABLE `users` ADD COLUMN `last_login_at` DATETIME NULL DEFAULT NULL AFTER `lockout_until`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'users' AND index_name = 'idx_users_last_login') THEN
+            ALTER TABLE `users` ADD INDEX `idx_users_last_login` (`last_login_at`);
+        END IF;
+
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'email_notifications_enabled') THEN
             ALTER TABLE `users` ADD COLUMN `email_notifications_enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-account opt-in for ticket/request email updates' AFTER `is_verified`;
         END IF;
@@ -69,8 +77,8 @@ BEGIN
         -- Update Role ENUM to include 'staff' and 'worker'
         ALTER TABLE `users` MODIFY COLUMN `role` ENUM('student','employee','admin','staff','director','superadmin','worker') NOT NULL DEFAULT 'student';
         
-        -- Update Status ENUM to standard system values
-        ALTER TABLE `users` MODIFY COLUMN `status` ENUM('Active','Pending','Rejected','Suspended') NOT NULL DEFAULT 'Active';
+        -- Update Status ENUM to standard system values including 'Archived' (Supports 6-month inactivity archiving)
+        ALTER TABLE `users` MODIFY COLUMN `status` ENUM('Active','Pending','Rejected','Suspended','Archived') NOT NULL DEFAULT 'Active';
     END IF;
 
     -- ------------------------------------------------------------------------
@@ -390,7 +398,49 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------
-    -- 13. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
+    -- 13. USER SESSIONS TABLE UPGRADES (Single Active Session & Real-Time Presence)
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'user_sessions') THEN
+        -- Safely migrate legacy token_id to session_id if present
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'token_id')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'session_id') THEN
+            ALTER TABLE `user_sessions` CHANGE COLUMN `token_id` `session_id` VARCHAR(64) NOT NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'session_id') THEN
+            ALTER TABLE `user_sessions` ADD COLUMN `session_id` VARCHAR(64) NOT NULL AFTER `user_id`;
+        END IF;
+
+        -- Safely migrate legacy last_active to last_activity if present
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'last_active')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'last_activity') THEN
+            ALTER TABLE `user_sessions` CHANGE COLUMN `last_active` `last_activity` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'user_sessions' AND column_name = 'last_activity') THEN
+            ALTER TABLE `user_sessions` ADD COLUMN `last_activity` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`;
+        END IF;
+
+        -- Ensure user_sessions.id is VARCHAR(36) to support UUIDs
+        ALTER TABLE `user_sessions` MODIFY COLUMN `id` VARCHAR(36) NOT NULL;
+
+        -- Enforce UNIQUE on user_id (One Active Session Per User)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'user_sessions' AND index_name = 'uq_user_sessions_user') THEN
+            -- Deduplicate existing rows keeping newest prior to adding UNIQUE constraint
+            DELETE s1 FROM `user_sessions` s1
+            INNER JOIN `user_sessions` s2 
+            WHERE s1.user_id = s2.user_id AND s1.created_at < s2.created_at;
+            ALTER TABLE `user_sessions` ADD UNIQUE KEY `uq_user_sessions_user` (`user_id`);
+        END IF;
+
+        -- Index on session_id for fast JWT sid validation
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'user_sessions' AND index_name = 'idx_user_sessions_sid') THEN
+            ALTER TABLE `user_sessions` ADD INDEX `idx_user_sessions_sid` (`session_id`);
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 14. DROP DEPRECATED TABLES (Safe - only obsolete session/RBAC tables)
     -- ------------------------------------------------------------------------
     DROP TABLE IF EXISTS `ci_sessions`;
     DROP TABLE IF EXISTS `role_permissions`;
@@ -444,11 +494,12 @@ CREATE TABLE IF NOT EXISTS `users` (
   `id_card_image` text DEFAULT NULL,
   `id_selfie_image` text DEFAULT NULL,
   `avatar_path` varchar(255) DEFAULT NULL,
-  `status` enum('Active','Pending','Rejected','Suspended') NOT NULL DEFAULT 'Active',
+  `status` enum('Active','Pending','Rejected','Suspended','Archived') NOT NULL DEFAULT 'Active',
   `is_verified` tinyint(1) NOT NULL DEFAULT 1,
   `email_notifications_enabled` tinyint(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-account opt-in for ticket/request email updates (SSU alerts, dispatch, etc.)',
   `failed_login_attempts` int(10) UNSIGNED NOT NULL DEFAULT 0,
   `lockout_until` datetime DEFAULT NULL,
+  `last_login_at` datetime DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
@@ -456,6 +507,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   KEY `idx_users_role` (`role`),
   KEY `idx_users_status` (`status`),
   KEY `idx_users_unit` (`unit_id`),
+  KEY `idx_users_last_login` (`last_login_at`),
   CONSTRAINT `fk_users_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -995,18 +1047,17 @@ CREATE TABLE IF NOT EXISTS `account_activity_logs` (
 
 -- Table structure for table `user_sessions`
 CREATE TABLE IF NOT EXISTS `user_sessions` (
-  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id` varchar(36) NOT NULL,
   `user_id` varchar(36) NOT NULL,
-  `token_id` varchar(255) NOT NULL,
+  `session_id` varchar(64) NOT NULL,
   `ip_address` varchar(45) DEFAULT NULL,
-  `user_agent` text DEFAULT NULL,
-  `last_active` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `user_agent` varchar(255) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-  `expires_at` timestamp NULL DEFAULT NULL,
+  `last_activity` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_user_sessions_token` (`token_id`),
-  KEY `idx_sessions_user` (`user_id`),
-  CONSTRAINT `fk_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `uq_user_sessions_user` (`user_id`),
+  KEY `idx_user_sessions_sid` (`session_id`),
+  CONSTRAINT `fk_user_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `notifications`

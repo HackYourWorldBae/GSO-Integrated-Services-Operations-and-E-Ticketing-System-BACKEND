@@ -484,6 +484,13 @@ class AuthController extends BaseController
                 ResponseInterface::HTTP_FORBIDDEN
             );
         }
+        if ($user['status'] === 'Archived') {
+            return $this->errorResponse(
+                'Your account has been archived due to 6+ months of inactivity. Please contact the GSO Administrator to reactivate your account.',
+                ['is_archived' => true],
+                ResponseInterface::HTTP_FORBIDDEN
+            );
+        }
         // Legacy Deactivated (migrated to Suspended) — treat same as Suspended for cached JWTs
         if ($user['status'] === 'Deactivated') {
             return $this->errorResponse(
@@ -557,6 +564,14 @@ class AuthController extends BaseController
         $ipAddress = $this->request->getIPAddress();
         $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
         $this->userSessionModel->registerSession($user['id'], $sessionId, $ipAddress, $userAgent);
+
+        // --- Record Last Login Timestamp on Users Table ---
+        try {
+            $this->userModel->update($user['id'], [
+                'last_login_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $ignored) {
+        }
 
         // --- Build JWT Payload with sid (Session ID) ---
         $tokenPayload = [

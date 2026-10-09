@@ -4,6 +4,7 @@ namespace App\Libraries;
 
 use App\Models\SystemBackupModel;
 use App\Models\AccountActivityLogModel;
+use App\Models\TicketLogModel;
 use Config\Database;
 use Ifsnop\Mysqldump\Mysqldump;
 use mysqli;
@@ -20,16 +21,19 @@ class BackupService
     private SystemBackupModel $backupModel;
     private GoogleDriveService $driveService;
     private AccountActivityLogModel $activityLogModel;
+    private TicketLogModel $ticketLogModel;
     private string $backupDir;
 
     public function __construct(
         ?SystemBackupModel $backupModel = null,
         ?GoogleDriveService $driveService = null,
-        ?AccountActivityLogModel $activityLogModel = null
+        ?AccountActivityLogModel $activityLogModel = null,
+        ?TicketLogModel $ticketLogModel = null
     ) {
         $this->backupModel      = $backupModel ?? new SystemBackupModel();
         $this->driveService     = $driveService ?? new GoogleDriveService();
         $this->activityLogModel = $activityLogModel ?? new AccountActivityLogModel();
+        $this->ticketLogModel   = $ticketLogModel ?? new TicketLogModel();
         $this->backupDir        = WRITEPATH . 'backups' . DIRECTORY_SEPARATOR;
 
         if (!is_dir($this->backupDir)) {
@@ -38,153 +42,29 @@ class BackupService
     }
 
     /**
-     * Create a full MySQL database backup and sync to Google Drive.
+     * Create a full unified snapshot (database + media) and sync to Google Drive.
+     * All backups are unified full snapshots to eliminate restore conflicts.
      *
      * @param ?string $userId Superadmin user ID performing the backup
      * @param string $type 'manual' or 'scheduled'
      * @param string $notes Optional descriptive note
-     * @param string $category 'database' | 'media' | 'full'
+     * @param string $category 'full' (unified snapshot)
      * @return array Result summary with backup record
      */
-    public function createBackup(?string $userId = null, string $type = 'manual', string $notes = '', string $category = 'database'): array
+    public function createBackup(?string $userId = null, string $type = 'manual', string $notes = '', string $category = 'full'): array
     {
-        if ($category === 'media') {
-            return $this->createMediaBackup($userId, $type, $notes);
-        }
-
-        if ($category === 'full') {
-            return $this->createFullBackup($userId, $type, $notes);
-        }
-
-        $db = Database::connect();
-        $dbName = $db->database;
-        $dbHost = $db->hostname;
-        $dbUser = $db->username;
-        $dbPass = $db->password;
-        $dbPort = $db->port ?: 3306;
-
-        $timestamp = date('Ymd_His');
-        $fileName  = "backup_{$dbName}_{$timestamp}.sql";
-        $filePath  = $this->backupDir . $fileName;
-
-        try {
-            // Configure Dump settings
-            $dumpSettings = [
-                'add-drop-table'             => true,
-                'add-locks'                  => false,
-                'extended-insert'            => true,
-                'disable-foreign-keys-check' => true,
-                'single-transaction'         => true,
-                'lock-tables'                => false,
-                'default-character-set'      => 'utf8mb4',
-                // Exclude system_backups table to maintain backup lineage during restore
-                'exclude-tables'             => ['system_backups'],
-            ];
-
-            $dsn = "mysql:host={$dbHost};port={$dbPort};dbname={$dbName};charset=utf8mb4";
-            $dump = new Mysqldump($dsn, $dbUser, $dbPass, $dumpSettings);
-            $dump->start($filePath);
-
-            if (!file_exists($filePath) || filesize($filePath) === 0) {
-                throw new \RuntimeException('Database dump generated an empty file.');
-            }
-
-            $fileSizeBytes = (int) filesize($filePath);
-
-            // Fetch table list for metadata
-            $tables = $db->listTables();
-
-            // Insert initial record in database
-            $backupRecordId = $this->backupModel->insert([
-                'file_name'           => $fileName,
-                'file_path'           => $filePath,
-                'file_size_bytes'     => $fileSizeBytes,
-                'backup_type'         => $type,
-                'backup_category'     => 'database',
-                'tables_included'     => json_encode($tables),
-                'google_drive_status' => 'pending',
-                'status'              => 'completed',
-                'notes'               => $notes ?: 'System on-demand database backup',
-                'created_by'          => $userId,
-            ]);
-
-            // Attempt Cloud Upload to Google Drive under 'Databases' subfolder
-            $driveStatus = 'not_configured';
-            $driveFileId = null;
-            $driveLink   = null;
-            $driveError  = null;
-
-            if ($this->driveService->isConfigured()) {
-                $uploadResult = $this->driveService->uploadFile($filePath, $fileName, 'database');
-                if ($uploadResult['success']) {
-                    $driveStatus = 'uploaded';
-                    $driveFileId = $uploadResult['file_id'];
-                    $driveLink   = $uploadResult['web_link'];
-                } else {
-                    $driveStatus = 'failed';
-                    $driveError  = $uploadResult['error'];
-                }
-            } else {
-                $driveError = $this->driveService->getInitError() ?? 'Google Drive credentials not configured.';
-            }
-
-            // Update backup record with Google Drive status
-            $this->backupModel->update($backupRecordId, [
-                'google_drive_file_id' => $driveFileId,
-                'google_drive_link'    => $driveLink,
-                'google_drive_status'  => $driveStatus,
-                'google_drive_error'   => $driveError,
-            ]);
-
-            // Log activity
-            try {
-                $this->activityLogModel->insert([
-                    'actor_id'       => $userId,
-                    'event_type'     => 'SYSTEM_BACKUP_CREATED',
-                    'severity'       => 'info',
-                    'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
-                    'user_agent'     => (string) service('request')->getUserAgent(),
-                    'device_summary' => 'System Backup',
-                    'details'        => "Manual database backup created: {$fileName} (" . number_format($fileSizeBytes) . " bytes)",
-                    'metadata'       => json_encode([
-                        'file_name'         => $fileName,
-                        'category'          => 'database',
-                        'size_bytes'        => $fileSizeBytes,
-                        'cloud_sync_status' => $driveStatus,
-                    ]),
-                    'created_at'     => date('Y-m-d H:i:s'),
-                ]);
-            } catch (Throwable $logErr) {
-                // Non-blocking log insertion failure
-            }
-
-            $finalRecord = $this->backupModel->find($backupRecordId);
-
-            return [
-                'success' => true,
-                'message' => 'Database backup created successfully.',
-                'backup'  => $finalRecord,
-            ];
-        } catch (Throwable $e) {
-            if (file_exists($filePath)) {
-                @unlink($filePath);
-            }
-
-            log_message('error', 'Backup failed: ' . $e->getMessage());
-
-            return [
-                'success' => false,
-                'message' => 'Backup creation failed: ' . $e->getMessage(),
-                'backup'  => null,
-            ];
-        }
+        // Unified full snapshot bundling MySQL database dump + all uploaded media files
+        return $this->createFullBackup($userId, $type, $notes);
     }
 
     /**
-     * Restore database or media files from an existing backup record.
-     * If the local file is missing but exists on Google Drive, it will automatically download it.
+     * Restore database and media files from an existing backup record.
+     * Supports explicitly choosing storage source:
+     *   - 'local': Restores from the server's onsite storage disk.
+     *   - 'google_drive': Force-downloads fresh copy from Google Drive cloud storage.
+     *   - 'auto': Restores from local if present, else downloads from Google Drive.
      */
-    public function restoreBackup(int $backupId, ?string $userId = null): array
+    public function restoreBackup(int $backupId, ?string $userId = null, string $source = 'auto'): array
     {
         $backup = $this->backupModel->find($backupId);
         if (!$backup) {
@@ -194,10 +74,10 @@ class BackupService
             ];
         }
 
-        $filePath = $backup['file_path'];
+        $filePath    = $backup['file_path'];
+        $sourceLabel = 'Local Onsite Storage';
 
-        // If local file is missing, attempt to restore from Google Drive
-        if (!file_exists($filePath)) {
+        if ($source === 'google_drive') {
             if (!empty($backup['google_drive_file_id']) && $this->driveService->isConfigured()) {
                 $downloadResult = $this->driveService->downloadFile(
                     $backup['google_drive_file_id'],
@@ -207,23 +87,55 @@ class BackupService
                 if (!$downloadResult['success']) {
                     return [
                         'success' => false,
-                        'message' => 'Local backup missing and Google Drive download failed: ' . $downloadResult['error'],
+                        'message' => 'Google Drive cloud download failed: ' . $downloadResult['error'],
                     ];
                 }
+                $sourceLabel = 'Google Drive Cloud';
             } else {
                 return [
                     'success' => false,
-                    'message' => 'Backup file not found locally or on Google Drive.',
+                    'message' => 'Google Drive cloud backup is not available for this snapshot entry.',
                 ];
+            }
+        } elseif ($source === 'local') {
+            if (!file_exists($filePath)) {
+                return [
+                    'success' => false,
+                    'message' => 'Local onsite backup file not found on disk: ' . basename($filePath),
+                ];
+            }
+            $sourceLabel = 'Local Onsite Storage';
+        } else {
+            // Auto mode: prefer local if exists, else download from Google Drive
+            if (!file_exists($filePath)) {
+                if (!empty($backup['google_drive_file_id']) && $this->driveService->isConfigured()) {
+                    $downloadResult = $this->driveService->downloadFile(
+                        $backup['google_drive_file_id'],
+                        $filePath
+                    );
+
+                    if (!$downloadResult['success']) {
+                        return [
+                            'success' => false,
+                            'message' => 'Local backup missing and Google Drive download failed: ' . $downloadResult['error'],
+                        ];
+                    }
+                    $sourceLabel = 'Google Drive Cloud (Auto-downloaded)';
+                } else {
+                    return [
+                        'success' => false,
+                        'message' => 'Backup file not found locally or on Google Drive.',
+                    ];
+                }
             }
         }
 
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
         if ($ext === 'zip') {
-            return $this->executeZipRestore($filePath, $backup['file_name'], $userId);
+            return $this->executeZipRestore($filePath, "{$backup['file_name']} [{$sourceLabel}]", $userId);
         }
 
-        return $this->executeSqlRestore($filePath, $backup['file_name'], $userId);
+        return $this->executeSqlRestore($filePath, "{$backup['file_name']} [{$sourceLabel}]", $userId);
     }
 
     /**
@@ -298,6 +210,23 @@ class BackupService
                 'google_drive_error'   => null,
             ]);
 
+            try {
+                $this->activityLogModel->logEvent([
+                    'actor_id'       => null,
+                    'event_type'     => 'SYSTEM_BACKUP_SYNCED',
+                    'severity'       => 'info',
+                    'device_summary' => 'Cloud Synchronization',
+                    'details'        => "Backup snapshot {$backup['file_name']} synced to Google Drive.",
+                    'metadata'       => ['file_name' => $backup['file_name'], 'file_id' => $upload['file_id']],
+                ]);
+                $this->ticketLogModel->logAction(
+                    'SYSTEM-BACKUP',
+                    null,
+                    'Snapshot Synced to Drive',
+                    "Backup snapshot {$backup['file_name']} successfully uploaded to Google Drive."
+                );
+            } catch (Throwable $ignored) {}
+
             return [
                 'success'   => true,
                 'message'   => 'Successfully synced backup to Google Drive.',
@@ -345,17 +274,20 @@ class BackupService
 
         // Audit log
         try {
-            $this->activityLogModel->insert([
+            $this->activityLogModel->logEvent([
                 'actor_id'       => $userId,
                 'event_type'     => 'SYSTEM_BACKUP_DELETED',
                 'severity'       => 'notice',
-                'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
-                'user_agent'     => (string) service('request')->getUserAgent(),
                 'device_summary' => 'System Backup',
-                'details'        => "Database backup removed: {$backup['file_name']}",
-                'metadata'       => json_encode(['file_name' => $backup['file_name']]),
-                'created_at'     => date('Y-m-d H:i:s'),
+                'details'        => "Backup snapshot deleted: {$backup['file_name']}",
+                'metadata'       => ['file_name' => $backup['file_name']],
             ]);
+            $this->ticketLogModel->logAction(
+                'SYSTEM-BACKUP',
+                $userId,
+                'Backup Snapshot Deleted',
+                "Backup snapshot permanently removed: {$backup['file_name']}"
+            );
         } catch (Throwable $logErr) {
             // Non-blocking log failure
         }
@@ -418,17 +350,20 @@ class BackupService
 
             // Audit log
             try {
-                $this->activityLogModel->insert([
+                $this->activityLogModel->logEvent([
                     'actor_id'       => $userId,
                     'event_type'     => 'SYSTEM_RESTORE_EXECUTED',
                     'severity'       => 'warning',
-                    'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
-                    'user_agent'     => (string) service('request')->getUserAgent(),
-                    'device_summary' => 'Disaster Recovery',
+                    'device_summary' => 'Disaster Recovery (SQL)',
                     'details'        => "Database restored from snapshot: {$sourceName}",
-                    'metadata'       => json_encode(['restored_from' => $sourceName]),
-                    'created_at'     => date('Y-m-d H:i:s'),
+                    'metadata'       => ['restored_from' => $sourceName],
                 ]);
+                $this->ticketLogModel->logAction(
+                    'SYSTEM-RESTORE',
+                    $userId,
+                    'System Snapshot Restored',
+                    "Database successfully restored from snapshot: {$sourceName}."
+                );
             } catch (Throwable $logErr) {
                 // Non-blocking log failure
             }
@@ -673,24 +608,27 @@ class BackupService
             ]);
 
             try {
-                $this->activityLogModel->insert([
+                $this->activityLogModel->logEvent([
                     'actor_id'       => $userId,
                     'event_type'     => 'SYSTEM_BACKUP_CREATED',
                     'severity'       => 'info',
-                    'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
-                    'user_agent'     => (string) service('request')->getUserAgent(),
                     'device_summary' => 'Full Disaster Snapshot',
-                    'details'        => "Full disaster recovery backup created: {$fileName} (Database + {$mediaCount} uploads)",
-                    'metadata'       => json_encode([
+                    'details'        => "Full disaster recovery backup created: {$fileName} (Database + {$mediaCount} uploads, " . number_format($fileSizeBytes) . " bytes). Cloud sync: {$driveStatus}.",
+                    'metadata'       => [
                         'file_name'         => $fileName,
                         'category'          => 'full',
                         'tables_count'      => count($tables),
                         'media_count'       => $mediaCount,
                         'size_bytes'        => $fileSizeBytes,
                         'cloud_sync_status' => $driveStatus,
-                    ]),
-                    'created_at'     => date('Y-m-d H:i:s'),
+                    ],
                 ]);
+                $this->ticketLogModel->logAction(
+                    'SYSTEM-SNAPSHOT',
+                    $userId,
+                    'System Snapshot Created',
+                    "Full disaster recovery snapshot created: {$fileName} (Database + {$mediaCount} uploads, " . number_format($fileSizeBytes) . " bytes). Synced to Google Drive [{$driveStatus}]."
+                );
             } catch (Throwable $ignored) {}
 
             $finalRecord = $this->backupModel->find($backupRecordId);
@@ -825,21 +763,24 @@ class BackupService
 
             // Audit log
             try {
-                $this->activityLogModel->insert([
+                $this->activityLogModel->logEvent([
                     'actor_id'       => $userId,
                     'event_type'     => 'SYSTEM_RESTORE_EXECUTED',
                     'severity'       => 'warning',
-                    'ip_address'     => service('request')->getIPAddress() ?? '127.0.0.1',
-                    'user_agent'     => (string) service('request')->getUserAgent(),
                     'device_summary' => 'Disaster Recovery (ZIP)',
                     'details'        => "Archive restored from {$sourceName}: {$restoredMediaCount} media files" . ($dbRestored ? " and database tables." : "."),
-                    'metadata'       => json_encode([
+                    'metadata'       => [
                         'source'      => $sourceName,
                         'db_restored' => $dbRestored,
                         'media_count' => $restoredMediaCount,
-                    ]),
-                    'created_at'     => date('Y-m-d H:i:s'),
+                    ],
                 ]);
+                $this->ticketLogModel->logAction(
+                    'SYSTEM-RESTORE',
+                    $userId,
+                    'System Snapshot Restored',
+                    "Full disaster recovery snapshot restored from {$sourceName}: " . ($dbRestored ? "Database schema and records restored. " : "") . "{$restoredMediaCount} media files extracted."
+                );
             } catch (Throwable $ignored) {}
 
             $msgParts = [];

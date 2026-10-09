@@ -54,9 +54,29 @@ class BackupController extends BaseController
             $backendUrl  = rtrim(env('app.baseURL', config('App')->baseURL ?? 'http://localhost:8080'), '/');
             $redirectUri = $backendUrl . '/api/v1/superadmin/backups/google-oauth-callback';
 
+            // Retrieve recent backup & restore activity logs for disaster recovery audit trail
+            $recentLogs = [];
+            try {
+                $recentLogs = (new \App\Models\AccountActivityLogModel())
+                    ->select('account_activity_logs.*, CONCAT(users.first_name, " ", users.last_name) as actor_name')
+                    ->join('users', 'users.id = account_activity_logs.actor_id', 'left')
+                    ->whereIn('account_activity_logs.event_type', [
+                        'SYSTEM_BACKUP_CREATED',
+                        'SYSTEM_RESTORE_EXECUTED',
+                        'SYSTEM_BACKUP_SYNCED',
+                        'SYSTEM_BACKUP_DELETED',
+                    ])
+                    ->orderBy('account_activity_logs.created_at', 'DESC')
+                    ->limit(15)
+                    ->findAll();
+            } catch (Throwable $logErr) {
+                // Non-blocking log query failure
+            }
+
             return $this->successResponse('Backups retrieved successfully.', [
                 'backups'      => $backups,
                 'stats'        => $stats,
+                'recent_logs'  => $recentLogs,
                 'google_drive' => [
                     'is_configured'         => $this->driveService->isConfigured(),
                     'connected'             => $gdriveTest['success'] ?? false,
@@ -79,7 +99,7 @@ class BackupController extends BaseController
     }
 
     /**
-     * Create an on-demand database backup and sync to Google Drive.
+     * Create an on-demand full system snapshot (database + media) and sync to Google Drive.
      * POST /api/v1/superadmin/backups
      */
     public function create(): ResponseInterface
@@ -87,11 +107,8 @@ class BackupController extends BaseController
         try {
             $userId   = $this->currentUserId();
             $body     = $this->request->getJSON(true) ?? [];
-            $notes    = trim($body['notes'] ?? 'Manual on-demand backup');
-            $category = trim($body['category'] ?? 'database');
-            if (!in_array($category, ['database', 'media', 'full'], true)) {
-                $category = 'database';
-            }
+            $notes    = trim($body['notes'] ?? 'Manual on-demand full snapshot');
+            $category = 'full'; // Unified full snapshot by standard to avoid restore conflicts
 
             $result = $this->backupService->createBackup($userId, 'manual', $notes, $category);
 
@@ -109,14 +126,15 @@ class BackupController extends BaseController
     }
 
     /**
-     * Restore database from an existing backup entry.
+     * Restore database from an existing backup entry from selected storage (Local or Google Drive).
      * POST /api/v1/superadmin/backups/(:num)/restore
      */
     public function restore(int $id): ResponseInterface
     {
         try {
-            $body = $this->request->getJSON(true) ?? [];
+            $body         = $this->request->getJSON(true) ?? [];
             $confirmation = trim($body['confirmation'] ?? '');
+            $source       = trim($body['source'] ?? 'auto'); // 'local' | 'google_drive' | 'auto'
 
             if ($confirmation !== 'CONFIRM RESTORE') {
                 return $this->errorResponse(
@@ -127,7 +145,7 @@ class BackupController extends BaseController
             }
 
             $userId = $this->currentUserId();
-            $result = $this->backupService->restoreBackup($id, $userId);
+            $result = $this->backupService->restoreBackup($id, $userId, $source);
 
             if (!$result['success']) {
                 return $this->errorResponse($result['message'], [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);

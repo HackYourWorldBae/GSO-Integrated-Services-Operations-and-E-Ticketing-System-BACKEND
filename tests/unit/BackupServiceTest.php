@@ -469,5 +469,50 @@ final class BackupServiceTest extends CIUnitTestCase
         $this->assertFalse($result['success']);
         $this->assertStringContainsString('malicious relative path', $result['message']);
     }
+
+    public function testRestoreBackupWithExplicitLocalSourceRejectsWhenLocalMissing(): void
+    {
+        $mockModel = $this->createMock(SystemBackupModel::class);
+        $mockModel->method('find')->with(1)->willReturn([
+            'id'                   => 1,
+            'file_name'            => 'backup_test.zip',
+            'file_path'            => WRITEPATH . 'backups/missing_local_file_888.zip',
+            'google_drive_file_id' => 'drive-id-123',
+        ]);
+
+        $service = new BackupService($mockModel, $this->driveService);
+        $result  = $service->restoreBackup(1, 'superadmin-uuid', 'local');
+
+        $this->assertIsArray($result);
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Local onsite backup file not found on disk', $result['message']);
+    }
+
+    public function testRestoreBackupWithExplicitGoogleDriveSourceDownloadsFreshCopy(): void
+    {
+        $sampleFile = $this->createTempFile('dummy', '.zip');
+
+        $mockModel = $this->createMock(SystemBackupModel::class);
+        $mockModel->method('find')->with(1)->willReturn([
+            'id'                   => 1,
+            'file_name'            => basename($sampleFile),
+            'file_path'            => $sampleFile,
+            'google_drive_file_id' => 'drive-id-fresh-999',
+        ]);
+
+        $mockDrive = $this->createMock(GoogleDriveService::class);
+        $mockDrive->method('isConfigured')->willReturn(true);
+        $mockDrive->expects($this->once())
+            ->method('downloadFile')
+            ->with('drive-id-fresh-999', $sampleFile)
+            ->willReturn(['success' => false, 'bytes' => 0, 'error' => 'Simulated Google Drive network timeout']);
+
+        $service = new BackupService($mockModel, $mockDrive);
+        $result  = $service->restoreBackup(1, 'superadmin-uuid', 'google_drive');
+
+        $this->assertIsArray($result);
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Google Drive cloud download failed', $result['message']);
+    }
 }
 

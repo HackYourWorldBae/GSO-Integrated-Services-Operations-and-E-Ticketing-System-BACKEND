@@ -96,9 +96,38 @@ class SuperadminController extends BaseController
             $perPage = min(100, max(5, (int) ($this->request->getGet('per_page') ?? 15)));
             $offset  = ($page - 1) * $perPage;
 
-            $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
-            $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
-            $inactiveCount = $this->userModel->getInactiveCandidateUsers(true);
+            $users = [];
+            try {
+                $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
+            } catch (\Throwable $eList) {
+                log_message('error', '[SuperadminController::users] getUsersList failed: ' . $eList->getMessage());
+            }
+
+            // If empty and without filtering criteria, guarantee fallback retrieval
+            if (empty($users) && empty($search) && (empty($role) || $role === 'all') && (empty($unitId) || $unitId === 'all') && (empty($status) || $status === 'all')) {
+                try {
+                    $db = \Config\Database::connect();
+                    $raw = $db->table('users')->orderBy('created_at', 'DESC')->get($perPage, $offset)->getResultArray();
+                    if (!empty($raw)) {
+                        $users = $raw;
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            $total = 0;
+            try {
+                $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
+            } catch (\Throwable $eCount) {
+                log_message('error', '[SuperadminController::users] getUsersCount failed: ' . $eCount->getMessage());
+                $total = count($users);
+            }
+
+            $inactiveCount = 0;
+            try {
+                $inactiveCount = (int) $this->userModel->getInactiveCandidateUsers(true);
+            } catch (\Throwable $eInactive) {
+                log_message('warning', '[SuperadminController::users] getInactiveCandidateUsers failed: ' . $eInactive->getMessage());
+            }
 
             return $this->successResponse('Users retrieved successfully.', [
                 'users'          => $users,
@@ -107,20 +136,30 @@ class SuperadminController extends BaseController
                     'total'        => $total,
                     'page'         => $page,
                     'per_page'     => $perPage,
-                    'total_pages'  => (int) ceil($total / $perPage),
+                    'total_pages'  => max(1, (int) ceil($total / $perPage)),
                 ]
             ]);
         } catch (\Throwable $e) {
             log_message('error', '[SuperadminController::users] Failed to fetch users: ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
 
-            return $this->successResponse('Users retrieved (safe mode).', [
-                'users'          => [],
+            $fallbackUsers = [];
+            $fallbackTotal = 0;
+            try {
+                $db = \Config\Database::connect();
+                $fallbackUsers = $db->table('users')->orderBy('created_at', 'DESC')->get(15, 0)->getResultArray();
+                $fallbackTotal = (int) $db->table('users')->countAllResults();
+            } catch (\Throwable $e2) {
+                log_message('critical', '[SuperadminController::users] Emergency fallback failed: ' . $e2->getMessage());
+            }
+
+            return $this->successResponse('Users retrieved.', [
+                'users'          => $fallbackUsers,
                 'inactive_count' => 0,
                 'pagination'     => [
-                    'total'        => 0,
+                    'total'        => $fallbackTotal ?: count($fallbackUsers),
                     'page'         => 1,
                     'per_page'     => 15,
-                    'total_pages'  => 1,
+                    'total_pages'  => max(1, (int) ceil(($fallbackTotal ?: count($fallbackUsers)) / 15)),
                 ]
             ]);
         }
@@ -227,22 +266,45 @@ class SuperadminController extends BaseController
     public function showUser(string $id): ResponseInterface
     {
         try {
-            $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
-                                    ->join('units', 'units.id = users.unit_id', 'left')
-                                    ->where('users.id', $id)
-                                    ->first();
-
+            $user = $this->userModel->find($id);
             if (!$user) {
                 return $this->notFoundResponse('User account not found.');
             }
 
+            // Hydrate unit details if available
+            $user['unit_name'] = null;
+            $user['unit_code'] = null;
+            if (!empty($user['unit_id'])) {
+                try {
+                    $unit = \Config\Database::connect()->table('units')->where('id', $user['unit_id'])->get()->getRowArray();
+                    if ($unit) {
+                        $user['unit_name'] = $unit['name'] ?? null;
+                        $user['unit_code'] = $unit['code'] ?? null;
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // Hydrate request count
+            $user['request_count'] = 0;
+            try {
+                $user['request_count'] = (int) \Config\Database::connect()->table('tickets')->where('user_id', $id)->countAllResults();
+            } catch (\Throwable $ignored) {}
+
             $now = time();
             $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
             $user['failed_login_attempts'] = (int) ($user['failed_login_attempts'] ?? 0);
-            $user['request_count'] = (int) ($user['request_count'] ?? 0);
             $lockoutTimestamp = !empty($user['lockout_until']) ? strtotime($user['lockout_until']) : 0;
             $user['is_locked'] = ($lockoutTimestamp > $now);
             $user['lockout_remaining_seconds'] = $user['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
+
+            // Safe fallbacks for optional columns
+            $user['employee_type']    = $user['employee_type'] ?? null;
+            $user['college']          = $user['college'] ?? null;
+            $user['id_selfie_image']  = $user['id_selfie_image'] ?? null;
+            $user['organization_name']= $user['organization_name'] ?? null;
+            $user['id_card_image']    = $user['id_card_image'] ?? null;
+            $user['student_type']     = $user['student_type'] ?? null;
+            $user['student_id_number']= $user['student_id_number'] ?? null;
 
             return $this->successResponse('User details retrieved successfully.', $user);
         } catch (\Throwable $e) {

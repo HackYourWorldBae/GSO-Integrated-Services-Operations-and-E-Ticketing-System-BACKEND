@@ -152,65 +152,71 @@ class UserModel extends Model
             return self::$schemaCapabilities;
         }
 
+        $db = \Config\Database::connect();
+
         try {
-            $hasLastLoginAt = $this->db->fieldExists('last_login_at', 'users');
+            $userFields = $db->getFieldNames('users') ?: [];
         } catch (\Throwable $e) {
-            $hasLastLoginAt = false;
+            $userFields = [];
         }
 
         try {
-            $hasUserSessions = $this->db->tableExists('user_sessions');
-            $userSessionActivityCol = null;
+            $hasUserSessions = $db->tableExists('user_sessions');
+            $sessionActivityCol = null;
             if ($hasUserSessions) {
-                if ($this->db->fieldExists('last_activity', 'user_sessions')) {
-                    $userSessionActivityCol = 'last_activity';
-                } elseif ($this->db->fieldExists('last_active', 'user_sessions')) {
-                    $userSessionActivityCol = 'last_active';
+                if ($db->fieldExists('last_activity', 'user_sessions')) {
+                    $sessionActivityCol = 'last_activity';
+                } elseif ($db->fieldExists('last_active', 'user_sessions')) {
+                    $sessionActivityCol = 'last_active';
                 }
             }
         } catch (\Throwable $e) {
             $hasUserSessions = false;
-            $userSessionActivityCol = null;
+            $sessionActivityCol = null;
         }
 
         try {
-            $hasActivityLogs = $this->db->tableExists('account_activity_logs');
-        } catch (\Throwable $e) {
-            $hasActivityLogs = false;
-        }
-
-        try {
-            $hasTickets = $this->db->tableExists('tickets');
-        } catch (\Throwable $e) {
-            $hasTickets = false;
-        }
-
-        try {
-            $hasUnits = $this->db->tableExists('units');
+            $hasUnits = $db->tableExists('units');
         } catch (\Throwable $e) {
             $hasUnits = false;
         }
 
         try {
-            $hasPersonnel = $this->db->tableExists('personnel');
-            $hasPersonnelUserId = $hasPersonnel && $this->db->fieldExists('user_id', 'personnel');
-            $hasPersonnelSpecialty = $hasPersonnel && $this->db->fieldExists('specialty', 'personnel');
+            $hasPersonnel = $db->tableExists('personnel');
+            $hasPersonnelUserId = $hasPersonnel && $db->fieldExists('user_id', 'personnel');
+            $hasPersonnelSpecialty = $hasPersonnel && $db->fieldExists('specialty', 'personnel');
         } catch (\Throwable $e) {
             $hasPersonnel = false;
             $hasPersonnelUserId = false;
             $hasPersonnelSpecialty = false;
         }
 
+        try {
+            $hasTickets = $db->tableExists('tickets');
+        } catch (\Throwable $e) {
+            $hasTickets = false;
+        }
+
+        try {
+            $hasActivityLogs = $db->tableExists('account_activity_logs');
+        } catch (\Throwable $e) {
+            $hasActivityLogs = false;
+        }
+
         self::$schemaCapabilities = [
-            'has_last_login_at'      => $hasLastLoginAt,
+            'user_fields'            => $userFields,
+            'has_last_login_at'      => in_array('last_login_at', $userFields, true),
+            'has_employee_type'      => in_array('employee_type', $userFields, true),
+            'has_college'            => in_array('college', $userFields, true),
+            'has_id_selfie_image'    => in_array('id_selfie_image', $userFields, true),
             'has_user_sessions'      => $hasUserSessions,
-            'session_activity_col'   => $userSessionActivityCol,
-            'has_activity_logs'      => $hasActivityLogs,
-            'has_tickets'            => $hasTickets,
+            'session_activity_col'   => $sessionActivityCol,
             'has_units'              => $hasUnits,
             'has_personnel'          => $hasPersonnel,
             'has_personnel_user_id'  => $hasPersonnelUserId,
             'has_personnel_specialty'=> $hasPersonnelSpecialty,
+            'has_tickets'            => $hasTickets,
+            'has_activity_logs'      => $hasActivityLogs,
         ];
 
         return self::$schemaCapabilities;
@@ -224,160 +230,34 @@ class UserModel extends Model
     {
         try {
             $caps = $this->getSchemaCapabilities();
+            $db = \Config\Database::connect();
+            $builder = $db->table('users');
 
-            $selects = [
-                'users.id',
-                'users.first_name',
-                'users.last_name',
-                'users.email',
-                'users.contact_number',
-                'users.role',
-                'users.unit_id',
-                'users.student_id_number',
-                'users.student_type',
-                'users.employee_type',
-                'users.organization_name',
-                'users.college',
-                'users.id_card_image',
-                'users.id_selfie_image',
-                'users.avatar_path',
-                'users.status',
-                'users.is_verified',
-                'users.failed_login_attempts',
-                'users.lockout_until',
-                'users.created_at',
-                'users.updated_at',
-            ];
-
-            if ($caps['has_last_login_at']) {
-                $selects[] = 'users.last_login_at';
-            } else {
-                $selects[] = 'NULL AS last_login_at';
-            }
-
-            if ($caps['has_units']) {
-                $selects[] = 'MAX(units.name) AS unit_name';
-                $selects[] = 'MAX(units.code) AS unit_code';
-            } else {
-                $selects[] = 'NULL AS unit_name';
-                $selects[] = 'NULL AS unit_code';
-            }
-
-            if ($caps['has_personnel'] && $caps['has_personnel_specialty']) {
-                $selects[] = 'MAX(personnel.specialty) AS specialty';
-            } else {
-                $selects[] = 'NULL AS specialty';
-            }
-
-            if ($caps['has_tickets']) {
-                $selects[] = '(SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count';
-                $selects[] = '(SELECT MAX(created_at) FROM tickets WHERE tickets.user_id = users.id) AS last_request_at';
-            } else {
-                $selects[] = '0 AS request_count';
-                $selects[] = 'NULL AS last_request_at';
-            }
-
-            if ($caps['has_activity_logs']) {
-                $selects[] = "(SELECT MAX(created_at) FROM account_activity_logs WHERE (actor_id = users.id OR target_user_id = users.id) AND event_type = 'AUTH_LOGIN_SUCCESS') AS log_last_login_at";
-            } else {
-                $selects[] = 'NULL AS log_last_login_at';
-            }
-
-            if ($caps['has_user_sessions'] && $caps['session_activity_col']) {
-                $actCol = $caps['session_activity_col'];
-                $selects[] = "MAX(user_sessions.{$actCol}) AS session_last_activity";
-                $selects[] = 'MAX(user_sessions.created_at) AS session_created_at';
-                $selects[] = 'MAX(user_sessions.ip_address) AS session_ip_address';
-                $selects[] = 'MAX(user_sessions.user_agent) AS session_user_agent';
-            } else {
-                $selects[] = 'NULL AS session_last_activity';
-                $selects[] = 'NULL AS session_created_at';
-                $selects[] = 'NULL AS session_ip_address';
-                $selects[] = 'NULL AS session_user_agent';
-            }
-
-            $builder = $this->select(implode(', ', $selects));
-
-            if ($caps['has_units']) {
-                $builder->join('units', 'units.id = users.unit_id', 'left');
-            }
-
-            if ($caps['has_personnel']) {
-                $personnelJoin = $caps['has_personnel_user_id']
-                    ? "personnel.user_id = users.id OR (users.role IN ('worker', 'personnel') AND (personnel.name = CONCAT(TRIM(users.first_name), ' ', TRIM(users.last_name)) OR personnel.name LIKE CONCAT('%', TRIM(users.last_name), '%')))"
-                    : "(users.role IN ('worker', 'personnel') AND (personnel.name = CONCAT(TRIM(users.first_name), ' ', TRIM(users.last_name)) OR personnel.name LIKE CONCAT('%', TRIM(users.last_name), '%')))";
-                $builder->join('personnel', $personnelJoin, 'left');
-            }
-
-            if ($caps['has_user_sessions']) {
-                $builder->join('user_sessions', 'user_sessions.user_id = users.id', 'left');
-            }
-
-            $builder->groupBy('users.id');
+            $builder->select('users.*');
 
             if (!empty($search)) {
+                $personnelUserIds = [];
+                if ($caps['has_personnel'] && $caps['has_personnel_specialty'] && $caps['has_personnel_user_id']) {
+                    try {
+                        $pRows = $db->table('personnel')
+                                    ->select('user_id')
+                                    ->like('specialty', $search)
+                                    ->where('user_id IS NOT NULL', null, false)
+                                    ->get()
+                                    ->getResultArray();
+                        $personnelUserIds = array_filter(array_column($pRows, 'user_id'));
+                    } catch (\Throwable $ignored) {}
+                }
+
                 $builder->groupStart()
                         ->like('users.first_name', $search)
                         ->orLike('users.last_name', $search)
                         ->orLike('users.email', $search)
                         ->orLike('users.student_id_number', $search);
-                if ($caps['has_personnel'] && $caps['has_personnel_specialty']) {
-                    $builder->orLike('personnel.specialty', $search);
+                if (!empty($personnelUserIds)) {
+                    $builder->orWhereIn('users.id', $personnelUserIds);
                 }
                 $builder->groupEnd();
-            }
-
-            if (!empty($role) && $role !== 'all') {
-                if ($role === 'personnel' || $role === 'worker') {
-                    $builder->groupStart()
-                            ->where('users.role', 'worker')
-                            ->orWhere('users.role', 'personnel')
-                            ->groupEnd();
-                } else {
-                    $builder->where('users.role', $role);
-                }
-            }
-
-            if (!empty($unitId) && $unitId !== 'all') {
-                if ($unitId === 'none') {
-                    $builder->where('users.unit_id IS NULL', null, false);
-                } else {
-                    $builder->where('users.unit_id', (int) $unitId);
-                }
-            }
-
-            if (!empty($status) && $status !== 'all') {
-                $builder->where('users.status', $status);
-            }
-
-            $users = $builder->orderBy('users.created_at', 'DESC')
-                             ->findAll($limit, $offset);
-        } catch (\Throwable $e) {
-            log_message('error', '[UserModel::getUsersList] Primary query failed: ' . $e->getMessage() . '. Running safe fallback query.');
-            $users = $this->getUsersListSafeFallback($search, $role, $unitId, $status, $limit, $offset);
-        }
-
-        return $this->enrichUsersWithPresenceAndInactivity($users);
-    }
-
-    /**
-     * Resilient fallback query that operates purely on the users table,
-     * ensuring that superadmin user listings can NEVER crash with 500
-     * even under non-standard MySQL SQL modes or partial database schema states.
-     */
-    protected function getUsersListSafeFallback(?string $search = null, ?string $role = null, ?string $unitId = null, ?string $status = null, int $limit = 20, int $offset = 0): array
-    {
-        try {
-            $builder = $this->builder();
-            $builder->select('users.*');
-
-            if (!empty($search)) {
-                $builder->groupStart()
-                        ->like('users.first_name', $search)
-                        ->orLike('users.last_name', $search)
-                        ->orLike('users.email', $search)
-                        ->orLike('users.student_id_number', $search)
-                        ->groupEnd();
             }
 
             if (!empty($role) && $role !== 'all') {
@@ -404,38 +284,143 @@ class UserModel extends Model
                              ->get($limit, $offset)
                              ->getResultArray();
 
-            // Safely hydrate unit info if units table exists
-            try {
-                if ($this->db->tableExists('units') && !empty($users)) {
-                    $unitIds = array_filter(array_column($users, 'unit_id'));
-                    if (!empty($unitIds)) {
-                        $units = $this->db->table('units')
-                                          ->whereIn('id', array_unique($unitIds))
-                                          ->get()
-                                          ->getResultArray();
-                        $unitMap = [];
-                        foreach ($units as $u) {
-                            $unitMap[$u['id']] = $u;
-                        }
-                        foreach ($users as &$usr) {
-                            if (!empty($usr['unit_id']) && isset($unitMap[$usr['unit_id']])) {
-                                $usr['unit_name'] = $unitMap[$usr['unit_id']]['name'] ?? null;
-                                $usr['unit_code'] = $unitMap[$usr['unit_id']]['code'] ?? null;
-                            } else {
-                                $usr['unit_name'] = null;
-                                $usr['unit_code'] = null;
-                            }
-                        }
-                        unset($usr);
-                    }
-                }
-            } catch (\Throwable $ignored) {
+            if (empty($users)) {
+                return [];
             }
 
-            return $users;
+            $userIds = array_column($users, 'id');
+            $unitIds = array_filter(array_unique(array_column($users, 'unit_id')));
+
+            // 1. Units Hydration
+            $unitsMap = [];
+            if ($caps['has_units'] && !empty($unitIds)) {
+                try {
+                    $unitRows = $db->table('units')->whereIn('id', $unitIds)->get()->getResultArray();
+                    foreach ($unitRows as $ur) {
+                        $unitsMap[$ur['id']] = $ur;
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // 2. Personnel Specialty Hydration
+            $specialtyMap = [];
+            if ($caps['has_personnel'] && $caps['has_personnel_specialty']) {
+                try {
+                    $pRows = [];
+                    if ($caps['has_personnel_user_id']) {
+                        $pRows = $db->table('personnel')
+                                    ->select('user_id, specialty')
+                                    ->whereIn('user_id', $userIds)
+                                    ->get()
+                                    ->getResultArray();
+                    }
+                    foreach ($pRows as $pr) {
+                        if (!empty($pr['user_id'])) {
+                            $specialtyMap[$pr['user_id']] = $pr['specialty'];
+                        }
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // 3. User Sessions Hydration
+            $sessionMap = [];
+            if ($caps['has_user_sessions'] && $caps['session_activity_col']) {
+                try {
+                    $actCol = $caps['session_activity_col'];
+                    $sessionRows = $db->table('user_sessions')
+                                      ->select("user_id, {$actCol} AS session_last_activity, created_at AS session_created_at, ip_address AS session_ip_address, user_agent AS session_user_agent")
+                                      ->whereIn('user_id', $userIds)
+                                      ->get()
+                                      ->getResultArray();
+                    foreach ($sessionRows as $sr) {
+                        $sessionMap[$sr['user_id']] = $sr;
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // 4. Ticket Requests Hydration
+            $ticketMap = [];
+            if ($caps['has_tickets']) {
+                try {
+                    $ticketRows = $db->table('tickets')
+                                     ->select('user_id, COUNT(*) AS request_count, MAX(created_at) AS last_request_at')
+                                     ->whereIn('user_id', $userIds)
+                                     ->groupBy('user_id')
+                                     ->get()
+                                     ->getResultArray();
+                    foreach ($ticketRows as $tr) {
+                        $ticketMap[$tr['user_id']] = $tr;
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // 5. Account Activity Logs Hydration
+            $logMap = [];
+            if ($caps['has_activity_logs']) {
+                try {
+                    $logRows = $db->table('account_activity_logs')
+                                  ->select('actor_id, MAX(created_at) AS log_last_login_at')
+                                  ->whereIn('actor_id', $userIds)
+                                  ->where('event_type', 'AUTH_LOGIN_SUCCESS')
+                                  ->groupBy('actor_id')
+                                  ->get()
+                                  ->getResultArray();
+                    foreach ($logRows as $lr) {
+                        $logMap[$lr['actor_id']] = $lr['log_last_login_at'];
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            // Merge hydrated metadata into each user object
+            foreach ($users as &$u) {
+                $uid = $u['id'];
+                $uUnitId = $u['unit_id'] ?? null;
+
+                // Units
+                $u['unit_name'] = ($uUnitId && isset($unitsMap[$uUnitId])) ? ($unitsMap[$uUnitId]['name'] ?? null) : null;
+                $u['unit_code'] = ($uUnitId && isset($unitsMap[$uUnitId])) ? ($unitsMap[$uUnitId]['code'] ?? null) : null;
+
+                // Personnel Specialty
+                $u['specialty'] = $specialtyMap[$uid] ?? null;
+
+                // Sessions
+                $sess = $sessionMap[$uid] ?? null;
+                $u['session_last_activity'] = $sess['session_last_activity'] ?? null;
+                $u['session_created_at']    = $sess['session_created_at'] ?? null;
+                $u['session_ip_address']    = $sess['session_ip_address'] ?? null;
+                $u['session_user_agent']    = $sess['session_user_agent'] ?? null;
+
+                // Tickets
+                $tkt = $ticketMap[$uid] ?? null;
+                $u['request_count']   = (int) ($tkt['request_count'] ?? 0);
+                $u['last_request_at'] = $tkt['last_request_at'] ?? null;
+
+                // Activity Log Login
+                $u['log_last_login_at'] = $logMap[$uid] ?? null;
+
+                // Safe fallbacks for optional fields
+                $u['last_login_at']    = $u['last_login_at'] ?? null;
+                $u['employee_type']    = $u['employee_type'] ?? null;
+                $u['college']          = $u['college'] ?? null;
+                $u['id_selfie_image']  = $u['id_selfie_image'] ?? null;
+                $u['organization_name']= $u['organization_name'] ?? null;
+                $u['id_card_image']    = $u['id_card_image'] ?? null;
+                $u['student_type']     = $u['student_type'] ?? null;
+                $u['student_id_number']= $u['student_id_number'] ?? null;
+            }
+            unset($u);
+
+            return $this->enrichUsersWithPresenceAndInactivity($users);
         } catch (\Throwable $e) {
-            log_message('critical', '[UserModel::getUsersListSafeFallback] Critical query failure: ' . $e->getMessage());
-            return [];
+            log_message('critical', '[UserModel::getUsersList] Error: ' . $e->getMessage());
+            try {
+                $db = \Config\Database::connect();
+                $fallbackUsers = $db->table('users')->orderBy('created_at', 'DESC')->get($limit, $offset)->getResultArray();
+                return $this->enrichUsersWithPresenceAndInactivity($fallbackUsers);
+            } catch (\Throwable $fallbackErr) {
+                log_message('critical', '[UserModel::getUsersList] Fallback failed: ' . $fallbackErr->getMessage());
+                return [];
+            }
         }
     }
 
@@ -610,34 +595,37 @@ class UserModel extends Model
     {
         try {
             $caps = $this->getSchemaCapabilities();
-            $builder = $this->builder();
-            $builder->select('COUNT(DISTINCT users.id) as total');
-
-            if ($caps['has_personnel']) {
-                $joinCond = $caps['has_personnel_user_id']
-                    ? "personnel.user_id = users.id OR (users.role IN ('worker', 'personnel') AND (personnel.name = CONCAT(TRIM(users.first_name), ' ', TRIM(users.last_name)) OR personnel.name LIKE CONCAT('%', TRIM(users.last_name), '%')))"
-                    : "(users.role IN ('worker', 'personnel') AND (personnel.name = CONCAT(TRIM(users.first_name), ' ', TRIM(users.last_name)) OR personnel.name LIKE CONCAT('%', TRIM(users.last_name), '%')))";
-                $builder->join('personnel', $joinCond, 'left');
-            }
+            $db = \Config\Database::connect();
+            $builder = $db->table('users');
 
             if (!empty($search)) {
+                $personnelUserIds = [];
+                if ($caps['has_personnel'] && $caps['has_personnel_specialty'] && $caps['has_personnel_user_id']) {
+                    try {
+                        $pRows = $db->table('personnel')
+                                    ->select('user_id')
+                                    ->like('specialty', $search)
+                                    ->where('user_id IS NOT NULL', null, false)
+                                    ->get()
+                                    ->getResultArray();
+                        $personnelUserIds = array_filter(array_column($pRows, 'user_id'));
+                    } catch (\Throwable $ignored) {}
+                }
+
                 $builder->groupStart()
                         ->like('users.first_name', $search)
                         ->orLike('users.last_name', $search)
                         ->orLike('users.email', $search)
                         ->orLike('users.student_id_number', $search);
-                if ($caps['has_personnel'] && $caps['has_personnel_specialty']) {
-                    $builder->orLike('personnel.specialty', $search);
+                if (!empty($personnelUserIds)) {
+                    $builder->orWhereIn('users.id', $personnelUserIds);
                 }
                 $builder->groupEnd();
             }
 
             if (!empty($role) && $role !== 'all') {
                 if ($role === 'personnel' || $role === 'worker') {
-                    $builder->groupStart()
-                            ->where('users.role', 'worker')
-                            ->orWhere('users.role', 'personnel')
-                            ->groupEnd();
+                    $builder->whereIn('users.role', ['worker', 'personnel']);
                 } else {
                     $builder->where('users.role', $role);
                 }
@@ -655,29 +643,10 @@ class UserModel extends Model
                 $builder->where('users.status', $status);
             }
 
-            $res = $builder->get()->getRowArray();
-            return (int) ($res['total'] ?? 0);
+            return (int) $builder->countAllResults();
         } catch (\Throwable $e) {
             log_message('error', '[UserModel::getUsersCount] Error counting users: ' . $e->getMessage());
-            try {
-                $simple = $this->builder();
-                if (!empty($search)) {
-                    $simple->groupStart()
-                           ->like('users.first_name', $search)
-                           ->orLike('users.last_name', $search)
-                           ->orLike('users.email', $search)
-                           ->groupEnd();
-                }
-                if (!empty($role) && $role !== 'all') {
-                    $simple->where('users.role', $role);
-                }
-                if (!empty($status) && $status !== 'all') {
-                    $simple->where('users.status', $status);
-                }
-                return (int) $simple->countAllResults();
-            } catch (\Throwable $e2) {
-                return 0;
-            }
+            return 0;
         }
     }
 
@@ -686,20 +655,21 @@ class UserModel extends Model
      */
     public function getSystemUserStats(): array
     {
-        $totalUsers = $this->countAllResults();
-        $activeUsers = $this->where('status', 'Active')->countAllResults();
-        $pendingUsers = $this->where('status', 'Pending')->countAllResults();
-        $suspendedUsers = $this->where('status', 'Suspended')->countAllResults();
-        $archivedUsers = $this->where('status', 'Archived')->countAllResults();
+        $db = \Config\Database::connect();
+        $totalUsers = $db->table('users')->countAllResults();
+        $activeUsers = $db->table('users')->where('status', 'Active')->countAllResults();
+        $pendingUsers = $db->table('users')->where('status', 'Pending')->countAllResults();
+        $suspendedUsers = $db->table('users')->where('status', 'Suspended')->countAllResults();
+        $archivedUsers = $db->table('users')->where('status', 'Archived')->countAllResults();
 
         // Role breakdown
         $roles = ['superadmin', 'admin', 'staff', 'director', 'worker', 'employee', 'student'];
         $roleBreakdown = [];
         foreach ($roles as $r) {
             if ($r === 'worker') {
-                $roleBreakdown[$r] = $this->whereIn('role', ['worker', 'personnel'])->countAllResults();
+                $roleBreakdown[$r] = $db->table('users')->whereIn('role', ['worker', 'personnel'])->countAllResults();
             } else {
-                $roleBreakdown[$r] = $this->where('role', $r)->countAllResults();
+                $roleBreakdown[$r] = $db->table('users')->where('role', $r)->countAllResults();
             }
         }
 
@@ -727,7 +697,8 @@ class UserModel extends Model
         try {
             $caps = $this->getSchemaCapabilities();
             $sixMonthsAgo = date('Y-m-d H:i:s', strtotime('-6 months'));
-            $builder = $this->builder();
+            $db = \Config\Database::connect();
+            $builder = $db->table('users');
 
             if ($onlyCount) {
                 $builder->select('COUNT(users.id) as total');

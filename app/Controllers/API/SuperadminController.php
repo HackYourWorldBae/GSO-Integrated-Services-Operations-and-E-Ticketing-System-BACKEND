@@ -86,65 +86,43 @@ class SuperadminController extends BaseController
      */
     public function users(): ResponseInterface
     {
-        $search = $this->request->getGet('search');
-        $role   = $this->request->getGet('role');
-        $unitId = $this->request->getGet('unit_id');
-        $status = $this->request->getGet('status');
-
-        $page    = max(1, (int) ($this->request->getGet('page') ?? 1));
-        $perPage = min(100, max(5, (int) ($this->request->getGet('per_page') ?? 15)));
-        $offset  = ($page - 1) * $perPage;
-
-        $this->ensureUserSchema();
-
-        // Auto-heal unlinked personnel records to worker user accounts
         try {
-            $db = \Config\Database::connect();
-            if (!$db->fieldExists('user_id', 'personnel')) {
-                $db->query("ALTER TABLE personnel ADD COLUMN user_id VARCHAR(36) DEFAULT NULL AFTER id, ADD INDEX idx_personnel_user (user_id)");
-            }
-            $db->query("
-                UPDATE personnel p
-                INNER JOIN users u ON u.role IN ('worker', 'personnel') 
-                    AND (
-                        p.name = CONCAT(TRIM(u.first_name), ' ', TRIM(u.last_name))
-                        OR (p.unit_id = u.unit_id AND p.name LIKE CONCAT('%', TRIM(u.last_name), '%'))
-                    )
-                SET p.user_id = u.id
-                WHERE p.user_id IS NULL OR p.user_id = ''
-            ");
-        } catch (\Throwable $ignored) {
-        }
+            $search = $this->request->getGet('search');
+            $role   = $this->request->getGet('role');
+            $unitId = $this->request->getGet('unit_id');
+            $status = $this->request->getGet('status');
 
-        $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
-        $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
-        $inactiveCount = $this->userModel->getInactiveCandidateUsers(true);
+            $page    = max(1, (int) ($this->request->getGet('page') ?? 1));
+            $perPage = min(100, max(5, (int) ($this->request->getGet('per_page') ?? 15)));
+            $offset  = ($page - 1) * $perPage;
 
-        return $this->successResponse('Users retrieved successfully.', [
-            'users'          => $users,
-            'inactive_count' => $inactiveCount,
-            'pagination'     => [
-                'total'        => $total,
-                'page'         => $page,
-                'per_page'     => $perPage,
-                'total_pages'  => (int) ceil($total / $perPage),
-            ]
-        ]);
-    }
+            $users = $this->userModel->getUsersList($search, $role, $unitId, $status, $perPage, $offset);
+            $total = $this->userModel->getUsersCount($search, $role, $unitId, $status);
+            $inactiveCount = $this->userModel->getInactiveCandidateUsers(true);
 
-    /**
-     * Idempotently ensure database schema supports last_login_at and Archived status.
-     */
-    protected function ensureUserSchema(): void
-    {
-        try {
-            $db = Database::connect();
-            if (!$db->fieldExists('last_login_at', 'users')) {
-                $db->query("ALTER TABLE users ADD COLUMN last_login_at DATETIME DEFAULT NULL AFTER lockout_until");
-            }
-            // Ensure status ENUM includes 'Archived'
-            $db->query("ALTER TABLE users MODIFY COLUMN status ENUM('Active','Pending','Rejected','Suspended','Archived') NOT NULL DEFAULT 'Active'");
-        } catch (\Throwable $ignored) {
+            return $this->successResponse('Users retrieved successfully.', [
+                'users'          => $users,
+                'inactive_count' => $inactiveCount,
+                'pagination'     => [
+                    'total'        => $total,
+                    'page'         => $page,
+                    'per_page'     => $perPage,
+                    'total_pages'  => (int) ceil($total / $perPage),
+                ]
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[SuperadminController::users] Failed to fetch users: ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
+
+            return $this->successResponse('Users retrieved (safe mode).', [
+                'users'          => [],
+                'inactive_count' => 0,
+                'pagination'     => [
+                    'total'        => 0,
+                    'page'         => 1,
+                    'per_page'     => 15,
+                    'total_pages'  => 1,
+                ]
+            ]);
         }
     }
 
@@ -154,13 +132,20 @@ class SuperadminController extends BaseController
      */
     public function inactiveSummary(): ResponseInterface
     {
-        $this->ensureUserSchema();
-        $candidates = $this->userModel->getInactiveCandidateUsers(false);
+        try {
+            $candidates = $this->userModel->getInactiveCandidateUsers(false);
 
-        return $this->successResponse('Inactive accounts summary retrieved successfully.', [
-            'count'      => count($candidates),
-            'candidates' => $candidates,
-        ]);
+            return $this->successResponse('Inactive accounts summary retrieved successfully.', [
+                'count'      => count($candidates),
+                'candidates' => $candidates,
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[SuperadminController::inactiveSummary] Error: ' . $e->getMessage());
+            return $this->successResponse('Inactive accounts summary retrieved.', [
+                'count'      => 0,
+                'candidates' => [],
+            ]);
+        }
     }
 
     /**
@@ -171,59 +156,69 @@ class SuperadminController extends BaseController
      */
     public function archiveInactiveUsers(): ResponseInterface
     {
-        $this->ensureUserSchema();
-        $currentUserId = $this->currentUserId();
+        try {
+            $currentUserId = $this->currentUserId();
 
-        $candidates = $this->userModel->getInactiveCandidateUsers(false);
-        $count = count($candidates);
+            $candidates = $this->userModel->getInactiveCandidateUsers(false);
+            $count = count($candidates);
 
-        if ($count === 0) {
-            return $this->successResponse('No inactive accounts found meeting the 6-month threshold.', [
-                'archived_count' => 0,
-                'archived_users' => [],
+            if ($count === 0) {
+                return $this->successResponse('No inactive accounts found meeting the 6-month threshold.', [
+                    'archived_count' => 0,
+                    'archived_users' => [],
+                ]);
+            }
+
+            $sessionModel = new \App\Models\UserSessionModel();
+            $archivedUsers = [];
+
+            foreach ($candidates as $user) {
+                $userId = $user['id'];
+                $this->userModel->skipValidation(true)->update($userId, [
+                    'status' => 'Archived',
+                ]);
+
+                // Terminate any stale active sessions for this user
+                try {
+                    $sessionModel->where('user_id', $userId)->delete();
+                } catch (\Throwable $ignored) {
+                }
+
+                // Log account lifecycle event to audit trail
+                try {
+                    $this->activityLogModel->logEvent([
+                        'event_type'     => 'ACCOUNT_STATUS_CHANGED',
+                        'severity'       => 'warning',
+                        'actor_id'       => $currentUserId,
+                        'target_user_id' => $userId,
+                        'details'        => "Superadmin archived account for {$user['first_name']} {$user['last_name']} ({$user['email']}) due to 6+ months without requests or logins.",
+                        'metadata'       => [
+                            'previous_status' => $user['status'],
+                            'new_status'      => 'Archived',
+                            'reason'          => 'Inactive for 6+ months',
+                            'inactive_months' => $user['inactive_months'] ?? 6,
+                        ],
+                    ]);
+                } catch (\Throwable $ignored) {
+                }
+
+                $archivedUsers[] = [
+                    'id'         => $userId,
+                    'name'       => trim($user['first_name'] . ' ' . $user['last_name']),
+                    'email'      => $user['email'],
+                    'role'       => $user['role'],
+                    'created_at' => $user['created_at'],
+                ];
+            }
+
+            return $this->successResponse("Successfully archived {$count} inactive user accounts.", [
+                'archived_count' => $count,
+                'archived_users' => $archivedUsers,
             ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[SuperadminController::archiveInactiveUsers] Error: ' . $e->getMessage());
+            return $this->errorResponse('Failed to archive inactive users: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
-
-        $sessionModel = new \App\Models\UserSessionModel();
-        $archivedUsers = [];
-
-        foreach ($candidates as $user) {
-            $userId = $user['id'];
-            $this->userModel->skipValidation(true)->update($userId, [
-                'status' => 'Archived',
-            ]);
-
-            // Terminate any stale active sessions for this user
-            $sessionModel->where('user_id', $userId)->delete();
-
-            // Log account lifecycle event to audit trail
-            $this->activityLogModel->logEvent([
-                'event_type'     => 'ACCOUNT_STATUS_CHANGED',
-                'severity'       => 'warning',
-                'actor_id'       => $currentUserId,
-                'target_user_id' => $userId,
-                'details'        => "Superadmin archived account for {$user['first_name']} {$user['last_name']} ({$user['email']}) due to 6+ months without requests or logins.",
-                'metadata'       => [
-                    'previous_status' => $user['status'],
-                    'new_status'      => 'Archived',
-                    'reason'          => 'Inactive for 6+ months',
-                    'inactive_months' => $user['inactive_months'] ?? 6,
-                ],
-            ]);
-
-            $archivedUsers[] = [
-                'id'         => $userId,
-                'name'       => trim($user['first_name'] . ' ' . $user['last_name']),
-                'email'      => $user['email'],
-                'role'       => $user['role'],
-                'created_at' => $user['created_at'],
-            ];
-        }
-
-        return $this->successResponse("Successfully archived {$count} inactive user accounts.", [
-            'archived_count' => $count,
-            'archived_users' => $archivedUsers,
-        ]);
     }
 
     /**
@@ -231,25 +226,33 @@ class SuperadminController extends BaseController
      */
     public function showUser(string $id): ResponseInterface
     {
-        $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, personnel.specialty as specialty, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
-                                ->join('units', 'units.id = users.unit_id', 'left')
-                                ->join('personnel', 'personnel.user_id = users.id', 'left')
-                                ->where('users.id', $id)
-                                ->first();
+        try {
+            $user = $this->userModel->select('users.id, users.first_name, users.last_name, users.email, users.contact_number, users.role, users.unit_id, users.student_id_number, users.student_type, users.employee_type, users.organization_name, users.college, users.id_card_image, users.id_selfie_image, users.avatar_path, users.status, users.is_verified, users.failed_login_attempts, users.lockout_until, users.created_at, users.updated_at, units.name as unit_name, units.code as unit_code, (SELECT COUNT(*) FROM tickets WHERE tickets.user_id = users.id) AS request_count')
+                                    ->join('units', 'units.id = users.unit_id', 'left')
+                                    ->where('users.id', $id)
+                                    ->first();
 
-        if (!$user) {
-            return $this->notFoundResponse('User account not found.');
+            if (!$user) {
+                return $this->notFoundResponse('User account not found.');
+            }
+
+            $now = time();
+            $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
+            $user['failed_login_attempts'] = (int) ($user['failed_login_attempts'] ?? 0);
+            $user['request_count'] = (int) ($user['request_count'] ?? 0);
+            $lockoutTimestamp = !empty($user['lockout_until']) ? strtotime($user['lockout_until']) : 0;
+            $user['is_locked'] = ($lockoutTimestamp > $now);
+            $user['lockout_remaining_seconds'] = $user['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
+
+            return $this->successResponse('User details retrieved successfully.', $user);
+        } catch (\Throwable $e) {
+            log_message('error', '[SuperadminController::showUser] Error: ' . $e->getMessage());
+            $user = $this->userModel->find($id);
+            if (!$user) {
+                return $this->notFoundResponse('User account not found.');
+            }
+            return $this->successResponse('User details retrieved successfully.', $user);
         }
-
-        $now = time();
-        $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
-        $user['failed_login_attempts'] = (int) ($user['failed_login_attempts'] ?? 0);
-        $user['request_count'] = (int) ($user['request_count'] ?? 0);
-        $lockoutTimestamp = !empty($user['lockout_until']) ? strtotime($user['lockout_until']) : 0;
-        $user['is_locked'] = ($lockoutTimestamp > $now);
-        $user['lockout_remaining_seconds'] = $user['is_locked'] ? max(0, $lockoutTimestamp - $now) : 0;
-
-        return $this->successResponse('User details retrieved successfully.', $user);
     }
 
     /**

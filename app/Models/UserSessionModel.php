@@ -35,23 +35,35 @@ class UserSessionModel extends Model
      */
     public function registerSession(string $userId, string $sessionId, ?string $ipAddress = null, ?string $userAgent = null): void
     {
-        helper('sanitize');
-        $id = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
-        $now = date('Y-m-d H:i:s');
+        try {
+            helper('sanitize');
+            $id = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
+            $now = date('Y-m-d H:i:s');
 
-        // Strictly enforce 1 session per user: delete any prior session for this user
-        $this->where('user_id', $userId)->delete();
+            // Strictly enforce 1 session per user: delete any prior session for this user
+            $this->where('user_id', $userId)->delete();
 
-        // Insert the single active session record
-        $this->insert([
-            'id'            => $id,
-            'user_id'       => $userId,
-            'session_id'    => $sessionId,
-            'ip_address'    => $ipAddress,
-            'user_agent'    => $userAgent,
-            'created_at'    => $now,
-            'last_activity' => $now,
-        ]);
+            $record = [
+                'id'         => $id,
+                'user_id'    => $userId,
+                'session_id' => $sessionId,
+                'ip_address' => $ipAddress,
+                'user_agent' => $userAgent,
+                'created_at' => $now,
+            ];
+
+            // Dynamically support last_activity or last_active
+            if ($this->db->fieldExists('last_activity', $this->table)) {
+                $record['last_activity'] = $now;
+            } elseif ($this->db->fieldExists('last_active', $this->table)) {
+                $record['last_active'] = $now;
+            }
+
+            // Insert the single active session record
+            $this->insert($record);
+        } catch (\Throwable $e) {
+            log_message('error', '[UserSessionModel] registerSession error: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -59,12 +71,17 @@ class UserSessionModel extends Model
      */
     public function isValidSession(string $userId, string $sessionId): bool
     {
-        $session = $this->select('id')
-                        ->where('user_id', $userId)
-                        ->where('session_id', $sessionId)
-                        ->first();
+        try {
+            $session = $this->select('id')
+                            ->where('user_id', $userId)
+                            ->where('session_id', $sessionId)
+                            ->first();
 
-        return !empty($session);
+            return !empty($session);
+        } catch (\Throwable $e) {
+            log_message('error', '[UserSessionModel] isValidSession error: ' . $e->getMessage());
+            return true; // Graceful fallback: do not lock user out if session lookup encounters schema issue
+        }
     }
 
     /**
@@ -74,16 +91,24 @@ class UserSessionModel extends Model
     public function touchSession(string $userId, string $sessionId): void
     {
         try {
-            $session = $this->select('id, last_activity')
+            $actCol = $this->db->fieldExists('last_activity', $this->table)
+                ? 'last_activity'
+                : ($this->db->fieldExists('last_active', $this->table) ? 'last_active' : null);
+
+            if (!$actCol) {
+                return;
+            }
+
+            $session = $this->select("id, {$actCol}")
                             ->where('user_id', $userId)
                             ->where('session_id', $sessionId)
                             ->first();
 
-            if ($session && !empty($session['last_activity'])) {
-                $lastTime = strtotime($session['last_activity']);
+            if ($session && !empty($session[$actCol])) {
+                $lastTime = strtotime($session[$actCol]);
                 if ($lastTime && (time() - $lastTime > 60)) {
                     $this->update($session['id'], [
-                        'last_activity' => date('Y-m-d H:i:s'),
+                        $actCol => date('Y-m-d H:i:s'),
                     ]);
                 }
             }

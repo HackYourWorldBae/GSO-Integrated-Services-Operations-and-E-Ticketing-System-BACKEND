@@ -321,12 +321,15 @@ class PersonnelController extends BaseController
         $userId        = null;
 
         if ($createAccount) {
-            $email         = trim(sanitize_string($body['email'] ?? ''));
-            $password      = (string) ($body['password'] ?? '');
-            $contactNumber = trim(sanitize_string($body['contact_number'] ?? ''));
+            $username = trim(sanitize_string($body['username'] ?? $body['email'] ?? ''));
+            $password = (string) ($body['password'] ?? '');
 
-            if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                return $this->errorResponse('A valid email address is required to create a personnel portal account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            if (empty($username)) {
+                return $this->errorResponse('A username is required to create a personnel portal account.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            if (mb_strlen($username) < 3 || mb_strlen($username) > 50 || !preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
+                return $this->errorResponse('Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             if (mb_strlen($password) < 8) {
@@ -334,8 +337,15 @@ class PersonnelController extends BaseController
             }
 
             $userModel = new \App\Models\UserModel();
-            if ($userModel->where('email', $email)->first()) {
-                return $this->errorResponse('This email address is already registered to another account.', [], ResponseInterface::HTTP_CONFLICT);
+            $caps      = $userModel->getSchemaCapabilities();
+            $checkQuery = $userModel->groupStart()
+                ->where('email', $username)
+                ->orWhere('student_id_number', $username);
+            if (!empty($caps['has_username'])) {
+                $checkQuery->orWhere('username', $username);
+            }
+            if ($checkQuery->groupEnd()->first()) {
+                return $this->errorResponse('This username is already taken. Please choose another username.', [], ResponseInterface::HTTP_CONFLICT);
             }
 
             $firstName = !empty($body['first_name']) ? sanitize_string($body['first_name']) : (explode(' ', $name)[0] ?? 'Staff');
@@ -350,15 +360,19 @@ class PersonnelController extends BaseController
                 'id'                          => $userId,
                 'first_name'                  => $firstName,
                 'last_name'                   => $lastName,
-                'email'                       => $email,
+                'email'                       => $username, // Store username in email field for legacy schema compatibility & unique lookup
                 'password_hash'               => password_hash($password, PASSWORD_DEFAULT),
-                'contact_number'              => !empty($contactNumber) ? $contactNumber : null,
+                'contact_number'              => null, // Contact number field removed for personnel accounts
                 'role'                        => 'worker',
                 'unit_id'                     => $unitId,
                 'status'                      => 'Active',
                 'is_verified'                 => 1, // Directly provisioned by Unit Head
-                'email_notifications_enabled' => 1,
+                'email_notifications_enabled' => 0,
             ];
+
+            if (!empty($caps['has_username'])) {
+                $userData['username'] = $username;
+            }
 
             if (!$userModel->skipValidation(true)->insert($userData)) {
                 return $this->errorResponse('Failed to provision personnel login account.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
@@ -415,13 +429,16 @@ class PersonnelController extends BaseController
             return $this->errorResponse('This personnel already has an active portal account linked.', [], ResponseInterface::HTTP_CONFLICT);
         }
 
-        $body          = $this->request->getJSON(true) ?? [];
-        $email         = trim(sanitize_string($body['email'] ?? ''));
-        $password      = (string) ($body['password'] ?? '');
-        $contactNumber = trim(sanitize_string($body['contact_number'] ?? ''));
+        $body     = $this->request->getJSON(true) ?? [];
+        $username = trim(sanitize_string($body['username'] ?? $body['email'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
 
-        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return $this->errorResponse('A valid email address is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        if (empty($username)) {
+            return $this->errorResponse('A username is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (mb_strlen($username) < 3 || mb_strlen($username) > 50 || !preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
+            return $this->errorResponse('Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         if (mb_strlen($password) < 8) {
@@ -429,8 +446,15 @@ class PersonnelController extends BaseController
         }
 
         $userModel = new \App\Models\UserModel();
-        if ($userModel->where('email', $email)->first()) {
-            return $this->errorResponse('This email address is already registered to another account.', [], ResponseInterface::HTTP_CONFLICT);
+        $caps      = $userModel->getSchemaCapabilities();
+        $checkQuery = $userModel->groupStart()
+            ->where('email', $username)
+            ->orWhere('student_id_number', $username);
+        if (!empty($caps['has_username'])) {
+            $checkQuery->orWhere('username', $username);
+        }
+        if ($checkQuery->groupEnd()->first()) {
+            return $this->errorResponse('This username is already registered to another account.', [], ResponseInterface::HTTP_CONFLICT);
         }
 
         $nameParts = explode(' ', trim($worker['name']));
@@ -442,15 +466,19 @@ class PersonnelController extends BaseController
             'id'                          => $userId,
             'first_name'                  => $firstName,
             'last_name'                   => $lastName,
-            'email'                       => $email,
+            'email'                       => $username,
             'password_hash'               => password_hash($password, PASSWORD_DEFAULT),
-            'contact_number'              => !empty($contactNumber) ? $contactNumber : null,
+            'contact_number'              => null,
             'role'                        => 'worker',
             'unit_id'                     => (int) $worker['unit_id'],
             'status'                      => 'Active',
             'is_verified'                 => 1,
-            'email_notifications_enabled' => 1,
+            'email_notifications_enabled' => 0,
         ];
+
+        if (!empty($caps['has_username'])) {
+            $userData['username'] = $username;
+        }
 
         if (!$userModel->skipValidation(true)->insert($userData)) {
             return $this->errorResponse('Failed to create account in database.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);

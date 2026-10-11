@@ -26,6 +26,7 @@ class UserModel extends Model
         'id',
         'first_name',
         'last_name',
+        'username',
         'email',
         'password_hash',
         'contact_number',
@@ -75,12 +76,17 @@ class UserModel extends Model
     public function findUserByIdentifier(string $identifier): ?array
     {
         $clean = trim($identifier);
-        return $this->groupStart()
+        $builder = $this->groupStart()
                         ->where('email', $clean)
                         ->orWhere('student_id_number', $clean)
-                        ->orWhere('contact_number', $clean)
-                    ->groupEnd()
-                    ->first();
+                        ->orWhere('contact_number', $clean);
+
+        $caps = $this->getSchemaCapabilities();
+        if (!empty($caps['has_username'])) {
+            $builder->orWhere('username', $clean);
+        }
+
+        return $builder->groupEnd()->first();
     }
 
     /**
@@ -205,6 +211,7 @@ class UserModel extends Model
 
         self::$schemaCapabilities = [
             'user_fields'            => $userFields,
+            'has_username'           => in_array('username', $userFields, true),
             'has_last_login_at'      => in_array('last_login_at', $userFields, true),
             'has_employee_type'      => in_array('employee_type', $userFields, true),
             'has_college'            => in_array('college', $userFields, true),

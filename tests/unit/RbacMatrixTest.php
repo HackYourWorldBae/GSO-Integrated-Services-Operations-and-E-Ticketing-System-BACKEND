@@ -77,7 +77,7 @@ final class RbacMatrixTest extends CIUnitTestCase
         $this->assertFalse($this->matrix->hasPermission('director', 'tickets.dispatch'));
         $this->assertFalse($this->matrix->hasPermission('director', 'tickets.assign_worker'));
         $this->assertFalse($this->matrix->hasPermission('director', 'personnel.manage'));
-        $this->assertFalse($this->matrix->hasPermission('director', 'tickets.create'));
+        $this->assertTrue($this->matrix->hasPermission('director', 'tickets.create'));
     }
 
     public function testRequestorsCanCreateAndRateButNothingElse(): void

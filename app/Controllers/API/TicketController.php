@@ -127,7 +127,7 @@ class TicketController extends BaseController
         $role   = $this->currentUserRole();
 
         // Must be the owner of the ticket or an elevated administrator
-        if ((string) $ticket['user_id'] !== (string) $userId && !in_array($role, ['admin', 'superadmin'], true)) {
+        if ((string) $ticket['user_id'] !== (string) $userId && !in_array($role, ['admin', 'director', 'superadmin'], true)) {
             return $this->forbiddenResponse('You do not have permission to cancel this ticket.');
         }
 

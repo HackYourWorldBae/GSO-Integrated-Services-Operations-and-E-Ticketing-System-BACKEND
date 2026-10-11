@@ -130,9 +130,9 @@ class RolePermissionModel extends Model
             return true;
         }
 
-        // Director has university-wide oversight and analytics
+        // Director has university-wide oversight, analytics, and internal service requesting
         if ($role === 'director' && in_array($featureKey, [
-            'tickets.view_all', 'reports.view'
+            'tickets.create', 'tickets.view_all', 'reports.view'
         ], true)) {
             return true;
         }

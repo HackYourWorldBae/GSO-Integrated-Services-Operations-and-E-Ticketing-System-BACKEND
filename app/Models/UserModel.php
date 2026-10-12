@@ -131,6 +131,13 @@ class UserModel extends Model
             ? (int) $user['email_notifications_enabled']
             : 1;
 
+        // If personnel / worker, ensure username is populated (falling back to email if username column was null)
+        if (in_array(strtolower($user['role'] ?? ''), ['worker', 'personnel'], true)) {
+            if (empty($user['username']) && !empty($user['email'])) {
+                $user['username'] = $user['email'];
+            }
+        }
+
         // Attach avatar URL
         $user['avatar_url'] = !empty($user['avatar_path'])
             ? base_url('api/v1/auth/avatar/' . $user['id'])

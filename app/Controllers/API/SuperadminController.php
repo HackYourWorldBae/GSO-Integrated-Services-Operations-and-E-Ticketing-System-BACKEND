@@ -514,10 +514,15 @@ class SuperadminController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
 
+        $isWorkerAccount = ($existing['role'] ?? '') === 'worker' || ($body['role'] ?? '') === 'worker' || ($existing['role'] ?? '') === 'personnel';
+        $emailRule = $isWorkerAccount
+            ? "permit_empty|regex_match[/^[a-zA-Z0-9._-]+$/]|min_length[3]|max_length[100]|is_unique[users.email,id,{$id}]"
+            : "permit_empty|valid_email|is_unique[users.email,id,{$id}]";
+
         $rules = [
             'first_name'     => 'permit_empty|max_length[100]',
             'last_name'      => 'permit_empty|max_length[100]',
-            'email'          => "permit_empty|valid_email|is_unique[users.email,id,{$id}]",
+            'email'          => $emailRule,
             'role'           => 'permit_empty|in_list[student,employee,admin,staff,director,superadmin,worker]',
             'status'         => 'permit_empty|in_list[Active,Pending,Rejected,Suspended,Archived]',
             'contact_number' => 'permit_empty|max_length[30]',
@@ -565,7 +570,13 @@ class SuperadminController extends BaseController
         $updateData = [];
         if (isset($body['first_name']))     $updateData['first_name']     = trim($body['first_name']);
         if (isset($body['last_name']))      $updateData['last_name']      = trim($body['last_name']);
-        if (isset($body['email']))          $updateData['email']          = strtolower(trim($body['email']));
+        if (isset($body['email'])) {
+            $updateData['email'] = strtolower(trim($body['email']));
+            $caps = $this->userModel->getSchemaCapabilities();
+            if ($isWorkerAccount && !empty($caps['has_username'])) {
+                $updateData['username'] = $updateData['email'];
+            }
+        }
         if (isset($body['role']))           $updateData['role']           = $body['role'];
         if (isset($body['status']))         $updateData['status']         = $body['status'];
         // Contact numbers are unnecessary for internal accounts — ignore input and clear any legacy value.

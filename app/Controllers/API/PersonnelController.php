@@ -729,6 +729,17 @@ class PersonnelController extends BaseController
             }
             $candidatePersonnelIds = array_values(array_unique(array_filter($candidatePersonnelIds)));
 
+            // Enrich personnel profile with explicit sub-unit metadata
+            $effectiveUnitId = !empty($personnel['unit_id']) ? (int)$personnel['unit_id'] : (!empty($user['unit_id']) ? (int)$user['unit_id'] : null);
+            if ($effectiveUnitId) {
+                $unitRow = $db->table('units')->where('id', $effectiveUnitId)->get()->getRowArray();
+                if ($unitRow) {
+                    $personnel['unit_id']   = (int)$unitRow['id'];
+                    $personnel['unit_name'] = $unitRow['name'];
+                    $personnel['unit_code'] = $unitRow['code'];
+                }
+            }
+
             // Self-heal ticket_assignments: Unify any assignments stored under user_id or duplicate personnel IDs
             if (count($candidatePersonnelIds) > 1 && !empty($personnel['id'])) {
                 $secondaryIds = array_values(array_diff($candidatePersonnelIds, [$personnel['id']]));
@@ -908,6 +919,14 @@ class PersonnelController extends BaseController
                     'team'                     => $team,
                     'team_count'               => count($team),
                 ];
+            }
+
+            if (empty($personnel['unit_name']) && !empty($formattedAssignments)) {
+                $firstAssignment = reset($formattedAssignments);
+                if (!empty($firstAssignment['unit_name']) && $firstAssignment['unit_name'] !== 'General Services Office') {
+                    $personnel['unit_name'] = $firstAssignment['unit_name'];
+                    $personnel['unit_code'] = $firstAssignment['unit_code'] ?? 'FGMU';
+                }
             }
 
             return $this->successResponse('Personnel dashboard data retrieved.', [

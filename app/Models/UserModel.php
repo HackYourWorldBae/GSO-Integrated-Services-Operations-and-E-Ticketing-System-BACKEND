@@ -159,7 +159,7 @@ class UserModel extends Model
      * Inspect database schema dynamically to avoid fatal errors when tables/columns
      * vary across development, staging, or production hosting environments.
      */
-    protected function getSchemaCapabilities(): array
+    public function getSchemaCapabilities(): array
     {
         if (self::$schemaCapabilities !== null) {
             return self::$schemaCapabilities;

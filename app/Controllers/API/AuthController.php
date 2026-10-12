@@ -742,121 +742,126 @@ class AuthController extends BaseController
      */
     public function updateProfile(): ResponseInterface
     {
-        $userId = $this->currentUserId();
-        $body   = $this->request->getJSON(true) ?? [];
+        try {
+            $userId = $this->currentUserId();
+            $body   = $this->request->getJSON(true) ?? [];
 
-        $currentUser = $this->userModel->find($userId);
-        if (!$currentUser) {
-            return $this->errorResponse('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
-        }
+            $currentUser = $this->userModel->find($userId);
+            if (!$currentUser) {
+                return $this->errorResponse('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+            }
 
-        $isPersonnel = in_array(strtolower($currentUser['role'] ?? ''), ['worker', 'personnel'], true);
-        $caps        = $this->userModel->getSchemaCapabilities();
-        $updateData  = [];
+            $isPersonnel = in_array(strtolower($currentUser['role'] ?? ''), ['worker', 'personnel'], true);
+            $caps        = $this->userModel->getSchemaCapabilities();
+            $updateData  = [];
 
-        if (isset($body['first_name'])) {
-            $updateData['first_name'] = sanitize_string($body['first_name']);
-        }
-        if (isset($body['last_name'])) {
-            $updateData['last_name'] = sanitize_string($body['last_name']);
-        }
-        if (isset($body['contact_number'])) {
-            $updateData['contact_number'] = sanitize_string($body['contact_number']);
-        }
-        if (array_key_exists('email_notifications_enabled', $body)) {
-            $raw = $body['email_notifications_enabled'];
-            $updateData['email_notifications_enabled'] = ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') ? 1 : 0;
-        }
+            if (isset($body['first_name'])) {
+                $updateData['first_name'] = sanitize_string($body['first_name']);
+            }
+            if (isset($body['last_name'])) {
+                $updateData['last_name'] = sanitize_string($body['last_name']);
+            }
+            if (isset($body['contact_number'])) {
+                $updateData['contact_number'] = sanitize_string($body['contact_number']);
+            }
+            if (array_key_exists('email_notifications_enabled', $body)) {
+                $raw = $body['email_notifications_enabled'];
+                $updateData['email_notifications_enabled'] = ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') ? 1 : 0;
+            }
 
-        // Handle identifier: Username for personnel/field workers; institutional email for requestors & staff
-        if ($isPersonnel) {
-            $rawUsername = $body['username'] ?? $body['email'] ?? null;
-            if ($rawUsername !== null) {
-                $username = trim(sanitize_string($rawUsername));
-                if ($username === '') {
-                    return $this->errorResponse('Username cannot be empty.', ['username' => 'Username cannot be empty.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            // Handle identifier: Username for personnel/field workers; institutional email for requestors & staff
+            if ($isPersonnel) {
+                $rawUsername = $body['username'] ?? $body['email'] ?? null;
+                if ($rawUsername !== null) {
+                    $username = trim(sanitize_string($rawUsername));
+                    if ($username === '') {
+                        return $this->errorResponse('Username cannot be empty.', ['username' => 'Username cannot be empty.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+                    }
+                    if (mb_strlen($username) < 3 || mb_strlen($username) > 50 || !preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
+                        return $this->errorResponse(
+                            'Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.',
+                            ['username' => 'Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.'],
+                            ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                        );
+                    }
+
+                    // Check uniqueness across users table (email, student_id_number, and username)
+                    $checkQuery = $this->userModel->groupStart()
+                        ->where('email', $username)
+                        ->orWhere('student_id_number', $username);
+                    if (!empty($caps['has_username'])) {
+                        $checkQuery->orWhere('username', $username);
+                    }
+                    $existing = $checkQuery->groupEnd()->first();
+                    if ($existing && (string) ($existing['id'] ?? '') !== (string) $userId) {
+                        return $this->errorResponse(
+                            'This username is already taken. Please choose another username.',
+                            ['username' => 'This username is already taken. Please choose another username.'],
+                            ResponseInterface::HTTP_CONFLICT
+                        );
+                    }
+
+                    $updateData['email'] = $username;
+                    if (!empty($caps['has_username'])) {
+                        $updateData['username'] = $username;
+                    }
                 }
-                if (mb_strlen($username) < 3 || mb_strlen($username) > 50 || !preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
-                    return $this->errorResponse(
-                        'Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.',
-                        ['username' => 'Username must be 3-50 characters long and contain only letters, numbers, dots, hyphens, or underscores.'],
-                        ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-                    );
-                }
-
-                // Check uniqueness across users table (email, student_id_number, and username)
-                $checkQuery = $this->userModel->groupStart()
-                    ->where('email', $username)
-                    ->orWhere('student_id_number', $username);
-                if (!empty($caps['has_username'])) {
-                    $checkQuery->orWhere('username', $username);
-                }
-                $existing = $checkQuery->groupEnd()->first();
-                if ($existing && (string) ($existing['id'] ?? '') !== (string) $userId) {
-                    return $this->errorResponse(
-                        'This username is already taken. Please choose another username.',
-                        ['username' => 'This username is already taken. Please choose another username.'],
-                        ResponseInterface::HTTP_CONFLICT
-                    );
-                }
-
-                $updateData['email'] = $username;
-                if (!empty($caps['has_username'])) {
-                    $updateData['username'] = $username;
+            } else {
+                if (isset($body['email'])) {
+                    $email = strtolower(trim((string) $body['email']));
+                    if ($email === '' || strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                        return $this->errorResponse('Please enter a valid email address.', ['email' => 'Please enter a valid email address.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+                    }
+                    $existing = $this->userModel->where('email', $email)->first();
+                    if ($existing && (string) ($existing['id'] ?? '') !== (string) $userId) {
+                        return $this->errorResponse('This email address is already registered.', ['email' => 'This email address is already registered.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+                    }
+                    $updateData['email'] = $email;
                 }
             }
-        } else {
-            if (isset($body['email'])) {
-                $email = strtolower(trim((string) $body['email']));
-                if ($email === '' || strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    return $this->errorResponse('Please enter a valid email address.', ['email' => 'Please enter a valid email address.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-                }
-                $existing = $this->userModel->where('email', $email)->first();
-                if ($existing && (string) ($existing['id'] ?? '') !== (string) $userId) {
-                    return $this->errorResponse('This email address is already registered.', ['email' => 'This email address is already registered.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-                }
-                $updateData['email'] = $email;
+
+            if (empty($updateData)) {
+                return $this->errorResponse('No valid fields provided to update.');
             }
-        }
 
-        if (empty($updateData)) {
-            return $this->errorResponse('No valid fields provided to update.');
-        }
+            $this->userModel->skipValidation(true)->update($userId, $updateData);
 
-        $this->userModel->skipValidation(true)->update($userId, $updateData);
+            // If personnel updated their name, synchronize linked personnel roster record
+            if ($isPersonnel && (isset($updateData['first_name']) || isset($updateData['last_name']))) {
+                try {
+                    $personnelModel = new \App\Models\PersonnelModel();
+                    $updatedFirst = $updateData['first_name'] ?? ($currentUser['first_name'] ?? '');
+                    $updatedLast  = $updateData['last_name']  ?? ($currentUser['last_name'] ?? '');
+                    $workerName   = trim("{$updatedFirst} {$updatedLast}");
 
-        // If personnel updated their name, synchronize linked personnel roster record
-        if ($isPersonnel && (isset($updateData['first_name']) || isset($updateData['last_name']))) {
-            try {
-                $personnelModel = new \App\Models\PersonnelModel();
-                $updatedFirst = $updateData['first_name'] ?? ($currentUser['first_name'] ?? '');
-                $updatedLast  = $updateData['last_name']  ?? ($currentUser['last_name'] ?? '');
-                $workerName   = trim("{$updatedFirst} {$updatedLast}");
-
-                $linked = $personnelModel->where('user_id', $userId)->first();
-                if ($linked) {
-                    $personnelModel->update($linked['id'], [
-                        'name'       => $workerName,
-                        'updated_at' => date('Y-m-d H:i:s'),
-                    ]);
+                    $linked = $personnelModel->where('user_id', $userId)->first();
+                    if ($linked) {
+                        $personnelModel->update($linked['id'], [
+                            'name'       => $workerName,
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                } catch (\Throwable $pSyncErr) {
+                    log_message('warning', '[AuthController::updateProfile] Failed to sync personnel roster name: ' . $pSyncErr->getMessage());
                 }
-            } catch (\Throwable $pSyncErr) {
-                log_message('warning', '[AuthController::updateProfile] Failed to sync personnel roster name: ' . $pSyncErr->getMessage());
             }
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_UPDATED',
+                'severity'       => 'info',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => "User updated own profile fields: " . implode(', ', array_keys($updateData)) . ".",
+                'metadata'       => array_keys($updateData),
+            ]);
+
+            $user = $this->userModel->getSafeUser($userId);
+
+            return $this->successResponse('Profile updated successfully.', ['user' => $user]);
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::updateProfile] Exception: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return $this->errorResponse('Failed to update profile: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
-
-        $this->activityLogModel->logEvent([
-            'event_type'     => 'ACCOUNT_UPDATED',
-            'severity'       => 'info',
-            'actor_id'       => $userId,
-            'target_user_id' => $userId,
-            'details'        => "User updated own profile fields: " . implode(', ', array_keys($updateData)) . ".",
-            'metadata'       => array_keys($updateData),
-        ]);
-
-        $user = $this->userModel->getSafeUser($userId);
-
-        return $this->successResponse('Profile updated successfully.', ['user' => $user]);
     }
 
     /**

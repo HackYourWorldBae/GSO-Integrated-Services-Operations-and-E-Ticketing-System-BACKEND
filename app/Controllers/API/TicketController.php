@@ -454,10 +454,31 @@ class TicketController extends BaseController
                     // Upfront validation: rejecting here (before the ticket
                     // row is created) prevents orphan tickets with no
                     // borrowing record when required details are missing.
-                    $borrowerName      = sanitize_string($borrowingDetails['borrower_name'] ?? ($user['first_name'] . ' ' . $user['last_name']));
-                    $borrowerIdNumber  = sanitize_string($borrowingDetails['borrower_id_number'] ?? ($user['student_id_number'] ?? ''));
-                    $borrowerEmail     = sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? ''));
-                    $borrowerContact   = sanitize_string($borrowingDetails['borrower_contact'] ?? ($user['contact_number'] ?? ''));
+                    $userRole = strtolower($user['role'] ?? '');
+                    $defaultIdNumber = $user['student_id_number'] ?? $user['employee_id'] ?? null;
+                    if (empty($defaultIdNumber)) {
+                        $defaultIdNumber = ($userRole === 'admin')
+                            ? (($user['unit_code'] ?? 'ADMIN') . '-OFFICER')
+                            : ('BSU-' . substr((string)$userId, 0, 8));
+                    }
+                    $defaultContact = $user['contact_number'] ?? $user['phone'] ?? 'N/A';
+
+                    $borrowerName      = sanitize_string($borrowingDetails['borrower_name'] ?? trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')));
+                    if ($borrowerName === '') {
+                        $borrowerName = sanitize_string($user['username'] ?? ($user['email'] ?? 'University Personnel'));
+                    }
+                    $borrowerIdNumber  = sanitize_string($borrowingDetails['borrower_id_number'] ?? $defaultIdNumber);
+                    if ($borrowerIdNumber === '') {
+                        $borrowerIdNumber = 'BSU-' . substr((string)$userId, 0, 8);
+                    }
+                    $borrowerEmail     = sanitize_string($borrowingDetails['borrower_email'] ?? ($user['email'] ?? 'requestor@gso.local'));
+                    if ($borrowerEmail === '') {
+                        $borrowerEmail = 'requestor@gso.local';
+                    }
+                    $borrowerContact   = sanitize_string($borrowingDetails['borrower_contact'] ?? $defaultContact);
+                    if ($borrowerContact === '') {
+                        $borrowerContact = 'N/A';
+                    }
                     $borrowItemName    = sanitize_string($borrowingDetails['item_name'] ?? '');
                     $borrowPurpose     = sanitize_string($borrowingDetails['purpose_project'] ?? '');
                     $borrowDateNeeded  = sanitize_string($borrowingDetails['date_needed'] ?? '');

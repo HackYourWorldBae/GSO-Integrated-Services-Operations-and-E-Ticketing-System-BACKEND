@@ -1533,7 +1533,7 @@ class AuthController extends BaseController
 
         return $this->response
             ->setHeader('Content-Type', $mime ?: 'image/png')
-            ->setHeader('Cache-Control', 'public, max-age=86400')
+            ->setHeader('Cache-Control', 'no-cache, private, must-revalidate')
             ->setBody(file_get_contents($fullPath));
     }
 

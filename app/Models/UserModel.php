@@ -40,6 +40,7 @@ class UserModel extends Model
         'id_card_image',
         'id_selfie_image',
         'avatar_path',
+        'signature_path',
         'status',
         'is_verified',
         'email_notifications_enabled',
@@ -141,6 +142,11 @@ class UserModel extends Model
         // Attach avatar URL
         $user['avatar_url'] = !empty($user['avatar_path'])
             ? base_url('api/v1/auth/avatar/' . $user['id'])
+            : null;
+
+        // Attach official signature URL
+        $user['signature_url'] = !empty($user['signature_path'])
+            ? base_url('api/v1/auth/signature/' . $user['id'])
             : null;
 
         // Attach dynamic RBAC permissions for the user's role

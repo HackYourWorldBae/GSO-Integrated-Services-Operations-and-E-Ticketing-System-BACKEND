@@ -503,6 +503,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `id_card_image` text DEFAULT NULL,
   `id_selfie_image` text DEFAULT NULL,
   `avatar_path` varchar(255) DEFAULT NULL,
+  `signature_path` varchar(255) DEFAULT NULL,
   `status` enum('Active','Pending','Rejected','Suspended','Archived') NOT NULL DEFAULT 'Active',
   `is_verified` tinyint(1) NOT NULL DEFAULT 1,
   `email_notifications_enabled` tinyint(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-account opt-in for ticket/request email updates (SSU alerts, dispatch, etc.)',

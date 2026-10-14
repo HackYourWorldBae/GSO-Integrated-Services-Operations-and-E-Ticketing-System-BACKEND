@@ -27,8 +27,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
 
-    // Public Avatar & Institutional ID Card / Selfie Stream
+    // Public Avatar & Institutional ID Card / Selfie / Signature Stream
     $routes->get('auth/avatar/(:segment)',    'AuthController::getAvatar/$1');
+    $routes->get('auth/signature/(:segment)', 'AuthController::getSignature/$1');
     $routes->get('auth/id-card/(:segment)',   'AuthController::getIdCard/$1');
     $routes->get('auth/id-selfie/(:segment)', 'AuthController::getIdSelfie/$1');
 
@@ -59,6 +60,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/avatar',          'AuthController::uploadAvatar');
         $routes->get('auth/avatar/(:segment)','AuthController::getAvatar/$1');
+        $routes->post('auth/signature',          'AuthController::uploadSignature');
+        $routes->delete('auth/signature',        'AuthController::deleteSignature');
+        $routes->get('auth/signature/(:segment)','AuthController::getSignature/$1');
+        $routes->get('auth/document-signatures', 'AuthController::getDocumentSignatures');
 
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');

@@ -989,6 +989,218 @@ class AuthController extends BaseController
     }
 
     /**
+     * Upload or update official signature for authenticated administrator or director.
+     * Supports both direct PNG/JPEG multipart file upload and base64 canvas data URL.
+     */
+    public function uploadSignature(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        if (!$userId) {
+            return $this->errorResponse('Unauthenticated.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $user = $this->userModel->find($userId);
+        if (!$user) {
+            return $this->errorResponse('User record not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
+
+        // Auto-provision signature_path column if database schema has not run migration yet
+        $db = \Config\Database::connect();
+        if ($db->tableExists('users') && !$db->fieldExists('signature_path', 'users')) {
+            try {
+                $forge = \Config\Database::forge();
+                $forge->addColumn('users', [
+                    'signature_path' => [
+                        'type'       => 'VARCHAR',
+                        'constraint' => 255,
+                        'null'       => true,
+                        'default'    => null,
+                        'after'      => 'avatar_path',
+                    ],
+                ]);
+            } catch (\Throwable $e) {
+                // Non-fatal if race condition or already added
+            }
+        }
+
+        $uploadDir = WRITEPATH . 'uploads/signatures/';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0775, true);
+        }
+
+        $fileName = 'signature_' . $userId . '_' . time() . '.png';
+        $fullTarget = $uploadDir . $fileName;
+
+        // 1. Check for multipart file upload
+        $file = $this->request->getFile('signature');
+        if ($file && $file->isValid() && !$file->hasMoved()) {
+            if ($file->getSizeByUnit('mb') > 3) {
+                return $this->errorResponse('Signature image size must not exceed 3MB.');
+            }
+            $ext = strtolower($file->getClientExtension());
+            if (!in_array($ext, ['png', 'jpg', 'jpeg', 'webp'], true)) {
+                return $this->errorResponse('Only PNG, JPG, or WebP images are allowed for signatures.');
+            }
+
+            if (!$file->move($uploadDir, $fileName)) {
+                return $this->errorResponse('Failed to save signature file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+        } else {
+            // 2. Check for base64 data URL payload (from signature pad or client background remover)
+            $json = $this->request->getJSON(true) ?: [];
+            $base64Data = $json['signature_base64'] ?? $this->request->getPost('signature_base64') ?? '';
+
+            if (empty($base64Data)) {
+                return $this->errorResponse('Please provide a signature file or base64 image data.');
+            }
+
+            if (preg_match('/^data:image\/(\w+);base64,/', $base64Data, $type)) {
+                $base64Data = substr($base64Data, strpos($base64Data, ',') + 1);
+            }
+            $decodedData = base64_decode($base64Data);
+            if ($decodedData === false) {
+                return $this->errorResponse('Invalid base64 signature image payload.');
+            }
+            if (strlen($decodedData) > 3 * 1024 * 1024) {
+                return $this->errorResponse('Signature payload must not exceed 3MB.');
+            }
+
+            if (file_put_contents($fullTarget, $decodedData) === false) {
+                return $this->errorResponse('Failed to write signature image to disk.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+        }
+
+        // Delete old signature file if exists and different
+        if (!empty($user['signature_path'])) {
+            $oldPath = WRITEPATH . 'uploads/' . $user['signature_path'];
+            if (is_file($oldPath) && $oldPath !== $fullTarget) {
+                @unlink($oldPath);
+            }
+        }
+
+        $signatureRelativePath = 'signatures/' . $fileName;
+        $this->userModel->update($userId, [
+            'signature_path' => $signatureRelativePath,
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($userId);
+
+        return $this->successResponse('Official signature saved successfully.', [
+            'user'          => $safeUser,
+            'signature_url' => base_url('api/v1/auth/signature/' . $userId),
+        ]);
+    }
+
+    /**
+     * Remove official signature for authenticated user.
+     */
+    public function deleteSignature(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        if (!$userId) {
+            return $this->errorResponse('Unauthenticated.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $user = $this->userModel->find($userId);
+        if ($user && !empty($user['signature_path'])) {
+            $fullPath = WRITEPATH . 'uploads/' . $user['signature_path'];
+            if (is_file($fullPath)) {
+                @unlink($fullPath);
+            }
+        }
+
+        $this->userModel->update($userId, [
+            'signature_path' => null,
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($userId);
+
+        return $this->successResponse('Official signature removed successfully.', ['user' => $safeUser]);
+    }
+
+    /**
+     * Stream official signature image.
+     */
+    public function getSignature(string $userId)
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || empty($user['signature_path'])) {
+            return $this->response->setStatusCode(404)->setBody('Signature not found.');
+        }
+
+        $fullPath = WRITEPATH . 'uploads/' . $user['signature_path'];
+        if (!is_file($fullPath)) {
+            return $this->response->setStatusCode(404)->setBody('Signature file not found on disk.');
+        }
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $fullPath);
+        finfo_close($finfo);
+
+        return $this->response
+            ->setHeader('Content-Type', $mime ?: 'image/png')
+            ->setHeader('Cache-Control', 'public, max-age=86400')
+            ->setBody(file_get_contents($fullPath));
+    }
+
+    /**
+     * Retrieve active official document signatures (Director & Unit Dispatcher)
+     * for generating signed Job Orders and archived records.
+     */
+    public function getDocumentSignatures(): ResponseInterface
+    {
+        $unitParam = $this->request->getGet('unit');
+        $unitId = null;
+
+        if (!empty($unitParam)) {
+            $upper = strtoupper(trim((string)$unitParam));
+            if ($upper === 'FGMU' || $unitParam == '1') {
+                $unitId = 1;
+            } elseif ($upper === 'LEAU' || $unitParam == '2') {
+                $unitId = 2;
+            } elseif ($upper === 'SSU' || $unitParam == '3') {
+                $unitId = 3;
+            }
+        }
+
+        // 1. Director
+        $director = $this->userModel->where('role', 'director')
+            ->where('status', 'active')
+            ->orderBy('id', 'ASC')
+            ->first();
+
+        // 2. Unit Admin / Dispatcher
+        $dispatcher = null;
+        if ($unitId !== null) {
+            $dispatcher = $this->userModel->where('role', 'admin')
+                ->where('unit_id', $unitId)
+                ->where('status', 'active')
+                ->orderBy('id', 'ASC')
+                ->first();
+        }
+
+        return $this->successResponse('Official document signatures retrieved.', [
+            'director' => $director ? [
+                'id'            => $director['id'],
+                'name'          => trim(($director['first_name'] ?? '') . ' ' . ($director['last_name'] ?? '')),
+                'role'          => 'director',
+                'title'         => 'GSO Director / Authorized Rep.',
+                'signature_url' => !empty($director['signature_path']) ? base_url('api/v1/auth/signature/' . $director['id']) : null,
+            ] : null,
+            'dispatcher' => $dispatcher ? [
+                'id'            => $dispatcher['id'],
+                'name'          => trim(($dispatcher['first_name'] ?? '') . ' ' . ($dispatcher['last_name'] ?? '')),
+                'role'          => 'admin',
+                'unit_id'       => $dispatcher['unit_id'] ?? $unitId,
+                'title'         => ($unitParam ? strtoupper(trim((string)$unitParam)) : 'Unit') . ' Dispatcher / In-Charge',
+                'signature_url' => !empty($dispatcher['signature_path']) ? base_url('api/v1/auth/signature/' . $dispatcher['id']) : null,
+            ] : null,
+        ]);
+    }
+
+    /**
      * Stream uploaded Employee / Student ID card image or Selfie with ID for verification.
      * Accessible by Superadmin, Director, Admin, or the user themselves.
      */

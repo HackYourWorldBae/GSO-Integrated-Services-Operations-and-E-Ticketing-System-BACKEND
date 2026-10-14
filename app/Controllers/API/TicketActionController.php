@@ -907,6 +907,24 @@ class TicketActionController extends BaseController
             return $forbidden;
         }
 
+        // For director escalated approvals, the change nature of work feature is disabled
+        if (!empty($ticket['is_escalated_to_director'])) {
+            return $this->errorResponse('Escalated tickets cannot have their nature of work changed during Director executive approval.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        if ($this->currentUserRole() === 'director') {
+            return $this->forbiddenResponse('Change nature of work is not available for Director escalated approvals.');
+        }
+
+        // Unit admins can only recategorize tickets within their assigned unit
+        $userRole = $this->currentUserRole();
+        if (in_array($userRole, ['admin', 'staff'], true)) {
+            $userUnitId = $this->currentUserUnitId();
+            if ($userUnitId !== null && (int) $ticket['unit_id'] !== (int) $userUnitId) {
+                return $this->forbiddenResponse('You can only recategorize tickets within your assigned operating unit.');
+            }
+        }
+
         // Only pending tickets can be recategorized (before active dispatch/approval)
         if ($ticket['status'] !== 'pending') {
             return $this->errorResponse("Only pending tickets can be recategorized. Current status: {$ticket['status']}.");
@@ -946,8 +964,9 @@ class TicketActionController extends BaseController
             ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $actorRole = $this->currentUserRole() === 'director' ? 'Director' : 'Unit Administrator';
         if (empty($reason)) {
-            $reason = 'Recategorized by Director to align with the reported issue description.';
+            $reason = "Recategorized by {$actorRole} to align with the reported issue description.";
         }
 
         $now    = date('Y-m-d H:i:s');
@@ -992,7 +1011,7 @@ class TicketActionController extends BaseController
         $this->ticketModel->update($ticketId, $updateData);
 
         // 1. Audit log
-        $logMessage = "Nature of work recategorized from '{$oldService}' to '{$newService}' by Director.";
+        $logMessage = "Nature of work recategorized from '{$oldService}' to '{$newService}' by {$actorRole}.";
         if (!empty($reason)) {
             $logMessage .= " Reason: {$reason}";
         }
@@ -1000,7 +1019,7 @@ class TicketActionController extends BaseController
 
         // 2. In-app notification to requester
         $notifTitle = "Ticket #{$ticketId} Recategorized";
-        $notifBody  = "The Director updated the nature of work for your request from \"{$oldService}\" to \"{$newService}\" to properly categorize your ticket according to your description. Note: {$reason}";
+        $notifBody  = "The {$actorRole} updated the nature of work for your request from \"{$oldService}\" to \"{$newService}\" to properly categorize your ticket according to your description. Note: {$reason}";
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
@@ -1018,7 +1037,7 @@ class TicketActionController extends BaseController
             [
                 'Previous Nature of Work' => $oldService,
                 'Updated Nature of Work'  => $newService,
-                'Director Note'           => $reason
+                'Administration Note'     => $reason
             ]
         );
 

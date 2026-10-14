@@ -400,8 +400,8 @@ class SuperadminController extends BaseController
                 ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
             if ($body['role'] === 'employee' && !preg_match('/^[A-Za-z0-9\-]{4,15}$/', $cleanId)) {
-                return $this->errorResponse('Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).', [
-                    'student_id_number' => ['Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).']
+                return $this->errorResponse('Employee ID Number must be 4 to 15 alphanumeric characters (typically 6 digits, e.g. 102456).', [
+                    'student_id_number' => ['Employee ID Number must be 4 to 15 alphanumeric characters (typically 6 digits, e.g. 102456).']
                 ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
             $studentIdNumber = $cleanId;

@@ -172,7 +172,7 @@ class AuthController extends BaseController
             }
         } elseif ($role === 'employee') {
             if (!preg_match('/^[A-Za-z0-9\-]{4,15}$/', $studentIdNumber)) {
-                $errors['student_id_number'] = ['Employee ID Number must be 4 to 15 alphanumeric characters (e.g. EMP-9876).'];
+                $errors['student_id_number'] = ['Employee ID Number must be 4 to 15 alphanumeric characters (typically 6 digits, e.g. 102456).'];
             }
         }
 

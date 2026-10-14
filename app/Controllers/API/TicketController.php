@@ -377,27 +377,79 @@ class TicketController extends BaseController
                 }
             }
 
-            // --- 2b. LEAU Borrowing Intake (Borrowing of Plants / Tools & Equipment) ---
+            // --- 2b. Borrowing Intake (FGMU: Tools & Equipment / LEAU: Plants) ---
+            $borrowingQueues = [];
+
+            if (!empty($body['fgmuBorrowing']['services'])) {
+                $borrowingQueues[] = [
+                    'unit_key' => 'FGMU',
+                    'unit_id'  => self::UNIT_MAP['FGMU'],
+                    'details'  => sanitize_array($body['fgmuBorrowing']['details'] ?? []),
+                    'services' => $body['fgmuBorrowing']['services'],
+                ];
+            }
+
             if (!empty($body['leauBorrowing']['services'])) {
+                $leauServicesRaw  = $body['leauBorrowing']['services'];
                 $borrowingDetails = sanitize_array($body['leauBorrowing']['details'] ?? []);
-                $borrowingModel   = new \App\Models\BorrowingRequestModel();
 
-                $servicesList = array_map(function($srv) {
-                    return sanitize_string($srv['service'] ?? '');
-                }, $body['leauBorrowing']['services']);
-                $servicesList = array_filter($servicesList);
+                // Categorize services: tools/equipment to FGMU, plants to LEAU
+                $fgmuSrvs = [];
+                $leauSrvs = [];
+                foreach ($leauServicesRaw as $srv) {
+                    $sName = sanitize_string(is_array($srv) ? ($srv['service'] ?? '') : (string)$srv);
+                    if (stripos($sName, 'tool') !== false || stripos($sName, 'equipment') !== false) {
+                        $fgmuSrvs[] = is_array($srv) ? $srv : ['service' => $sName];
+                    } else {
+                        $leauSrvs[] = is_array($srv) ? $srv : ['service' => $sName];
+                    }
+                }
 
-                if (!empty($servicesList)) {
-                    $serviceString = $this->formatServicesList($servicesList);
-                    if (empty($serviceString)) {
-                        $serviceString = 'Borrowing Request';
+                // If fgmu services were passed inside leauBorrowing and not already queued in fgmuBorrowing:
+                if (!empty($fgmuSrvs) && empty($body['fgmuBorrowing']['services'])) {
+                    $borrowingQueues[] = [
+                        'unit_key' => 'FGMU',
+                        'unit_id'  => self::UNIT_MAP['FGMU'],
+                        'details'  => $borrowingDetails,
+                        'services' => $fgmuSrvs,
+                    ];
+                }
+
+                if (!empty($leauSrvs)) {
+                    $borrowingQueues[] = [
+                        'unit_key' => 'LEAU',
+                        'unit_id'  => self::UNIT_MAP['LEAU'],
+                        'details'  => $borrowingDetails,
+                        'services' => $leauSrvs,
+                    ];
+                }
+            }
+
+            if (!empty($borrowingQueues)) {
+                $borrowingModel = new \App\Models\BorrowingRequestModel();
+                $userModel      = new \App\Models\UserModel();
+                $user           = $userModel->find($userId);
+
+                foreach ($borrowingQueues as $borrowQueue) {
+                    $unitKey          = $borrowQueue['unit_key'];
+                    $unitIdVal        = $borrowQueue['unit_id'];
+                    $borrowingDetails = $borrowQueue['details'];
+
+                    $servicesList = array_map(function($srv) {
+                        return sanitize_string($srv['service'] ?? '');
+                    }, $borrowQueue['services']);
+                    $servicesList = array_filter($servicesList);
+
+                    if (empty($servicesList)) {
+                        continue;
                     }
 
-                    $ticketId = $this->ticketModel->generateTicketId('LEAU', self::UNIT_MAP['LEAU'], 0);
+                    $serviceString = $this->formatServicesList($servicesList);
+                    if (empty($serviceString)) {
+                        $serviceString = "{$unitKey} Borrowing Request";
+                    }
 
-                    // Get user details for borrower info
-                    $userModel = new \App\Models\UserModel();
-                    $user = $userModel->find($userId);
+                    $ticketId = $this->ticketModel->generateTicketId($unitKey, $unitIdVal, 0);
 
                     // Upfront validation: rejecting here (before the ticket
                     // row is created) prevents orphan tickets with no
@@ -437,10 +489,10 @@ class TicketController extends BaseController
                     $this->ticketModel->insert([
                         'id'          => $ticketId,
                         'user_id'     => $userId,
-                        'unit_id'     => self::UNIT_MAP['LEAU'],
+                        'unit_id'     => $unitIdVal,
                         'title'       => sanitize_string($serviceString),
                         'service_type'=> $serviceString,
-                        'description' => sanitize_string($borrowingDetails['purpose_project'] ?? 'Borrowing request.'),
+                        'description' => sanitize_string($borrowingDetails['purpose_project'] ?? "{$unitKey} Borrowing request."),
                         'status'      => 'pending',
                         'status_label'=> 'Pending Approval',
                         'is_emergency'=> 0,
@@ -453,7 +505,6 @@ class TicketController extends BaseController
                     ]);
 
                     // Create borrowing request record
-                    // (item model no longer collected; quantity is optional and defaults to 1)
                     $qtyRaw = $borrowingDetails['quantity_needed'] ?? '';
                     $qty = ($qtyRaw === '' || $qtyRaw === null) ? 1 : max(1, (int) $qtyRaw);
                     $borrowingId = $borrowingModel->insert([
@@ -481,7 +532,7 @@ class TicketController extends BaseController
                         );
                     }
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU borrowing request: {$serviceString}");
+                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "{$unitKey} borrowing request: {$serviceString}");
                     $createdTickets[] = $ticketId;
                 }
             }

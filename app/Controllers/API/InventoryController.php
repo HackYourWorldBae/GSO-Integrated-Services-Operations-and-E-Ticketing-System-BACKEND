@@ -27,13 +27,29 @@ class InventoryController extends BaseController
         $this->logModel       = new TicketLogModel();
     }
 
+    private function resolveTargetUnitId(?string $unitParam = null): int
+    {
+        if (!empty($unitParam)) {
+            $resolved = $this->resolveUnitId($unitParam);
+            if ($resolved !== null) {
+                return $resolved;
+            }
+        }
+        $userUnit = $this->currentUserUnitId();
+        if ($userUnit !== null && in_array($userUnit, [1, 2], true)) {
+            return $userUnit;
+        }
+        return 2; // Default to LEAU for campus-wide roles when unspecified
+    }
+
     /**
      * Get all inventory items with pagination and filters.
-     * GET /api/v1/inventory?category=&status=&search=&page=&per_page=
+     * GET /api/v1/inventory?unit=&category=&status=&search=&page=&per_page=
      */
     public function index(): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $targetUnitId = $this->resolveTargetUnitId($this->request->getGet('unit') ?? $this->request->getGet('unit_id'));
+        if ($forbidden = $this->assertUnitAccess($targetUnitId)) {
             return $forbidden;
         }
 
@@ -43,8 +59,8 @@ class InventoryController extends BaseController
         $page     = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage  = min(500, max(1, (int) ($this->request->getGet('per_page') ?? 50)));
 
-        $items = $this->inventoryModel->getFiltered($category, $status, $search, $perPage, ($page - 1) * $perPage);
-        $total = $this->inventoryModel->countFiltered($category, $status, $search);
+        $items = $this->inventoryModel->getFiltered($category, $status, $search, $perPage, ($page - 1) * $perPage, $targetUnitId);
+        $total = $this->inventoryModel->countFiltered($category, $status, $search, $targetUnitId);
 
         return $this->successResponse('Inventory items retrieved.', [
             'items'      => $items,
@@ -61,18 +77,14 @@ class InventoryController extends BaseController
      */
     public function show(int $id): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
-            return $forbidden;
-        }
-
         $item = $this->inventoryModel->find($id);
 
         if (!$item) {
             return $this->notFoundResponse('Inventory item');
         }
 
-        if ((int) $item['unit_id'] !== 2) {
-            return $this->forbiddenResponse('Inventory item does not belong to LEAU.');
+        if ($forbidden = $this->assertUnitAccess((int) $item['unit_id'])) {
+            return $forbidden;
         }
 
         return $this->successResponse('Inventory item retrieved.', ['item' => $item]);
@@ -84,16 +96,18 @@ class InventoryController extends BaseController
      */
     public function create(): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $body = $this->request->getJSON(true) ?? [];
+        $targetUnitId = $this->resolveTargetUnitId($body['unit'] ?? $body['unit_id'] ?? null);
+
+        if ($forbidden = $this->assertUnitAccess($targetUnitId)) {
             return $forbidden;
         }
 
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can create inventory items.');
+            $unitName = ($targetUnitId === 1) ? 'FGMU' : 'LEAU';
+            return $this->forbiddenResponse("Only {$unitName} Admin can create inventory items.");
         }
-
-        $body = $this->request->getJSON(true) ?? [];
 
         // Validation
         $name = sanitize_string($body['name'] ?? '');
@@ -101,16 +115,21 @@ class InventoryController extends BaseController
             return $this->errorResponse('Item name is required.', ['name' => ['Item name is required.']], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $category = sanitize_string($body['category'] ?? 'tools');
-        $validCategories = ['tools', 'equipment', 'plants', 'materials', 'others'];
-        if (!in_array($category, $validCategories, true)) {
-            $category = 'tools';
+        // Category restrictions:
+        // LEAU (unit 2) is for plants only.
+        // FGMU (unit 1) is for tools and equipment (tools, equipment, materials, others).
+        $rawCategory = sanitize_string($body['category'] ?? '');
+        if ($targetUnitId === 2) {
+            $category = 'plants';
+        } else {
+            $validCategories = ['tools', 'equipment', 'materials', 'others'];
+            $category = in_array($rawCategory, $validCategories, true) ? $rawCategory : 'tools';
         }
 
         $quantityTotal = max(1, (int) ($body['quantity_total'] ?? 1));
 
         $data = [
-            'unit_id'           => 2,
+            'unit_id'           => $targetUnitId,
             'name'              => $name,
             'model'             => sanitize_string($body['model'] ?? ''),
             'category'          => $category,
@@ -132,7 +151,7 @@ class InventoryController extends BaseController
             return $this->errorResponse('Failed to create inventory item.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        $this->logModel->logAction('inventory-' . $id, $this->currentUserId(), 'Inventory Created', "Created inventory item: {$name} (Category: {$category}, Qty: {$quantityTotal})");
+        $this->logModel->logAction('inventory-' . $id, $this->currentUserId(), 'Inventory Created', "Created inventory item: {$name} (Unit: {$targetUnitId}, Category: {$category}, Qty: {$quantityTotal})");
 
         return $this->successResponse('Inventory item created successfully.', ['item' => $this->inventoryModel->find($id)], ResponseInterface::HTTP_CREATED);
     }
@@ -143,22 +162,18 @@ class InventoryController extends BaseController
      */
     public function update(int $id): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
-            return $forbidden;
-        }
-
-        $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can update inventory items.');
-        }
-
         $item = $this->inventoryModel->find($id);
         if (!$item) {
             return $this->notFoundResponse('Inventory item');
         }
 
-        if ((int) $item['unit_id'] !== 2) {
-            return $this->forbiddenResponse('Inventory item does not belong to LEAU.');
+        if ($forbidden = $this->assertUnitAccess((int) $item['unit_id'])) {
+            return $forbidden;
+        }
+
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to update inventory items.');
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -182,6 +197,22 @@ class InventoryController extends BaseController
             if (isset($body[$inputKey])) {
                 $newValue = $body[$inputKey];
                 $oldValue = $item[$dbKey] ?? null;
+
+                // Category rule enforcement
+                if ($inputKey === 'category') {
+                    $itemUnit = (int) $item['unit_id'];
+                    $catVal = sanitize_string($newValue);
+                    if ($itemUnit === 2) {
+                        $catVal = 'plants';
+                    } elseif ($catVal === 'plants') {
+                        $catVal = 'tools';
+                    }
+                    if ($catVal !== $oldValue) {
+                        $updateData['category'] = $catVal;
+                        $changedFields[] = "category: {$oldValue} -> {$catVal}";
+                    }
+                    continue;
+                }
 
                 // Special handling for quantity_total - adjust available accordingly
                 if ($inputKey === 'quantity_total') {
@@ -225,22 +256,18 @@ class InventoryController extends BaseController
      */
     public function delete(int $id): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
-            return $forbidden;
-        }
-
-        $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can delete inventory items.');
-        }
-
         $item = $this->inventoryModel->find($id);
         if (!$item) {
             return $this->notFoundResponse('Inventory item');
         }
 
-        if ((int) $item['unit_id'] !== 2) {
-            return $this->forbiddenResponse('Inventory item does not belong to LEAU.');
+        if ($forbidden = $this->assertUnitAccess((int) $item['unit_id'])) {
+            return $forbidden;
+        }
+
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to delete inventory items.');
         }
 
         // Check if item has active borrowings
@@ -273,22 +300,18 @@ class InventoryController extends BaseController
      */
     public function adjustQuantity(int $id): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
-            return $forbidden;
-        }
-
-        $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can adjust inventory quantity.');
-        }
-
         $item = $this->inventoryModel->find($id);
         if (!$item) {
             return $this->notFoundResponse('Inventory item');
         }
 
-        if ((int) $item['unit_id'] !== 2) {
-            return $this->forbiddenResponse('Inventory item does not belong to LEAU.');
+        if ($forbidden = $this->assertUnitAccess((int) $item['unit_id'])) {
+            return $forbidden;
+        }
+
+        $role = $this->currentUserRole();
+        if (!in_array($role, ['admin', 'superadmin'], true)) {
+            return $this->forbiddenResponse('You do not have permission to adjust inventory quantity.');
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -313,43 +336,52 @@ class InventoryController extends BaseController
 
     /**
      * Get inventory categories for filter dropdown.
-     * GET /api/v1/inventory/categories
+     * GET /api/v1/inventory/categories?unit=
      */
     public function categories(): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $targetUnitId = $this->resolveTargetUnitId($this->request->getGet('unit') ?? $this->request->getGet('unit_id'));
+        if ($forbidden = $this->assertUnitAccess($targetUnitId)) {
             return $forbidden;
         }
 
-        return $this->successResponse('Inventory categories retrieved.', [
-            'categories' => [
+        if ($targetUnitId === 2) {
+            $categories = [
+                ['value' => 'plants', 'label' => 'Plants'],
+            ];
+        } else {
+            $categories = [
                 ['value' => 'tools',        'label' => 'Tools'],
                 ['value' => 'equipment',    'label' => 'Equipment'],
-                ['value' => 'plants',       'label' => 'Plants'],
                 ['value' => 'materials',    'label' => 'Materials'],
                 ['value' => 'others',       'label' => 'Others'],
-            ],
+            ];
+        }
+
+        return $this->successResponse('Inventory categories retrieved.', [
+            'categories' => $categories,
         ]);
     }
 
     /**
      * Get inventory stats.
-     * GET /api/v1/inventory/stats
+     * GET /api/v1/inventory/stats?unit=
      */
     public function stats(): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $targetUnitId = $this->resolveTargetUnitId($this->request->getGet('unit') ?? $this->request->getGet('unit_id'));
+        if ($forbidden = $this->assertUnitAccess($targetUnitId)) {
             return $forbidden;
         }
 
         $db = Database::connect();
 
-        $total = $db->table('inventory_items')->where('unit_id', 2)->where('is_active', 1)->countAllResults();
-        $available = $db->table('inventory_items')->where('unit_id', 2)->where('is_active', 1)->where('quantity_available >', 0)->countAllResults();
-        $lowStock = $db->table('inventory_items')->where('unit_id', 2)->where('is_active', 1)->where('quantity_available', 0)->countAllResults();
+        $total = $db->table('inventory_items')->where('unit_id', $targetUnitId)->where('is_active', 1)->countAllResults();
+        $available = $db->table('inventory_items')->where('unit_id', $targetUnitId)->where('is_active', 1)->where('quantity_available >', 0)->countAllResults();
+        $lowStock = $db->table('inventory_items')->where('unit_id', $targetUnitId)->where('is_active', 1)->where('quantity_available', 0)->countAllResults();
         $byCategory = $db->table('inventory_items')
             ->select('category, COUNT(*) as count')
-            ->where('unit_id', 2)
+            ->where('unit_id', $targetUnitId)
             ->where('is_active', 1)
             ->groupBy('category')
             ->get()->getResultArray();

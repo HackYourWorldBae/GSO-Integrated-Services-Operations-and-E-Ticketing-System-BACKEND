@@ -52,10 +52,10 @@ class InventoryItemModel extends Model
     /**
      * Get filtered inventory items with pagination
      */
-    public function getFiltered(string $category = '', string $status = '', string $search = '', int $limit = 50, int $offset = 0): array
+    public function getFiltered(string $category = '', string $status = '', string $search = '', int $limit = 50, int $offset = 0, int $unitId = 2): array
     {
         $builder = $this->builder()
-            ->where('unit_id', 2)
+            ->where('unit_id', $unitId)
             ->where('is_active', 1);
 
         if ($category) {
@@ -96,10 +96,10 @@ class InventoryItemModel extends Model
     /**
      * Count filtered inventory items
      */
-    public function countFiltered(string $category = '', string $status = '', string $search = ''): int
+    public function countFiltered(string $category = '', string $status = '', string $search = '', int $unitId = 2): int
     {
         $builder = $this->builder()
-            ->where('unit_id', 2)
+            ->where('unit_id', $unitId)
             ->where('is_active', 1);
 
         if ($category) {

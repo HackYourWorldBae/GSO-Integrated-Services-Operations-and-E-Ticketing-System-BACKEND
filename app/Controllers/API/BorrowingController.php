@@ -103,21 +103,24 @@ class BorrowingController extends BaseController
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);
 
+        $destUnitId = (int) $ticket['unit_id'];
+        $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
+
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Approved', "Borrowing request approved by {$approverTitle}. Notes: {$notes}");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'success',
             "Borrowing Request Approved",
-            "Your borrowing request #{$ticketId} has been approved by the {$approverTitle}. LEAU Admin will now assign inventory."
+            "Your borrowing request #{$ticketId} has been approved by the {$approverTitle}. {$unitCode} Admin will now assign inventory."
         );
 
-        // Notify destination Unit Admins (LEAU) if approved by Director
+        // Notify destination Unit Admins (FGMU or LEAU) if approved by Director
         if (in_array($role, ['director', 'superadmin'], true)) {
             try {
                 $dbConn = \Config\Database::connect();
-                $leauAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = 2 AND status = 'Active'")->getResultArray();
-                foreach ($leauAdmins as $uAdmin) {
+                $targetAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'", [$destUnitId])->getResultArray();
+                foreach ($targetAdmins as $uAdmin) {
                     $this->notificationModel->createNotification(
                         $uAdmin['id'],
                         'info',
@@ -223,13 +226,15 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can assign inventory.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can assign inventory.");
         }
 
-        if ((int) $ticket['unit_id'] !== 2) {
-            return $this->errorResponse('Inventory assignment is only available for LEAU tickets.');
+        if (!in_array((int) $ticket['unit_id'], [1, 2], true)) {
+            return $this->errorResponse('Inventory assignment is only available for FGMU and LEAU tickets.');
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -255,8 +260,8 @@ class BorrowingController extends BaseController
             return $this->notFoundResponse('Inventory item');
         }
 
-        if ((int) $inventory['unit_id'] !== 2) {
-            return $this->errorResponse('Inventory item does not belong to LEAU.');
+        if ((int) $inventory['unit_id'] !== (int) $ticket['unit_id']) {
+            return $this->errorResponse("Inventory item does not belong to {$unitCode}.");
         }
 
         if ((int) $inventory['quantity_available'] < $assignedQuantity) {
@@ -302,7 +307,7 @@ class BorrowingController extends BaseController
                 $ticket['user_id'],
                 'info',
                 "Inventory Assigned",
-                "Inventory has been assigned to your borrowing request #{$ticketId}. LEAU Admin will prepare it for pickup."
+                "Inventory has been assigned to your borrowing request #{$ticketId}. {$unitCode} Admin will prepare it for pickup."
             );
 
             return $this->successResponse('Inventory assigned successfully.', [
@@ -319,7 +324,7 @@ class BorrowingController extends BaseController
     }
 
     /**
-     * LEAU Admin unassigns inventory from a borrowing request before ready-for-pickup,
+     * Unit Admin unassigns inventory from a borrowing request before ready-for-pickup,
      * reverting the ticket back to the approved list.
      * POST /api/v1/borrowing/{ticketId}/unassign-inventory
      */
@@ -335,13 +340,15 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can unassign inventory.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can unassign inventory.");
         }
 
-        if ((int) $ticket['unit_id'] !== 2) {
-            return $this->errorResponse('Inventory unassignment is only available for LEAU tickets.');
+        if (!in_array((int) $ticket['unit_id'], [1, 2], true)) {
+            return $this->errorResponse('Inventory unassignment is only available for FGMU and LEAU tickets.');
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -421,7 +428,7 @@ class BorrowingController extends BaseController
     }
 
     /**
-     * LEAU Admin marks borrowing as ready for pickup.
+     * Unit Admin marks borrowing as ready for pickup.
      * PATCH /api/v1/borrowing/{ticketId}/ready-for-pickup
      */
     public function readyForPickup(string $ticketId): ResponseInterface
@@ -436,9 +443,11 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can mark ready for pickup.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can mark ready for pickup.");
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -474,10 +483,10 @@ class BorrowingController extends BaseController
             $ticket['user_id'],
             'success',
             "Ready for Pickup",
-            "Your borrowing request #{$ticketId} is ready for pickup. Please visit LEAU office to collect the item(s)."
+            "Your borrowing request #{$ticketId} is ready for pickup. Please visit {$unitCode} office to collect the item(s)."
         );
 
-        $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'ready_for_pickup', "Your borrowing request is ready for pickup. Please visit LEAU office to collect the item(s).");
+        $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'ready_for_pickup', "Your borrowing request is ready for pickup. Please visit {$unitCode} office to collect the item(s).");
 
         return $this->successResponse('Marked as ready for pickup.', [
             'borrowing_id' => $borrowing['id'],
@@ -501,9 +510,11 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can record pickup.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can record pickup.");
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -549,7 +560,7 @@ class BorrowingController extends BaseController
     }
 
     /**
-     * LEAU Admin marks item as returned.
+     * Unit Admin marks item as returned.
      * PATCH /api/v1/borrowing/{ticketId}/return
      */
     public function returnItem(string $ticketId): ResponseInterface
@@ -564,9 +575,11 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can record return.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can record return.");
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -653,7 +666,7 @@ class BorrowingController extends BaseController
     }
 
     /**
-     * LEAU Admin cancels a borrowing request.
+     * Unit Admin cancels a borrowing request.
      * PATCH /api/v1/borrowing/{ticketId}/cancel
      */
     public function cancel(string $ticketId): ResponseInterface
@@ -668,9 +681,11 @@ class BorrowingController extends BaseController
             return $forbidden;
         }
 
+        $unitCode = ((int) $ticket['unit_id'] === 1) ? 'FGMU' : 'LEAU';
+
         $role = $this->currentUserRole();
         if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can cancel borrowing requests.');
+            return $this->forbiddenResponse("Only {$unitCode} Admin can cancel borrowing requests.");
         }
 
         $borrowing = $this->borrowingModel->getByTicket($ticketId);
@@ -683,7 +698,7 @@ class BorrowingController extends BaseController
         }
 
         $body = $this->request->getJSON(true) ?? [];
-        $reason = sanitize_string($body['reason'] ?? 'Cancelled by LEAU Admin');
+        $reason = sanitize_string($body['reason'] ?? "Cancelled by {$unitCode} Admin");
 
         $db = Database::connect();
         $db->transStart();
@@ -798,12 +813,18 @@ class BorrowingController extends BaseController
     }
 
     /**
-     * Get all borrowing requests for LEAU admin dashboard.
-     * GET /api/v1/borrowing/queue/leau?status=...
+     * Get all borrowing requests for unit admin dashboard.
+     * GET /api/v1/borrowing/queue/(:segment)?status=...
      */
-    public function getQueue(): ResponseInterface
+    public function getQueue(?string $unit = null): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $unitParam = $unit ?? $this->request->getGet('unit') ?? $this->request->getGet('unit_id');
+        $targetUnitId = !empty($unitParam) ? $this->resolveUnitId($unitParam) : ($this->currentUserUnitId() ?? 2);
+        if ($targetUnitId === null) {
+            $targetUnitId = 2;
+        }
+
+        if ($forbidden = $this->assertUnitAccess($targetUnitId)) {
             return $forbidden;
         }
 
@@ -820,7 +841,7 @@ class BorrowingController extends BaseController
             log_message('error', '[BorrowingController::getQueue] auto-mark overdue failed: ' . $e->getMessage());
         }
 
-        $tickets = $this->borrowingModel->getQueue($status, $perPage, ($page - 1) * $perPage);
+        $tickets = $this->borrowingModel->getQueue($status, $perPage, ($page - 1) * $perPage, $targetUnitId);
 
         return $this->successResponse('Borrowing queue retrieved.', [
             'borrowing_requests' => $tickets,
@@ -832,11 +853,14 @@ class BorrowingController extends BaseController
 
     /**
      * Get overdue borrowing requests.
-     * GET /api/v1/borrowing/overdue
+     * GET /api/v1/borrowing/overdue?unit=
      */
-    public function getOverdue(): ResponseInterface
+    public function getOverdue(?string $unit = null): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
+        $unitParam = $unit ?? $this->request->getGet('unit') ?? $this->request->getGet('unit_id');
+        $targetUnitId = !empty($unitParam) ? $this->resolveUnitId($unitParam) : ($this->currentUserUnitId() ?? 0);
+
+        if ($targetUnitId > 0 && ($forbidden = $this->assertUnitAccess($targetUnitId))) {
             return $forbidden;
         }
 
@@ -847,7 +871,7 @@ class BorrowingController extends BaseController
             log_message('error', '[BorrowingController::getOverdue] auto-mark overdue failed: ' . $e->getMessage());
         }
 
-        $overdue = $this->borrowingModel->getOverdue();
+        $overdue = $this->borrowingModel->getOverdue($targetUnitId ?: 0);
 
         return $this->successResponse('Overdue borrowing requests retrieved.', [
             'overdue_requests' => $overdue,
@@ -861,13 +885,9 @@ class BorrowingController extends BaseController
      */
     public function markOverdue(): ResponseInterface
     {
-        if ($forbidden = $this->assertUnitAccess('LEAU')) {
-            return $forbidden;
-        }
-
         $role = $this->currentUserRole();
-        if (!in_array($role, ['admin', 'superadmin'], true)) {
-            return $this->forbiddenResponse('Only LEAU Admin can mark overdue.');
+        if (!in_array($role, ['admin', 'superadmin', 'director'], true)) {
+            return $this->forbiddenResponse('You do not have permission to mark overdue items.');
         }
 
         $updated = $this->borrowingModel->markOverdue();

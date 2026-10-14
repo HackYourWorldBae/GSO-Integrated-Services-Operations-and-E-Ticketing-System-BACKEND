@@ -81,15 +81,18 @@ class BorrowingRequestModel extends Model
     }
 
     /**
-     * Get borrowing requests queue for LEAU admin dashboard
+     * Get borrowing requests queue for unit admin dashboard (FGMU or LEAU)
      */
-    public function getQueue(string $status = '', int $limit = 100, int $offset = 0): array
+    public function getQueue(string $status = '', int $limit = 100, int $offset = 0, int $unitId = 2): array
     {
         $builder = $this->builder()
             ->select('borrowing_requests.*, tickets.service_type, tickets.submitted_at, users.first_name, users.last_name, users.email')
             ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
-            ->join('users', 'users.id = tickets.user_id')
-            ->where('tickets.unit_id', 2);
+            ->join('users', 'users.id = tickets.user_id');
+
+        if ($unitId > 0) {
+            $builder->where('tickets.unit_id', $unitId);
+        }
 
         if ($status) {
             $builder->where('borrowing_requests.status', $status);
@@ -106,18 +109,26 @@ class BorrowingRequestModel extends Model
      * Returns requests already flagged overdue, plus any picked-up requests
      * past their return date (safety net in case the auto-sync has not run yet).
      */
-    public function getOverdue(): array
+    public function getOverdue(int $unitId = 0): array
     {
         $today = date('Y-m-d');
 
-        $flagged = $this->where('status', 'overdue')
-            ->orderBy('expected_return_date', 'ASC')
-            ->findAll();
+        $flaggedBuilder = $this->select('borrowing_requests.*')
+            ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
+            ->where('borrowing_requests.status', 'overdue');
+        if ($unitId > 0) {
+            $flaggedBuilder->where('tickets.unit_id', $unitId);
+        }
+        $flagged = $flaggedBuilder->orderBy('borrowing_requests.expected_return_date', 'ASC')->findAll();
 
-        $pastDue = $this->where('status', 'picked_up')
-            ->where('expected_return_date <', $today)
-            ->orderBy('expected_return_date', 'ASC')
-            ->findAll();
+        $pastDueBuilder = $this->select('borrowing_requests.*')
+            ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
+            ->where('borrowing_requests.status', 'picked_up')
+            ->where('borrowing_requests.expected_return_date <', $today);
+        if ($unitId > 0) {
+            $pastDueBuilder->where('tickets.unit_id', $unitId);
+        }
+        $pastDue = $pastDueBuilder->orderBy('borrowing_requests.expected_return_date', 'ASC')->findAll();
 
         $merged = [...$flagged];
         foreach ($pastDue as $row) {

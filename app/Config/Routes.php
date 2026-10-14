@@ -118,7 +118,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         // NOTE: static segments must be declared BEFORE /borrowing/(:segment)
         // or the wildcard swallows them (e.g. "overdue" -> getByTicket).
         $routes->get('borrowing/overdue',              'BorrowingController::getOverdue',        ['filter' => 'role:admin,director,superadmin']);
-        $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue',          ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/overdue/(:segment)',   'BorrowingController::getOverdue/$1',     ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/queue/leau',           'BorrowingController::getQueue/leau',     ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/queue/fgmu',           'BorrowingController::getQueue/fgmu',     ['filter' => 'role:admin,director,superadmin']);
+        $routes->get('borrowing/queue/(:segment)',     'BorrowingController::getQueue/$1',       ['filter' => 'role:admin,director,superadmin']);
         $routes->get('borrowing/(:segment)',           'BorrowingController::getByTicket/$1',    ['filter' => 'role:admin,director,student,employee,superadmin']);
         $routes->post('borrowing/mark-overdue',        'BorrowingController::markOverdue',       ['filter' => 'role:admin']);
         $routes->patch('borrowing/(:segment)/director-approve', 'BorrowingController::directorApprove/$1', ['filter' => 'role:director,admin,superadmin']);

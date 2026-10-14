@@ -45,15 +45,35 @@ trait TicketEnrichmentTrait
         // lists + full-info modals can show item / purpose / schedule.
         $borrowingMap    = $this->buildDetailMap($db, 'borrowing_requests',     'ticket_id', $ticketIds);
 
-        // Load user/requester profiles in bulk for tickets (including staff who escalated)
+        // Map dispatch logs to find which user dispatched/assigned workers
+        $dispatchLogsMap = [];
+        if (!empty($ticketIds)) {
+            $tPlaceholders = implode(',', array_fill(0, count($ticketIds), '?'));
+            $dispatchLogRows = $db->query("
+                SELECT ticket_id, user_id, created_at 
+                FROM ticket_logs 
+                WHERE action = 'Worker Assigned' AND ticket_id IN ({$tPlaceholders})
+                ORDER BY id DESC
+            ", $ticketIds)->getResultArray();
+            foreach ($dispatchLogRows as $dLog) {
+                if (!isset($dispatchLogsMap[$dLog['ticket_id']])) {
+                    $dispatchLogsMap[$dLog['ticket_id']] = $dLog;
+                }
+            }
+        }
+        $dispatcherUserIds = array_column($dispatchLogsMap, 'user_id');
+
+        // Load user/requester profiles in bulk for tickets (including staff who escalated, reviewed, or dispatched)
         $userIds = array_filter(array_unique(array_merge(
             array_column($tickets, 'user_id'),
-            array_column($tickets, 'escalated_by')
+            array_column($tickets, 'escalated_by'),
+            array_column($tickets, 'reviewed_by'),
+            $dispatcherUserIds
         )));
         $usersMap = [];
         if (!empty($userIds)) {
             $userRows = $db->table('users')
-                           ->select('id, first_name, last_name, email, role as requester_role, student_id_number, student_type, employee_type, organization_name, college, contact_number as requester_contact')
+                           ->select('id, first_name, last_name, email, role as requester_role, role, unit_id, signature_path, student_id_number, student_type, employee_type, organization_name, college, contact_number as requester_contact')
                            ->whereIn('id', $userIds)
                            ->get()
                            ->getResultArray();
@@ -310,6 +330,48 @@ trait TicketEnrichmentTrait
             $isCancelled = ($ticket['status'] === 'cancelled') || str_contains(strtolower((string) ($ticket['status_label'] ?? '')), 'cancel');
             $ticket['cancellation_reason'] = $ticket['cancellation_reason'] 
                 ?? ($isCancelled ? ($ticket['decline_reason'] ?? null) : null);
+
+            // Reviewer / Approver profile
+            $revUser = !empty($ticket['reviewed_by']) ? ($usersMap[$ticket['reviewed_by']] ?? null) : null;
+            if ($revUser) {
+                $ticket['reviewed_by_user'] = [
+                    'id'            => $revUser['id'],
+                    'first_name'    => $revUser['first_name'],
+                    'last_name'     => $revUser['last_name'],
+                    'name'          => trim(($revUser['first_name'] ?? '') . ' ' . ($revUser['last_name'] ?? '')),
+                    'role'          => $revUser['role'] ?? $revUser['requester_role'],
+                    'unit_id'       => $revUser['unit_id'] ?? null,
+                    'signature_url' => !empty($revUser['signature_path']) ? base_url('api/v1/auth/signature/' . $revUser['id']) : null,
+                ];
+                $ticket['reviewer_name'] = $ticket['reviewed_by_user']['name'];
+                $ticket['reviewer_role'] = $ticket['reviewed_by_user']['role'];
+            } else {
+                $ticket['reviewed_by_user'] = null;
+                $ticket['reviewer_name']    = null;
+                $ticket['reviewer_role']    = null;
+            }
+
+            // Dispatcher / Issuer profile
+            $dispLog = $dispatchLogsMap[$id] ?? null;
+            $dispUser = ($dispLog && !empty($dispLog['user_id'])) ? ($usersMap[$dispLog['user_id']] ?? null) : null;
+            if ($dispUser) {
+                $ticket['dispatched_by_user'] = [
+                    'id'            => $dispUser['id'],
+                    'first_name'    => $dispUser['first_name'],
+                    'last_name'     => $dispUser['last_name'],
+                    'name'          => trim(($dispUser['first_name'] ?? '') . ' ' . ($dispUser['last_name'] ?? '')),
+                    'role'          => $dispUser['role'] ?? $dispUser['requester_role'],
+                    'unit_id'       => $dispUser['unit_id'] ?? null,
+                    'signature_url' => !empty($dispUser['signature_path']) ? base_url('api/v1/auth/signature/' . $dispUser['id']) : null,
+                    'dispatched_at' => $dispLog['created_at'] ?? null,
+                ];
+                $ticket['dispatcher_name'] = $ticket['dispatched_by_user']['name'];
+                $ticket['dispatcher_role'] = $ticket['dispatched_by_user']['role'];
+            } else {
+                $ticket['dispatched_by_user'] = null;
+                $ticket['dispatcher_name']    = null;
+                $ticket['dispatcher_role']    = null;
+            }
         }
         unset($ticket);
 

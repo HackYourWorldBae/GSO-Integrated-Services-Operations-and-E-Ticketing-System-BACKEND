@@ -328,11 +328,20 @@ class SuperadminController extends BaseController
     public function createUser(): ResponseInterface
     {
         $body = $this->request->getJSON(true) ?? [];
+        $isWorkerAccount = (($body['role'] ?? '') === 'worker') || (($body['role'] ?? '') === 'personnel');
+
+        if ($isWorkerAccount && empty($body['email']) && !empty($body['username'])) {
+            $body['email'] = $body['username'];
+        }
+
+        $emailRule = $isWorkerAccount
+            ? 'required|regex_match[/^[a-zA-Z0-9._-]+$/]|min_length[3]|max_length[100]|is_unique[users.email]'
+            : 'required|valid_email|is_unique[users.email]';
 
         $rules = [
             'first_name'        => 'required|max_length[100]',
             'last_name'         => 'required|max_length[100]',
-            'email'             => 'required|valid_email|is_unique[users.email]',
+            'email'             => $emailRule,
             'password'          => 'required|min_length[6]',
             'confirm_password'  => 'permit_empty|matches[password]',
             'role'              => 'required|in_list[student,employee,admin,staff,director,superadmin,worker]',
@@ -349,6 +358,17 @@ class SuperadminController extends BaseController
                 $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
+        }
+
+        $caps = $this->userModel->getSchemaCapabilities();
+        if ($isWorkerAccount && !empty($caps['has_username'])) {
+            $cleanUsername = strtolower(trim((string) ($body['email'] ?? '')));
+            $existingUserWithUsername = $this->userModel->where('username', $cleanUsername)->first();
+            if ($existingUserWithUsername) {
+                return $this->errorResponse('This username is already taken. Please choose another username.', [
+                    'email' => ['This username is already taken. Please choose another username.']
+                ], ResponseInterface::HTTP_CONFLICT);
+            }
         }
 
         if (!empty($body['confirm_password']) && $body['password'] !== $body['confirm_password']) {
@@ -435,6 +455,10 @@ class SuperadminController extends BaseController
             'is_verified'       => 1,
         ];
 
+        if ($isWorkerAccount && !empty($caps['has_username'])) {
+            $insertData['username'] = strtolower(trim((string) $body['email']));
+        }
+
         if ($this->userModel->skipValidation(true)->insert($insertData)) {
             // If creating a Personnel (worker) account, ensure a linked personnel roster record exists
             if ($body['role'] === 'worker' || $body['role'] === 'personnel') {
@@ -483,13 +507,14 @@ class SuperadminController extends BaseController
             }
 
             $createdUser = $this->userModel->getSafeUser($userId);
+            $logIdentifier = $isWorkerAccount ? ($createdUser['username'] ?? $createdUser['email']) : $createdUser['email'];
 
             $this->activityLogModel->logEvent([
                 'event_type'     => 'ACCOUNT_CREATED',
                 'severity'       => 'notice',
                 'actor_id'       => $this->currentUserId(),
                 'target_user_id' => $userId,
-                'details'        => "Superadmin provisioned account for {$firstName} {$lastName} ({$createdUser['email']}) with role {$body['role']}.",
+                'details'        => "Superadmin provisioned account for {$firstName} {$lastName} ({$logIdentifier}) with role {$body['role']}.",
                 'metadata'       => ['role' => $body['role'], 'status' => $body['status'] ?? 'Active'],
             ]);
 
@@ -537,6 +562,20 @@ class SuperadminController extends BaseController
                 $this->validator->getErrors(),
                 ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
             );
+        }
+
+        $caps = $this->userModel->getSchemaCapabilities();
+        if ($isWorkerAccount && !empty($caps['has_username']) && !empty($body['email'])) {
+            $cleanUsername = strtolower(trim((string) $body['email']));
+            $existingUserWithUsername = $this->userModel
+                ->where('username', $cleanUsername)
+                ->where('id !=', $id)
+                ->first();
+            if ($existingUserWithUsername) {
+                return $this->errorResponse('This username is already taken. Please choose another username.', [
+                    'email' => ['This username is already taken. Please choose another username.']
+                ], ResponseInterface::HTTP_CONFLICT);
+            }
         }
 
         // Policy: Registered user accounts (student, employee) cannot be edited by the Superadmin

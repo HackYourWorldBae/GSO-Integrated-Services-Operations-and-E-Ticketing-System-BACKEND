@@ -305,6 +305,11 @@ trait TicketEnrichmentTrait
                 $ticket['computed_working_hours']    = null;
                 $ticket['computed_working_duration'] = null;
             }
+
+            // Expose cancellation_reason for cancelled tickets
+            $isCancelled = ($ticket['status'] === 'cancelled') || str_contains(strtolower((string) ($ticket['status_label'] ?? '')), 'cancel');
+            $ticket['cancellation_reason'] = $ticket['cancellation_reason'] 
+                ?? ($isCancelled ? ($ticket['decline_reason'] ?? null) : null);
         }
         unset($ticket);
 

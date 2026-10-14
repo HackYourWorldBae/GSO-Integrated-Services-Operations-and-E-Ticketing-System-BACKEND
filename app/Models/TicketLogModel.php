@@ -25,6 +25,19 @@ class TicketLogModel extends Model
                 $this->db->query("SET time_zone = '+08:00'");
             } catch (\Throwable $ignored) {}
 
+            // Auto-tag audit trail with acting unit head coverage if active in JWT payload
+            $jwtPayload = \App\Libraries\RequestContext::getJwtPayload();
+            if (!empty($jwtPayload['is_acting_head']) && !empty($jwtPayload['acting_unit_code'])) {
+                $actingTag = "[Acting " . $jwtPayload['acting_unit_code'] . " Head] ";
+                if (!empty($details)) {
+                    if (!str_contains($details, '[Acting')) {
+                        $details = $actingTag . $details;
+                    }
+                } else {
+                    $details = $actingTag . "Action performed by Director while covering as Acting Unit Head.";
+                }
+            }
+
             return (bool) $this->insert([
                 'ticket_id'  => $ticketId,
                 'user_id'    => $userId,

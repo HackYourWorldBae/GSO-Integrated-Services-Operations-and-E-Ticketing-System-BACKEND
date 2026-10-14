@@ -65,6 +65,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('auth/signature/(:segment)','AuthController::getSignature/$1');
         $routes->get('auth/document-signatures', 'AuthController::getDocumentSignatures');
 
+        // -- Sub-Unit Head Delegation & Coverage (Acting Unit Head) --
+        $routes->get('auth/delegation/units',    'AuthController::getDelegationUnits');
+        $routes->post('auth/assume-unit-head',   'AuthController::assumeUnitHead');
+        $routes->post('auth/revert-unit-head',   'AuthController::revertUnitHead');
+
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');
         $routes->get('tickets/my-requests',       'TicketController::myRequests');

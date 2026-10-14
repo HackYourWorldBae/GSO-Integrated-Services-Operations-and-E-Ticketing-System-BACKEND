@@ -4,6 +4,7 @@ namespace App\Controllers\API;
 
 use App\Controllers\BaseController;
 use App\Libraries\JwtService;
+use App\Libraries\RequestContext;
 use App\Libraries\ResendEmailService;
 use App\Models\UserModel;
 use App\Models\UserSessionModel;
@@ -681,6 +682,20 @@ class AuthController extends BaseController
             return $this->notFoundResponse('User');
         }
 
+        $jwtPayload = RequestContext::getJwtPayload();
+        if (!empty($jwtPayload['is_acting_head'])) {
+            $user['role']             = $jwtPayload['role'] ?? 'admin';
+            $user['unit_id']          = $jwtPayload['unit_id'] ?? null;
+            $user['unit_code']        = $jwtPayload['acting_unit_code'] ?? null;
+            $user['is_acting_head']   = true;
+            $user['original_role']    = $jwtPayload['original_role'] ?? 'director';
+            $user['acting_unit_code'] = $jwtPayload['acting_unit_code'] ?? null;
+            $user['acting_unit_name'] = $jwtPayload['acting_unit_name'] ?? null;
+
+            $rolePermissionModel = new \App\Models\RolePermissionModel();
+            $user['permissions'] = $rolePermissionModel->getPermissionsForRole('admin');
+        }
+
         return $this->successResponse('User profile retrieved.', ['user' => $user]);
     }
 
@@ -710,7 +725,10 @@ class AuthController extends BaseController
             return $this->errorResponse('Account Rejected: Your registration was rejected by the administrator.', ['is_rejected' => true], ResponseInterface::HTTP_UNAUTHORIZED);
         }
 
-        $role = $user['role'] ?? ($this->request->jwtPayload['role'] ?? '');
+        $jwtPayload = RequestContext::getJwtPayload();
+        $isActing   = !empty($jwtPayload['is_acting_head']);
+        $role       = $isActing ? ($jwtPayload['role'] ?? 'admin') : ($user['role'] ?? ($this->request->jwtPayload['role'] ?? ''));
+
         $rolePermissionModel = new \App\Models\RolePermissionModel();
         $permissions = !empty($role) ? $rolePermissionModel->getPermissionsForRole($role) : [];
 
@@ -724,7 +742,7 @@ class AuthController extends BaseController
         $isMaintenance      = $systemSettingModel->isMaintenanceActive();
         $maintDetails       = $isMaintenance ? $systemSettingModel->getMaintenanceDetails() : null;
 
-        return $this->successResponse('Session is active and valid.', [
+        $responsePayload = [
             'valid'               => true,
             'user_id'             => $userId,
             'role'                => $role,
@@ -733,6 +751,323 @@ class AuthController extends BaseController
             'permissions'         => $permissions,
             'maintenance_mode'    => $isMaintenance,
             'maintenance_details' => $maintDetails,
+        ];
+
+        if ($isActing) {
+            $responsePayload['is_acting_head']   = true;
+            $responsePayload['unit_id']          = $jwtPayload['unit_id'] ?? null;
+            $responsePayload['original_role']    = $jwtPayload['original_role'] ?? 'director';
+            $responsePayload['acting_unit_code'] = $jwtPayload['acting_unit_code'] ?? null;
+            $responsePayload['acting_unit_name'] = $jwtPayload['acting_unit_name'] ?? null;
+        }
+
+        return $this->successResponse('Session is active and valid.', $responsePayload);
+    }
+
+    /**
+     * Get sub-units status and unit heads for Director delegation / coverage.
+     * GET /api/v1/auth/delegation/units
+     * Allowed: director, superadmin, or active acting head.
+     */
+    public function getDelegationUnits(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        $db = \Config\Database::connect();
+
+        $currentUser = $this->userModel->find($userId);
+        if (!$currentUser) {
+            return $this->errorResponse('User identity could not be resolved.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $jwtPayload = RequestContext::getJwtPayload();
+        $actualRole = $currentUser['role'] ?? null;
+        $isDirector = in_array($actualRole, ['director', 'superadmin'], true) || (!empty($jwtPayload['original_role']) && $jwtPayload['original_role'] === 'director');
+
+        if (!$isDirector) {
+            return $this->forbiddenResponse('Only the Executive Director can access unit head delegation controls.');
+        }
+
+        // Fetch sub-units (FGMU, LEAU, SSU)
+        $units = $db->table('units')
+            ->select('id, code, name, description')
+            ->whereIn('code', ['FGMU', 'LEAU', 'SSU'])
+            ->orderBy('id', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        $result = [];
+        $currentActingUnit = $jwtPayload['acting_unit_code'] ?? null;
+
+        foreach ($units as $u) {
+            $unitId   = (int) $u['id'];
+            $unitCode = strtoupper($u['code']);
+
+            // Find current assigned unit head
+            $headUser = $this->userModel
+                ->select('id, first_name, last_name, email, contact_number, status, is_verified, last_login_at')
+                ->where('role', 'admin')
+                ->where('unit_id', $unitId)
+                ->orderBy('id', 'ASC')
+                ->first();
+
+            $headInfo = null;
+            $hasActiveSession = false;
+
+            if ($headUser) {
+                $hasActiveSession = $this->userSessionModel->hasActiveSession($headUser['id']);
+                $headInfo = [
+                    'id'            => $headUser['id'],
+                    'name'          => trim(($headUser['first_name'] ?? '') . ' ' . ($headUser['last_name'] ?? '')),
+                    'email'         => $headUser['email'],
+                    'status'        => $headUser['status'],
+                    'last_login_at' => $headUser['last_login_at'] ?? null,
+                ];
+            }
+
+            $isCurrentlyActing = (!empty($jwtPayload['is_acting_head']) && $currentActingUnit === $unitCode);
+
+            $result[] = [
+                'unit_id'             => $unitId,
+                'unit_code'           => $unitCode,
+                'unit_name'           => $u['name'],
+                'description'         => $u['description'],
+                'head_user'           => $headInfo,
+                'is_session_active'   => $hasActiveSession,
+                'is_currently_acting' => $isCurrentlyActing,
+            ];
+        }
+
+        return $this->successResponse('Delegation units retrieved.', [
+            'units'               => $result,
+            'is_acting_head'      => !empty($jwtPayload['is_acting_head']),
+            'current_acting_unit' => $currentActingUnit,
+        ]);
+    }
+
+    /**
+     * Assume Unit Head dashboard coverage (Acting Unit Head).
+     * POST /api/v1/auth/assume-unit-head
+     * Body: { "unit_code": "FGMU" | "LEAU" | "SSU" }
+     *
+     * Enforces Single-Session Security:
+     * Terminates any active session of the unit head user.
+     * Logs action under Director's audit trail.
+     */
+    public function assumeUnitHead(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+        $db = \Config\Database::connect();
+
+        $currentUser = $this->userModel->find($userId);
+        if (!$currentUser) {
+            return $this->errorResponse('User identity could not be resolved.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $jwtPayload = RequestContext::getJwtPayload();
+        $actualRole = $currentUser['role'] ?? null;
+        $isDirector = in_array($actualRole, ['director', 'superadmin'], true) || (!empty($jwtPayload['original_role']) && $jwtPayload['original_role'] === 'director');
+
+        if (!$isDirector) {
+            return $this->forbiddenResponse('Only the Executive Director can assume unit head coverage.');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $unitCode = strtoupper(trim((string) ($body['unit_code'] ?? '')));
+
+        if (!in_array($unitCode, ['FGMU', 'LEAU', 'SSU'], true)) {
+            return $this->errorResponse('Invalid unit code. Supported units: FGMU, LEAU, SSU.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $unit = $db->table('units')->where('code', $unitCode)->first();
+        if (!$unit) {
+            return $this->notFoundResponse("Unit '{$unitCode}'");
+        }
+
+        $targetUnitId = (int) $unit['id'];
+
+        // Find active unit head(s) for this unit
+        $headUsers = $this->userModel->where('role', 'admin')->where('unit_id', $targetUnitId)->findAll();
+        $terminatedSessionsCount = 0;
+
+        foreach ($headUsers as $h) {
+            // Strictly enforce single-session security: invalidate active session for this unit head
+            if ($this->userSessionModel->hasActiveSession($h['id'])) {
+                $this->userSessionModel->destroyUserSession($h['id']);
+                $terminatedSessionsCount++;
+            }
+        }
+
+        $directorName = trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''));
+        if (empty($directorName)) {
+            $directorName = 'Executive Director';
+        }
+
+        // Register new session for Director
+        $sessionId = bin2hex(random_bytes(16));
+        $ipAddress = $this->request->getIPAddress();
+        $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+        $this->userSessionModel->registerSession($currentUser['id'], $sessionId, $ipAddress, $userAgent);
+
+        // Generate delegated JWT token payload
+        $tokenPayload = [
+            'id'               => $currentUser['id'],
+            'role'             => 'admin', // Active operational role
+            'unit_id'          => $targetUnitId,
+            'sid'              => $sessionId,
+            'is_acting_head'   => true,
+            'original_role'    => 'director',
+            'acting_unit_code' => $unitCode,
+            'acting_unit_name' => $unit['name'],
+        ];
+
+        $accessToken  = $this->jwt->generateAccessToken($tokenPayload);
+        $refreshToken = $this->jwt->generateRefreshToken($tokenPayload);
+
+        // Log delegation event in audit trail
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'DELEGATION_ACTING_HEAD_ASSUMED',
+            'severity'       => 'warning',
+            'actor_id'       => $currentUser['id'],
+            'target_user_id' => !empty($headUsers[0]['id']) ? $headUsers[0]['id'] : null,
+            'details'        => "Director {$directorName} assumed in-charge management for {$unitCode} dashboard ({$unit['name']}) while unit head is on leave. Unit head active sessions terminated per single-session security rules.",
+            'metadata'       => [
+                'unit_id'                  => $targetUnitId,
+                'unit_code'                => $unitCode,
+                'terminated_session_count' => $terminatedSessionsCount,
+            ],
+            'ip_address'     => $ipAddress,
+            'user_agent'     => $userAgent,
+        ]);
+
+        // Issue HttpOnly Cookie
+        $expiresIn = $this->jwt->getExpiresIn();
+        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $this->response->setCookie([
+            'name'     => 'gso_jwt_token',
+            'value'    => $accessToken,
+            'expire'   => $expiresIn,
+            'domain'   => '',
+            'path'     => '/',
+            'secure'   => $isSecure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+
+        // Build enriched safe user payload
+        $safeUser = $this->userModel->getSafeUser($currentUser['id']) ?? $currentUser;
+        $safeUser['role']             = 'admin';
+        $safeUser['unit_id']          = $targetUnitId;
+        $safeUser['unit_code']        = $unitCode;
+        $safeUser['is_acting_head']   = true;
+        $safeUser['original_role']    = 'director';
+        $safeUser['acting_unit_code'] = $unitCode;
+        $safeUser['acting_unit_name'] = $unit['name'];
+
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $safeUser['permissions'] = $rolePermissionModel->getPermissionsForRole('admin');
+
+        $redirectPath = '/admin/' . strtolower($unitCode);
+
+        return $this->successResponse("Successfully switched to {$unitCode} dashboard as Acting Unit Head.", [
+            'access_token'  => $accessToken,
+            'refresh_token' => $refreshToken,
+            'token_type'    => 'Bearer',
+            'expires_in'    => $expiresIn,
+            'user'          => $safeUser,
+            'redirect_url'  => $redirectPath,
+        ]);
+    }
+
+    /**
+     * Revert from Acting Unit Head back to Executive Director dashboard.
+     * POST /api/v1/auth/revert-unit-head
+     */
+    public function revertUnitHead(): ResponseInterface
+    {
+        $userId = $this->currentUserId();
+
+        $currentUser = $this->userModel->find($userId);
+        if (!$currentUser) {
+            return $this->errorResponse('User identity could not be resolved.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $jwtPayload = RequestContext::getJwtPayload();
+        $actualRole = $currentUser['role'] ?? null;
+        $isDirector = in_array($actualRole, ['director', 'superadmin'], true) || (!empty($jwtPayload['original_role']) && $jwtPayload['original_role'] === 'director');
+
+        if (!$isDirector) {
+            return $this->forbiddenResponse('Only the Executive Director can revert to Director dashboard.');
+        }
+
+        $actingUnit = $jwtPayload['acting_unit_code'] ?? 'Sub-Unit';
+        $directorName = trim(($currentUser['first_name'] ?? '') . ' ' . ($currentUser['last_name'] ?? ''));
+        if (empty($directorName)) {
+            $directorName = 'Executive Director';
+        }
+
+        // Register new standard Director session
+        $sessionId = bin2hex(random_bytes(16));
+        $ipAddress = $this->request->getIPAddress();
+        $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+        $this->userSessionModel->registerSession($currentUser['id'], $sessionId, $ipAddress, $userAgent);
+
+        // Standard Director token payload
+        $tokenPayload = [
+            'id'      => $currentUser['id'],
+            'role'    => 'director',
+            'unit_id' => null,
+            'sid'     => $sessionId,
+        ];
+
+        $accessToken  = $this->jwt->generateAccessToken($tokenPayload);
+        $refreshToken = $this->jwt->generateRefreshToken($tokenPayload);
+
+        // Log return event in audit trail
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'DELEGATION_ACTING_HEAD_RELEASED',
+            'severity'       => 'info',
+            'actor_id'       => $currentUser['id'],
+            'target_user_id' => $currentUser['id'],
+            'details'        => "Director {$directorName} concluded acting coverage for {$actingUnit} and returned to Executive Director dashboard.",
+            'metadata'       => [
+                'reverted_from_unit' => $actingUnit,
+            ],
+            'ip_address'     => $ipAddress,
+            'user_agent'     => $userAgent,
+        ]);
+
+        // Issue HttpOnly Cookie
+        $expiresIn = $this->jwt->getExpiresIn();
+        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $this->response->setCookie([
+            'name'     => 'gso_jwt_token',
+            'value'    => $accessToken,
+            'expire'   => $expiresIn,
+            'domain'   => '',
+            'path'     => '/',
+            'secure'   => $isSecure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+
+        $safeUser = $this->userModel->getSafeUser($currentUser['id']) ?? $currentUser;
+        $safeUser['role']             = 'director';
+        $safeUser['unit_id']          = null;
+        $safeUser['is_acting_head']   = false;
+        $safeUser['original_role']    = null;
+        $safeUser['acting_unit_code'] = null;
+        $safeUser['acting_unit_name'] = null;
+
+        $rolePermissionModel = new \App\Models\RolePermissionModel();
+        $safeUser['permissions'] = $rolePermissionModel->getPermissionsForRole('director');
+
+        return $this->successResponse('Successfully returned to Director Dashboard.', [
+            'access_token'  => $accessToken,
+            'refresh_token' => $refreshToken,
+            'token_type'    => 'Bearer',
+            'expires_in'    => $expiresIn,
+            'user'          => $safeUser,
+            'redirect_url'  => '/director/dashboard',
         ]);
     }
 

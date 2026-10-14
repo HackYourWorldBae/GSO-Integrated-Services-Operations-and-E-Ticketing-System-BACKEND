@@ -133,4 +133,17 @@ class UserSessionModel extends Model
     {
         $this->where('session_id', $sessionId)->delete();
     }
+
+    /**
+     * Check if a user currently has an active registered session.
+     */
+    public function hasActiveSession(string $userId): bool
+    {
+        try {
+            return $this->where('user_id', $userId)->countAllResults() > 0;
+        } catch (\Throwable $e) {
+            log_message('error', '[UserSessionModel::hasActiveSession] ' . $e->getMessage());
+            return false;
+        }
+    }
 }

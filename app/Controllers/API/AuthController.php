@@ -788,12 +788,25 @@ class AuthController extends BaseController
         }
 
         // Fetch sub-units (FGMU, LEAU, SSU)
-        $units = $db->table('units')
-            ->select('id, code, name, description')
-            ->whereIn('code', ['FGMU', 'LEAU', 'SSU'])
-            ->orderBy('id', 'ASC')
-            ->get()
-            ->getResultArray();
+        try {
+            $units = $db->table('units')
+                ->select('id, code, name, description')
+                ->whereIn('code', ['FGMU', 'LEAU', 'SSU'])
+                ->orderBy('id', 'ASC')
+                ->get()
+                ->getResultArray();
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::getDelegationUnits] ' . $e->getMessage());
+            $units = [];
+        }
+
+        if (empty($units)) {
+            $units = [
+                ['id' => 1, 'code' => 'FGMU', 'name' => 'Facilities and Grounds Management Unit', 'description' => 'Structure and grounds repairs'],
+                ['id' => 2, 'code' => 'LEAU', 'name' => 'Landscape and Environment Aesthetics Unit', 'description' => 'Landscaping and campus aesthetics'],
+                ['id' => 3, 'code' => 'SSU', 'name' => 'Security Service Unit', 'description' => 'Security and campus incident reporting'],
+            ];
+        }
 
         $result = [];
         $currentActingUnit = $jwtPayload['acting_unit_code'] ?? null;

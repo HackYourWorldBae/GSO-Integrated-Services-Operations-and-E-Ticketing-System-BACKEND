@@ -172,8 +172,7 @@ class BorrowingController extends BaseController
         }
 
         $body = $this->request->getJSON(true) ?? [];
-        $rejectorTitle = in_array($role, ['director', 'superadmin'], true) ? 'Director' : 'LEAU Unit Head';
-        $reason = sanitize_string($body['reason'] ?? "Rejected by {$rejectorTitle}");
+        $reason = sanitize_string($body['reason'] ?? 'Request declined');
 
         $this->borrowingModel->update($borrowing['id'], [
             'status'           => 'cancelled',
@@ -182,14 +181,14 @@ class BorrowingController extends BaseController
 
         $this->ticketModel->update($ticketId, [
             'status'         => 'declined',
-            'status_label'   => "Declined by {$rejectorTitle}",
+            'status_label'   => 'Declined',
             'decline_reason' => $reason,
             'is_archived'    => 1,
             'completed_at'   => date('Y-m-d H:i:s'),
             'updated_at'     => date('Y-m-d H:i:s'),
         ]);
 
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Director Rejected', "Director rejected borrowing request. Reason: {$reason}");
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Rejected', "Borrowing request declined. Reason: {$reason}");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
@@ -200,7 +199,7 @@ class BorrowingController extends BaseController
 
         $this->sendBorrowingEmail($ticket['user_id'], $ticketId, 'declined', "Your borrowing request has been declined. Reason: {$reason}");
 
-        return $this->successResponse('Borrowing request rejected by Director.', [
+        return $this->successResponse('Borrowing request declined.', [
             'borrowing_id' => $borrowing['id'],
             'status'       => 'cancelled',
         ]);

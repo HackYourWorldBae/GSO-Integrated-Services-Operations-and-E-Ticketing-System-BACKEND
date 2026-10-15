@@ -63,6 +63,7 @@ class AuthController extends BaseController
     {
         $firstName       = trim((string) ($this->request->getPost('first_name') ?? ''));
         $lastName        = trim((string) ($this->request->getPost('last_name') ?? ''));
+        $nameExtension   = trim((string) ($this->request->getPost('name_extension') ?? ''));
         $role            = trim((string) ($this->request->getPost('role') ?? ''));
         $studentIdNumber = trim((string) ($this->request->getPost('student_id_number') ?? ''));
         $contactNumber   = trim((string) ($this->request->getPost('contact_number') ?? ''));
@@ -327,6 +328,10 @@ class AuthController extends BaseController
 
         if ($this->userModel->db->fieldExists('id_selfie_image', 'users')) {
             $insertData['id_selfie_image'] = $idSelfieRelativePath;
+        }
+
+        if (!empty($nameExtension) && $this->userModel->db->fieldExists('name_extension', 'users')) {
+            $insertData['name_extension'] = sanitize_string($nameExtension);
         }
 
         if (!$this->userModel->skipValidation(true)->insert($insertData)) {
@@ -1153,6 +1158,12 @@ class AuthController extends BaseController
             if (isset($body['last_name'])) {
                 $updateData['last_name'] = sanitize_string($body['last_name']);
             }
+            if (array_key_exists('name_extension', $body)) {
+                $rawExt = trim((string) ($body['name_extension'] ?? ''));
+                if (!empty($caps['has_name_extension'])) {
+                    $updateData['name_extension'] = $rawExt !== '' ? sanitize_string($rawExt) : null;
+                }
+            }
             if (isset($body['contact_number'])) {
                 $updateData['contact_number'] = sanitize_string($body['contact_number']);
             }
@@ -1219,12 +1230,17 @@ class AuthController extends BaseController
             $this->userModel->skipValidation(true)->update($userId, $updateData);
 
             // If personnel updated their name, synchronize linked personnel roster record
-            if ($isPersonnel && (isset($updateData['first_name']) || isset($updateData['last_name']))) {
+            if ($isPersonnel && (isset($updateData['first_name']) || isset($updateData['last_name']) || array_key_exists('name_extension', $updateData))) {
                 try {
                     $personnelModel = new \App\Models\PersonnelModel();
                     $updatedFirst = $updateData['first_name'] ?? ($currentUser['first_name'] ?? '');
                     $updatedLast  = $updateData['last_name']  ?? ($currentUser['last_name'] ?? '');
-                    $workerName   = trim("{$updatedFirst} {$updatedLast}");
+                    $updatedExt   = array_key_exists('name_extension', $updateData)
+                        ? $updateData['name_extension']
+                        : ($currentUser['name_extension'] ?? null);
+                    
+                    $nameParts = array_filter([$updatedFirst, $updatedLast, $updatedExt], fn($p) => $p !== null && $p !== '');
+                    $workerName = trim(implode(' ', $nameParts));
 
                     $linked = $personnelModel->where('user_id', $userId)->first();
                     if ($linked) {

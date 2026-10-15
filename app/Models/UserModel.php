@@ -26,6 +26,7 @@ class UserModel extends Model
         'id',
         'first_name',
         'last_name',
+        'name_extension',
         'username',
         'email',
         'password_hash',
@@ -132,6 +133,9 @@ class UserModel extends Model
             ? (int) $user['email_notifications_enabled']
             : 1;
 
+        // Ensure name_extension is null-safe for frontend consumers
+        $user['name_extension'] = $user['name_extension'] ?? null;
+
         // If personnel / worker, ensure username is populated (falling back to email if username column was null)
         if (in_array(strtolower($user['role'] ?? ''), ['worker', 'personnel'], true)) {
             if (empty($user['username']) && !empty($user['email'])) {
@@ -225,6 +229,7 @@ class UserModel extends Model
         self::$schemaCapabilities = [
             'user_fields'            => $userFields,
             'has_username'           => in_array('username', $userFields, true),
+            'has_name_extension'     => in_array('name_extension', $userFields, true),
             'has_last_login_at'      => in_array('last_login_at', $userFields, true),
             'has_employee_type'      => in_array('employee_type', $userFields, true),
             'has_college'            => in_array('college', $userFields, true),
@@ -274,6 +279,9 @@ class UserModel extends Model
                         ->orLike('users.last_name', $search)
                         ->orLike('users.email', $search)
                         ->orLike('users.student_id_number', $search);
+                if (!empty($caps['has_name_extension'])) {
+                    $builder->orLike('users.name_extension', $search);
+                }
                 if (!empty($personnelUserIds)) {
                     $builder->orWhereIn('users.id', $personnelUserIds);
                 }
@@ -637,6 +645,9 @@ class UserModel extends Model
                         ->orLike('users.last_name', $search)
                         ->orLike('users.email', $search)
                         ->orLike('users.student_id_number', $search);
+                if (!empty($caps['has_name_extension'])) {
+                    $builder->orLike('users.name_extension', $search);
+                }
                 if (!empty($personnelUserIds)) {
                     $builder->orWhereIn('users.id', $personnelUserIds);
                 }
@@ -732,6 +743,10 @@ class UserModel extends Model
                     'users.status',
                     'users.created_at',
                 ];
+
+                if (!empty($caps['has_name_extension'])) {
+                    $selects[] = 'users.name_extension';
+                }
 
                 if ($caps['has_last_login_at']) {
                     $selects[] = 'users.last_login_at';

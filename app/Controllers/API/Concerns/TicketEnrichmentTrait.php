@@ -131,7 +131,7 @@ trait TicketEnrichmentTrait
             $ticket['unit_code'] = array_search($ticket['unit_id'], self::UNIT_MAP) ?: null;
 
             $ticket['details'] = match((int) $ticket['unit_id']) {
-                1       => $fgmuDetails[$id]  ?? null,
+                1       => $fgmuDetails[$id]  ?? ($borrowingMap[$id] ?? null),
                 2       => $leauDetails[$id]  ?? ($borrowingMap[$id] ?? null),
                 3       => $ssuIrDetails[$id] ?? null,
                 default => null,

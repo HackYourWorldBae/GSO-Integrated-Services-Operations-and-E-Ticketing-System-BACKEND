@@ -819,6 +819,14 @@ class BorrowingController extends BaseController
     public function getQueue(?string $unit = null): ResponseInterface
     {
         $unitParam = $unit ?? $this->request->getGet('unit') ?? $this->request->getGet('unit_id');
+        if (empty($unitParam)) {
+            $uri = $this->request->getUri();
+            $segments = $uri->getSegments();
+            $lastSeg = end($segments);
+            if (in_array(strtolower((string)$lastSeg), ['fgmu', 'leau', 'ssu', '1', '2', '3'])) {
+                $unitParam = $lastSeg;
+            }
+        }
         $targetUnitId = !empty($unitParam) ? $this->resolveUnitId($unitParam) : ($this->currentUserUnitId() ?? 2);
         if ($targetUnitId === null) {
             $targetUnitId = 2;

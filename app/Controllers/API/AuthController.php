@@ -1592,14 +1592,14 @@ class AuthController extends BaseController
         return $this->successResponse('Official document signatures retrieved.', [
             'director' => $director ? [
                 'id'            => $director['id'],
-                'name'          => trim(($director['first_name'] ?? '') . ' ' . ($director['last_name'] ?? '')),
+                'name'          => trim(($director['first_name'] ?? '') . ' ' . ($director['last_name'] ?? '') . (!empty($director['name_extension']) ? (' ' . trim($director['name_extension'])) : '')),
                 'role'          => 'director',
                 'title'         => 'GSO Director / Authorized Rep.',
                 'signature_url' => !empty($director['signature_path']) ? base_url('api/v1/auth/signature/' . $director['id']) : null,
             ] : null,
             'dispatcher' => $dispatcher ? [
                 'id'            => $dispatcher['id'],
-                'name'          => trim(($dispatcher['first_name'] ?? '') . ' ' . ($dispatcher['last_name'] ?? '')),
+                'name'          => trim(($dispatcher['first_name'] ?? '') . ' ' . ($dispatcher['last_name'] ?? '') . (!empty($dispatcher['name_extension']) ? (' ' . trim($dispatcher['name_extension'])) : '')),
                 'role'          => 'admin',
                 'unit_id'       => $dispatcher['unit_id'] ?? $unitId,
                 'title'         => ($unitParam ? strtoupper(trim((string)$unitParam)) : 'Unit') . ' Dispatcher / In-Charge',

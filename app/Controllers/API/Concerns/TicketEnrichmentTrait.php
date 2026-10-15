@@ -73,7 +73,7 @@ trait TicketEnrichmentTrait
         $usersMap = [];
         if (!empty($userIds)) {
             $userRows = $db->table('users')
-                           ->select('id, first_name, last_name, email, role as requester_role, role, unit_id, signature_path, student_id_number, student_type, employee_type, organization_name, college, contact_number as requester_contact')
+                           ->select('id, first_name, last_name, name_extension, email, role as requester_role, role, unit_id, signature_path, student_id_number, student_type, employee_type, organization_name, college, contact_number as requester_contact')
                            ->whereIn('id', $userIds)
                            ->get()
                            ->getResultArray();
@@ -150,12 +150,14 @@ trait TicketEnrichmentTrait
                 if (empty($ticket['student_type']))      $ticket['student_type']      = $u['student_type'] ?? null;
                 if (empty($ticket['organization_name'])) $ticket['organization_name'] = $u['organization_name'] ?? null;
                 if (empty($ticket['college']))           $ticket['college']           = $u['college'] ?? null;
-                $ticket['requester'] = trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? ''));
+                $uExt = !empty($u['name_extension']) ? (' ' . trim($u['name_extension'])) : '';
+                $ticket['requester'] = trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? '') . $uExt);
                 $ticket['requestedBy'] = $ticket['requester'];
                 $ticket['requested_by'] = $ticket['requester'];
                 $ticket['user'] = $u;
             } else if (!empty($ticket['first_name']) || !empty($ticket['last_name'])) {
-                $ticket['requester'] = trim(($ticket['first_name'] ?? '') . ' ' . ($ticket['last_name'] ?? ''));
+                $dirExt = !empty($ticket['name_extension']) ? (' ' . trim($ticket['name_extension'])) : '';
+                $ticket['requester'] = trim(($ticket['first_name'] ?? '') . ' ' . ($ticket['last_name'] ?? '') . $dirExt);
                 $ticket['requestedBy'] = $ticket['requester'];
                 $ticket['requested_by'] = $ticket['requester'];
                 if (empty($ticket['contact_number']) && !empty($ticket['requester_contact'])) {
@@ -334,11 +336,13 @@ trait TicketEnrichmentTrait
             // Reviewer / Approver profile
             $revUser = !empty($ticket['reviewed_by']) ? ($usersMap[$ticket['reviewed_by']] ?? null) : null;
             if ($revUser) {
+                $rExt = !empty($revUser['name_extension']) ? (' ' . trim($revUser['name_extension'])) : '';
                 $ticket['reviewed_by_user'] = [
                     'id'            => $revUser['id'],
                     'first_name'    => $revUser['first_name'],
                     'last_name'     => $revUser['last_name'],
-                    'name'          => trim(($revUser['first_name'] ?? '') . ' ' . ($revUser['last_name'] ?? '')),
+                    'name_extension'=> $revUser['name_extension'] ?? null,
+                    'name'          => trim(($revUser['first_name'] ?? '') . ' ' . ($revUser['last_name'] ?? '') . $rExt),
                     'role'          => $revUser['role'] ?? $revUser['requester_role'],
                     'unit_id'       => $revUser['unit_id'] ?? null,
                     'signature_url' => !empty($revUser['signature_path']) ? base_url('api/v1/auth/signature/' . $revUser['id']) : null,
@@ -355,11 +359,13 @@ trait TicketEnrichmentTrait
             $dispLog = $dispatchLogsMap[$id] ?? null;
             $dispUser = ($dispLog && !empty($dispLog['user_id'])) ? ($usersMap[$dispLog['user_id']] ?? null) : null;
             if ($dispUser) {
+                $dExt = !empty($dispUser['name_extension']) ? (' ' . trim($dispUser['name_extension'])) : '';
                 $ticket['dispatched_by_user'] = [
                     'id'            => $dispUser['id'],
                     'first_name'    => $dispUser['first_name'],
                     'last_name'     => $dispUser['last_name'],
-                    'name'          => trim(($dispUser['first_name'] ?? '') . ' ' . ($dispUser['last_name'] ?? '')),
+                    'name_extension'=> $dispUser['name_extension'] ?? null,
+                    'name'          => trim(($dispUser['first_name'] ?? '') . ' ' . ($dispUser['last_name'] ?? '') . $dExt),
                     'role'          => $dispUser['role'] ?? $dispUser['requester_role'],
                     'unit_id'       => $dispUser['unit_id'] ?? null,
                     'signature_url' => !empty($dispUser['signature_path']) ? base_url('api/v1/auth/signature/' . $dispUser['id']) : null,

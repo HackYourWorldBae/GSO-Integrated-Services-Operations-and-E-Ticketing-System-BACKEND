@@ -139,15 +139,15 @@ class BorrowingWorkflow
     public static function getTicketStatusLabel(string $borrowingStatus, string $ticketStatus = 'approved'): string
     {
         return match ($borrowingStatus) {
-            self::STATUS_PENDING_DIRECTOR   => 'Pending Director Approval',
+            self::STATUS_PENDING_DIRECTOR   => 'Pending Approval',
             self::STATUS_APPROVED_DIRECTOR  => 'Approved - Awaiting Inventory Assignment',
             self::STATUS_INVENTORY_ASSIGNED => 'Inventory Assigned - Awaiting Pickup Prep',
             self::STATUS_READY_FOR_PICKUP   => 'Ready for Pickup',
             self::STATUS_PICKED_UP          => 'Item Picked Up',
             self::STATUS_OVERDUE            => 'Overdue for Return',
             self::STATUS_RETURNED           => 'Returned & Completed',
-            self::STATUS_CANCELLED          => ($ticketStatus === 'declined' ? 'Declined by Director' : 'Cancelled'),
-            default                         => ($ticketStatus === 'approved' ? 'Approved - Awaiting Inventory Assignment' : 'Pending Director Approval'),
+            self::STATUS_CANCELLED          => ($ticketStatus === 'declined' ? 'Declined' : 'Cancelled'),
+            default                         => ($ticketStatus === 'approved' ? 'Approved - Awaiting Inventory Assignment' : 'Pending Approval'),
         };
     }
 }

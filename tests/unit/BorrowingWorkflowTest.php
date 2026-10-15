@@ -153,11 +153,11 @@ final class BorrowingWorkflowTest extends CIUnitTestCase
             BorrowingWorkflow::getTicketStatusLabel('returned')
         );
         $this->assertSame(
-            'Pending Director Approval',
+            'Pending Approval',
             BorrowingWorkflow::getTicketStatusLabel('pending_director')
         );
         $this->assertSame(
-            'Declined by Director',
+            'Declined',
             BorrowingWorkflow::getTicketStatusLabel('cancelled', 'declined')
         );
         $this->assertSame(

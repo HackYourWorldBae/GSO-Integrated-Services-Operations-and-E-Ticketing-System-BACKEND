@@ -232,7 +232,7 @@ trait TicketEnrichmentTrait
                     } else {
                         $ticket['status_label'] = in_array($tStatus, ['approved', 'approved_director'], true)
                             ? 'Approved - Awaiting Inventory Assignment'
-                            : 'Pending Director Approval';
+                            : 'Pending Approval';
                     }
                 }
             }

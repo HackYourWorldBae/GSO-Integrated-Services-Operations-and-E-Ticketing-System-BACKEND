@@ -166,6 +166,38 @@ class TicketController extends BaseController
             "Your service request #{$ticketId} has been successfully cancelled."
         );
 
+        // Notify concerned Unit Admins that the ticket has been cancelled
+        $db = \Config\Database::connect();
+        $unitAdmins = $db->query(
+            "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+            [(int) $ticket['unit_id']]
+        )->getResultArray();
+        foreach ($unitAdmins as $uAdmin) {
+            if ((string) $uAdmin['id'] !== (string) $userId) {
+                $this->notificationModel->createNotification(
+                    $uAdmin['id'],
+                    'info',
+                    "Ticket #{$ticketId} Cancelled",
+                    "Ticket #{$ticketId} ({$ticket['service_type']}) was cancelled. Reason: {$reason}"
+                );
+            }
+        }
+
+        // Notify Executive Director of cancelled requests
+        $directors = $db->query(
+            "SELECT id FROM users WHERE role = 'director' AND status = 'Active'"
+        )->getResultArray();
+        foreach ($directors as $dir) {
+            if ((string) $dir['id'] !== (string) $userId) {
+                $this->notificationModel->createNotification(
+                    $dir['id'],
+                    'info',
+                    "Ticket #{$ticketId} Cancelled",
+                    "Ticket #{$ticketId} ({$ticket['service_type']}) was cancelled. Reason: {$reason}"
+                );
+            }
+        }
+
         return $this->successResponse('Ticket cancelled successfully.', [
             'ticket_id' => $ticketId,
             'status'    => 'cancelled'

@@ -242,8 +242,11 @@ class TicketModel extends Model
         $builder = $this->select('tickets.*, users.first_name, users.last_name, users.email, users.role as requester_role, users.student_id_number, users.contact_number as requester_contact')
                         ->join('users', 'users.id = tickets.user_id', 'left')
                         ->where('tickets.unit_id', $unitId)
-                        ->where('tickets.is_archived', 1)
-                        ->orderBy('tickets.completed_at', 'DESC');
+                        ->groupStart()
+                            ->where('tickets.is_archived', 1)
+                            ->orWhereIn('tickets.status', ['closed', 'completed', 'resolved', 'declined', 'cancelled'])
+                        ->groupEnd()
+                        ->orderBy('COALESCE(tickets.completed_at, tickets.updated_at, tickets.submitted_at)', 'DESC', false);
 
         if (!empty($filters['search'])) {
             $builder->like('tickets.id', $filters['search']);

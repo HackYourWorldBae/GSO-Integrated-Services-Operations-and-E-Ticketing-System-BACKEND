@@ -745,6 +745,22 @@ class BorrowingController extends BaseController
                 "Your borrowing request #{$ticketId} has been cancelled. Reason: {$reason}"
             );
 
+            // Also notify concerned unit admins if cancelled by someone else
+            $unitAdmins = $db->query(
+                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                [(int) $ticket['unit_id']]
+            )->getResultArray();
+            foreach ($unitAdmins as $uAdmin) {
+                if ((string) $uAdmin['id'] !== (string) $this->currentUserId()) {
+                    $this->notificationModel->createNotification(
+                        $uAdmin['id'],
+                        'info',
+                        "Borrowing Request Cancelled",
+                        "Borrowing request #{$ticketId} was cancelled. Reason: {$reason}"
+                    );
+                }
+            }
+
             return $this->successResponse('Borrowing request cancelled.', [
                 'borrowing_id' => $borrowing['id'],
                 'status'       => 'cancelled',

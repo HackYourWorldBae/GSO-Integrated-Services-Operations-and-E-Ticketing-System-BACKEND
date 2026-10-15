@@ -38,6 +38,23 @@ BEGIN
     -- 1. USERS TABLE UPGRADES
     -- ------------------------------------------------------------------------
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'users') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'name_extension') THEN
+            ALTER TABLE `users` ADD COLUMN `name_extension` VARCHAR(20) NULL DEFAULT NULL AFTER `last_name`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'username') THEN
+            ALTER TABLE `users` ADD COLUMN `username` VARCHAR(100) NULL DEFAULT NULL AFTER `name_extension`;
+            UPDATE `users` SET `username` = `email` WHERE `role` = 'worker' AND (`username` IS NULL OR `username` = '');
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'users' AND index_name = 'idx_users_username') THEN
+            ALTER TABLE `users` ADD INDEX `idx_users_username` (`username`);
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'signature_path') THEN
+            ALTER TABLE `users` ADD COLUMN `signature_path` VARCHAR(255) NULL DEFAULT NULL AFTER `avatar_path`;
+        END IF;
+
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'student_type') THEN
             ALTER TABLE `users` ADD COLUMN `student_type` VARCHAR(50) NULL AFTER `student_id_number`;
         END IF;
@@ -100,7 +117,9 @@ BEGIN
                 (p.user_id IS NULL OR p.user_id = '')
                 AND (
                     TRIM(LOWER(p.name)) = TRIM(LOWER(CONCAT(u.first_name, ' ', u.last_name)))
+                    OR TRIM(LOWER(p.name)) = TRIM(LOWER(CONCAT(u.first_name, ' ', u.last_name, ' ', COALESCE(u.name_extension, ''))))
                     OR TRIM(LOWER(REPLACE(p.name, ' ', ''))) = TRIM(LOWER(REPLACE(CONCAT(u.first_name, u.last_name), ' ', '')))
+                    OR TRIM(LOWER(REPLACE(p.name, ' ', ''))) = TRIM(LOWER(REPLACE(CONCAT(u.first_name, u.last_name, COALESCE(u.name_extension, '')), ' ', '')))
                 )
                 AND u.role IN ('worker', 'personnel', 'employee', 'staff')
             )
@@ -490,6 +509,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `id` varchar(36) NOT NULL,
   `first_name` varchar(100) NOT NULL,
   `last_name` varchar(100) NOT NULL,
+  `name_extension` varchar(20) DEFAULT NULL,
+  `username` varchar(100) DEFAULT NULL,
   `email` varchar(255) NOT NULL,
   `password_hash` text NOT NULL,
   `contact_number` varchar(30) DEFAULT NULL,
@@ -517,6 +538,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   KEY `idx_users_role` (`role`),
   KEY `idx_users_status` (`status`),
   KEY `idx_users_unit` (`unit_id`),
+  KEY `idx_users_username` (`username`),
   KEY `idx_users_last_login` (`last_login_at`),
   CONSTRAINT `fk_users_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

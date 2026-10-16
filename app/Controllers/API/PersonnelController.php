@@ -226,48 +226,144 @@ class PersonnelController extends BaseController
                 $extensionDays = (int) ($body['extension_days'] ?? 1);
                 $extendedDate  = sanitize_string($body['extended_completion_date'] ?? '');
 
+                $processedTicketIds = [];
+                $extendedTickets    = [];
+                $maintainedTickets  = [];
+
                 foreach ($activeAssignments as $assignment) {
-                    $ticket = $ticketModel->find($assignment['ticket_id']);
+                    $ticketId = $assignment['ticket_id'];
+                    if (in_array($ticketId, $processedTicketIds, true)) {
+                        continue;
+                    }
+                    $processedTicketIds[] = $ticketId;
+
+                    $ticket = $ticketModel->find($ticketId);
                     if (!$ticket) {
                         continue;
                     }
 
-                    $baseDate = !empty($ticket['extended_completion_date'])
-                        ? new \DateTime($ticket['extended_completion_date'])
-                        : (!empty($assignment['implementation_date'])
-                            ? new \DateTime($assignment['implementation_date'])
-                            : new \DateTime());
+                    // Check all active assignments for this ticket to determine solo vs team
+                    $allTicketAssignments = $assignmentModel
+                        ->where('ticket_id', $ticketId)
+                        ->where('completed_at IS NULL')
+                        ->findAll();
 
-                    $newTargetDate = !empty($extendedDate)
-                        ? $extendedDate
-                        : \App\Libraries\WorkCalendar::addWorkingDays($baseDate, max(1, $extensionDays))->format('Y-m-d');
+                    $totalAssigned = count($allTicketAssignments);
 
-                    $totalDays = (int) ($ticket['extension_days'] ?? 0) + max(1, $extensionDays);
+                    $shouldExtend     = false;
+                    $extendReasonType = 'solo';
+                    $activeWorkers    = [];
+                    $onLeaveWorkers   = [];
 
-                    $ticketModel->update($ticket['id'], [
-                        'extension_days'           => $totalDays,
-                        'extended_completion_date' => $newTargetDate,
-                        'extension_reason'         => "Assigned worker {$worker['name']} on leave ({$leaveReason})",
-                        'updated_at'               => date('Y-m-d H:i:s'),
-                    ]);
+                    if ($totalAssigned <= 1) {
+                        // Solo assigned job: Always extend timeline since the sole worker is going on leave
+                        $shouldExtend     = true;
+                        $extendReasonType = 'solo';
+                        $onLeaveWorkers[] = $worker['name'];
+                    } else {
+                        // Team job: Multiple personnel assigned.
+                        // Count how many assigned personnel are on leave (including the current worker)
+                        $onLeaveCount = 0;
+                        foreach ($allTicketAssignments as $ta) {
+                            if ((string) $ta['personnel_id'] === (string) $personnelId) {
+                                $onLeaveCount++;
+                                $onLeaveWorkers[] = $worker['name'];
+                            } else {
+                                $otherWorker = $this->personnelModel->find($ta['personnel_id']);
+                                if ($otherWorker && in_array($otherWorker['status'], ['on_leave', 'On Leave'], true)) {
+                                    $onLeaveCount++;
+                                    $onLeaveWorkers[] = $otherWorker['name'] ?? 'Staff member';
+                                } else {
+                                    $activeWorkers[] = $otherWorker['name'] ?? 'Staff member';
+                                }
+                            }
+                        }
 
-                    $assignmentModel->update($assignment['id'], [
-                        'implementation_date' => $newTargetDate,
-                    ]);
+                        // Rule: Only extend if most or all personnel assigned to the ticket are on leave
+                        // (i.e. strict majority: > totalAssigned / 2)
+                        if ($onLeaveCount > ($totalAssigned / 2)) {
+                            $shouldExtend     = true;
+                            $extendReasonType = 'team_shortage';
+                        } else {
+                            $shouldExtend     = false;
+                            $extendReasonType = 'team_maintained';
+                        }
+                    }
 
-                    $this->logModel->logAction(
-                        $ticket['id'],
-                        $this->currentUserId(),
-                        'Timeline Extended (Staff Leave)',
-                        "Target completion adjusted to {$newTargetDate} (+{$extensionDays} working days) because {$worker['name']} is on leave: {$leaveReason}."
-                    );
+                    if ($shouldExtend) {
+                        $baseDate = !empty($ticket['extended_completion_date'])
+                            ? new \DateTime($ticket['extended_completion_date'])
+                            : (!empty($ticket['target_completion_date'])
+                                ? new \DateTime($ticket['target_completion_date'])
+                                : (!empty($assignment['implementation_date'])
+                                    ? new \DateTime($assignment['implementation_date'])
+                                    : new \DateTime()));
 
-                    $notificationModel->createNotification(
-                        $ticket['user_id'],
-                        'warning',
-                        "Ticket #{$ticket['id']} Extended",
-                        "Schedule adjusted to {$newTargetDate} due to staff leave."
-                    );
+                        $newTargetDate = !empty($extendedDate)
+                            ? $extendedDate
+                            : \App\Libraries\WorkCalendar::addWorkingDays($baseDate, max(1, $extensionDays))->format('Y-m-d');
+
+                        $totalDays = (int) ($ticket['extension_days'] ?? 0) + max(1, $extensionDays);
+
+                        $extensionReason = ($extendReasonType === 'solo')
+                            ? "Assigned solo worker {$worker['name']} on leave ({$leaveReason})"
+                            : "Most/all assigned team on leave (" . count($onLeaveWorkers) . "/{$totalAssigned}): " . implode(', ', $onLeaveWorkers) . " ({$leaveReason})";
+
+                        $ticketModel->update($ticket['id'], [
+                            'extension_days'           => $totalDays,
+                            'extended_completion_date' => $newTargetDate,
+                            'extension_reason'         => $extensionReason,
+                            'updated_at'               => date('Y-m-d H:i:s'),
+                        ]);
+
+                        $assignmentModel->where('ticket_id', $ticket['id'])
+                            ->where('completed_at IS NULL')
+                            ->set(['implementation_date' => $newTargetDate])
+                            ->update();
+
+                        $logDetail = ($extendReasonType === 'solo')
+                            ? "Target completion adjusted to {$newTargetDate} (+{$extensionDays} working days) because solo worker {$worker['name']} is on leave: {$leaveReason}."
+                            : "Target completion adjusted to {$newTargetDate} (+{$extensionDays} working days) because most/all team personnel (" . count($onLeaveWorkers) . "/{$totalAssigned}) are on leave: {$leaveReason}.";
+
+                        $this->logModel->logAction(
+                            $ticket['id'],
+                            $this->currentUserId(),
+                            'Timeline Extended (Staff Leave)',
+                            $logDetail
+                        );
+
+                        $notificationModel->createNotification(
+                            $ticket['user_id'],
+                            'warning',
+                            "Ticket #{$ticket['id']} Extended",
+                            "Schedule adjusted to {$newTargetDate} due to staff leave."
+                        );
+
+                        $extendedTickets[] = [
+                            'ticket_id'      => $ticket['id'],
+                            'reason_type'    => $extendReasonType,
+                            'new_date'       => $newTargetDate,
+                            'extension_days' => $extensionDays,
+                        ];
+                    } else {
+                        // Team job with other active workers: do not extend timeline
+                        $activeNames = !empty($activeWorkers) ? implode(', ', $activeWorkers) : 'other personnel';
+                        $logDetail = "Assigned worker {$worker['name']} is on leave ({$leaveReason}). Ticket schedule remains unchanged as other assigned team personnel ({$activeNames}) continue handling the job.";
+
+                        $this->logModel->logAction(
+                            $ticket['id'],
+                            $this->currentUserId(),
+                            'Staff Leave (Team Maintained)',
+                            $logDetail
+                        );
+
+                        $maintainedTickets[] = [
+                            'ticket_id'        => $ticket['id'],
+                            'total_assigned'   => $totalAssigned,
+                            'on_leave_count'   => count($onLeaveWorkers),
+                            'active_personnel' => $activeWorkers,
+                        ];
+                    }
                 }
             }
         }
@@ -278,8 +374,10 @@ class PersonnelController extends BaseController
         ]);
 
         return $this->successResponse("Personnel status updated to '{$status}'.", [
-            'personnel_id' => $personnelId,
-            'status'       => $status,
+            'personnel_id'       => $personnelId,
+            'status'             => $status,
+            'extended_tickets'   => $extendedTickets ?? [],
+            'maintained_tickets' => $maintainedTickets ?? [],
         ]);
     }
 

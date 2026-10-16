@@ -112,6 +112,38 @@ class PersonnelModel extends Model
             $assignmentMap[$a['personnel_id']][] = $a;
         }
 
+        // Query team stats for all active tickets across these workers
+        $ticketIds = array_values(array_unique(array_filter(array_column($assignments, 'ticket_id'))));
+        $ticketTeamStats = [];
+        if (!empty($ticketIds)) {
+            $allTeamRows = $db->table('ticket_assignments ta')
+                ->select('ta.ticket_id, ta.personnel_id, p.name as worker_name, p.status as worker_status')
+                ->join('personnel p', 'p.id = ta.personnel_id', 'left')
+                ->whereIn('ta.ticket_id', $ticketIds)
+                ->where('ta.completed_at IS NULL')
+                ->get()->getResultArray();
+
+            foreach ($allTeamRows as $r) {
+                $tId = $r['ticket_id'];
+                if (!isset($ticketTeamStats[$tId])) {
+                    $ticketTeamStats[$tId] = [
+                        'total_workers' => 0,
+                        'workers'       => [],
+                        'on_leave_count'=> 0,
+                    ];
+                }
+                $ticketTeamStats[$tId]['total_workers']++;
+                $ticketTeamStats[$tId]['workers'][] = [
+                    'id'     => $r['personnel_id'],
+                    'name'   => $r['worker_name'],
+                    'status' => $r['worker_status'],
+                ];
+                if (in_array($r['worker_status'], ['on_leave', 'On Leave'], true)) {
+                    $ticketTeamStats[$tId]['on_leave_count']++;
+                }
+            }
+        }
+
         foreach ($personnel as &$p) {
             $rawAssignments = $assignmentMap[$p['id']] ?? [];
             $formattedAssignments = [];
@@ -120,20 +152,36 @@ class PersonnelModel extends Model
                     ? ($a['project_title'] ?: 'Office Project')
                     : (!empty($a['service_type']) ? $a['service_type'] : ($a['task_notes'] ?? 'Assigned Work'));
 
+                $teamInfo = $ticketTeamStats[$a['ticket_id']] ?? null;
+                $totalTeam = $teamInfo['total_workers'] ?? 1;
+                $isSolo = ($totalTeam <= 1);
+                $otherMembers = [];
+                if ($teamInfo) {
+                    foreach ($teamInfo['workers'] as $w) {
+                        if ((string)$w['id'] !== (string)$p['id'] && !empty($w['name'])) {
+                            $otherMembers[] = $w['name'];
+                        }
+                    }
+                }
+
                 $formattedAssignments[] = [
-                    'id'                  => $a['id'],
-                    'ticket_id'           => $a['ticket_id'],
-                    'service_type'        => $a['service_type'] ?? null,
-                    'is_project'          => (int) ($a['is_project'] ?? 0),
-                    'project_title'       => $a['project_title'] ?? null,
-                    'task'                => $taskName,
-                    'implementation_date' => $a['implementation_date'] ?? null,
-                    'ticket_status'       => $a['ticket_status'] ?? null,
-                    'is_emergency'        => (int) ($a['is_emergency'] ?? 0),
-                    'queue_order'         => (int) ($a['queue_order'] ?? ($idx + 1)),
-                    'status'              => $a['status'] ?? 'active',
-                    'eodb_tier'           => $a['eodb_tier'] ?? null,
+                    'id'                     => $a['id'],
+                    'ticket_id'              => $a['ticket_id'],
+                    'service_type'           => $a['service_type'] ?? null,
+                    'is_project'             => (int) ($a['is_project'] ?? 0),
+                    'project_title'          => $a['project_title'] ?? null,
+                    'task'                   => $taskName,
+                    'implementation_date'    => $a['implementation_date'] ?? null,
+                    'ticket_status'          => $a['ticket_status'] ?? null,
+                    'is_emergency'           => (int) ($a['is_emergency'] ?? 0),
+                    'queue_order'            => (int) ($a['queue_order'] ?? ($idx + 1)),
+                    'status'                 => $a['status'] ?? 'active',
+                    'eodb_tier'              => $a['eodb_tier'] ?? null,
                     'target_completion_date' => $a['target_completion_date'] ?? null,
+                    'is_solo'                => $isSolo,
+                    'team_size'              => $totalTeam,
+                    'other_team_members'     => $otherMembers,
+                    'on_leave_team_count'    => $teamInfo['on_leave_count'] ?? 0,
                 ];
             }
 
@@ -154,6 +202,10 @@ class PersonnelModel extends Model
             $p['ticket_status']       = $formattedAssignments[0]['ticket_status'] ?? null;
             $p['service_type']        = $formattedAssignments[0]['service_type'] ?? null;
             $p['is_emergency']        = $formattedAssignments[0]['is_emergency'] ?? 0;
+            $p['is_solo_job']         = $formattedAssignments[0]['is_solo'] ?? true;
+            $p['team_size']           = $formattedAssignments[0]['team_size'] ?? 1;
+            $p['other_team_members']  = $formattedAssignments[0]['other_team_members'] ?? [];
+            $p['on_leave_team_count'] = $formattedAssignments[0]['on_leave_team_count'] ?? 0;
 
             $p['next_assignment_id'] = $formattedAssignments[1]['ticket_id'] ?? null;
             $p['next_is_project']    = $formattedAssignments[1]['is_project'] ?? 0;

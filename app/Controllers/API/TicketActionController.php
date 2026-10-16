@@ -1308,8 +1308,55 @@ class TicketActionController extends BaseController
         $personnelModel = new \App\Models\PersonnelModel();
         foreach ($assignments as $ass) {
             if (!empty($ass['personnel_id'])) {
+                // Check if worker has pending active or paused assignments
+                $otherActiveAss = $db->table('ticket_assignments')
+                    ->where('personnel_id', $ass['personnel_id'])
+                    ->where('ticket_id !=', $ticketId)
+                    ->where('completed_at IS NULL')
+                    ->get()->getResultArray();
+
+                $hasRunning = false;
+                foreach ($otherActiveAss as $other) {
+                    if ($other['status'] === 'paused') {
+                        // Unpause this assignment as the emergency job is now complete
+                        $db->table('ticket_assignments')
+                            ->where('id', $other['id'])
+                            ->update(['status' => 'active']);
+
+                        $hasRunning = true;
+
+                        // Check if the preempted ticket still has other paused assignments
+                        $remainingPaused = $db->table('ticket_assignments')
+                            ->where('ticket_id', $other['ticket_id'])
+                            ->where('status', 'paused')
+                            ->where('completed_at IS NULL')
+                            ->countAllResults();
+
+                        if ($remainingPaused === 0) {
+                            $db->table('tickets')
+                                ->where('id', $other['ticket_id'])
+                                ->where('status_label', 'Paused (Emergency Preempted)')
+                                ->update([
+                                    'status_label' => 'Job Started',
+                                    'updated_at'   => date('Y-m-d H:i:s'),
+                                ]);
+
+                            $this->logModel->logAction(
+                                $other['ticket_id'],
+                                $this->currentUserId(),
+                                'Status Changed',
+                                "Work resumed from emergency preemption as personnel returned from completed Ticket #{$ticketId}."
+                            );
+                        }
+                    } elseif ($other['status'] === 'active') {
+                        $hasRunning = true;
+                    }
+                }
+
+                $newWorkerStatus = $hasRunning ? 'working' : 'available';
+
                 $personnelModel->update($ass['personnel_id'], [
-                    'status'     => 'available',
+                    'status'     => $newWorkerStatus,
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
             }

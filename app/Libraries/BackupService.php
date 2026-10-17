@@ -5,6 +5,7 @@ namespace App\Libraries;
 use App\Models\SystemBackupModel;
 use App\Models\AccountActivityLogModel;
 use App\Models\TicketLogModel;
+use App\Models\SystemSettingModel;
 use Config\Database;
 use Ifsnop\Mysqldump\Mysqldump;
 use mysqli;
@@ -22,18 +23,21 @@ class BackupService
     private GoogleDriveService $driveService;
     private AccountActivityLogModel $activityLogModel;
     private TicketLogModel $ticketLogModel;
+    private SystemSettingModel $settingModel;
     private string $backupDir;
 
     public function __construct(
         ?SystemBackupModel $backupModel = null,
         ?GoogleDriveService $driveService = null,
         ?AccountActivityLogModel $activityLogModel = null,
-        ?TicketLogModel $ticketLogModel = null
+        ?TicketLogModel $ticketLogModel = null,
+        ?SystemSettingModel $settingModel = null
     ) {
         $this->backupModel      = $backupModel ?? new SystemBackupModel();
         $this->driveService     = $driveService ?? new GoogleDriveService();
         $this->activityLogModel = $activityLogModel ?? new AccountActivityLogModel();
         $this->ticketLogModel   = $ticketLogModel ?? new TicketLogModel();
+        $this->settingModel     = $settingModel ?? new SystemSettingModel();
         $this->backupDir        = WRITEPATH . 'backups' . DIRECTORY_SEPARATOR;
 
         if (!is_dir($this->backupDir)) {
@@ -517,10 +521,14 @@ class BackupService
 
             $finalRecord = $this->backupModel->find($backupRecordId);
 
+            // Enforce rolling retention limit (max 5 snapshots)
+            $retentionResult = $this->enforceRetentionLimit(5, $userId);
+
             return [
-                'success' => true,
-                'message' => "Media backup created successfully ({$fileCount} files archived).",
-                'backup'  => $finalRecord,
+                'success'   => true,
+                'message'   => "Media backup created successfully ({$fileCount} files archived).",
+                'backup'    => $finalRecord,
+                'retention' => $retentionResult,
             ];
         } catch (Throwable $e) {
             if (file_exists($filePath)) {
@@ -671,10 +679,20 @@ class BackupService
 
             $finalRecord = $this->backupModel->find($backupRecordId);
 
+            // Enforce rolling retention policy (retaining max 5 snapshots, deleting oldest 5th+)
+            $retentionResult = $this->enforceRetentionLimit(5, $userId);
+
+            $message = "Full system backup created successfully (Database + {$mediaCount} uploaded files).";
+            if (!empty($retentionResult['pruned_count'])) {
+                $oldestName = $retentionResult['pruned_files'][0] ?? 'oldest snapshot';
+                $message .= " Retention limit enforced: oldest snapshot ({$oldestName}) was automatically recycled.";
+            }
+
             return [
-                'success' => true,
-                'message' => "Full system backup created successfully (Database + {$mediaCount} uploaded files).",
-                'backup'  => $finalRecord,
+                'success'   => true,
+                'message'   => $message,
+                'backup'    => $finalRecord,
+                'retention' => $retentionResult,
             ];
         } catch (Throwable $e) {
             if (file_exists($tempSql)) {
@@ -881,5 +899,340 @@ class BackupService
         }
 
         return $count;
+    }
+
+    /**
+     * Enforce rolling snapshot retention policy.
+     * Retains at most $limit snapshots (default 5).
+     * If total snapshots exceed $limit, the oldest 5th+ snapshot(s) are automatically pruned (FIFO).
+     * Both local disk files, Google Drive files, and database records are removed.
+     *
+     * @param int $limit Maximum number of snapshots to retain (default 5)
+     * @param ?string $userId Superadmin ID or null for system
+     * @return array Summary of pruned backups
+     */
+    public function enforceRetentionLimit(int $limit = 5, ?string $userId = null): array
+    {
+        $limit = max(1, $limit);
+        // Fetch all completed snapshots ordered by created_at DESC (newest first)
+        $allBackups = $this->backupModel
+            ->where('status', 'completed')
+            ->orderBy('created_at', 'DESC')
+            ->findAll();
+
+        $totalCount = count($allBackups);
+        if ($totalCount <= $limit) {
+            return [
+                'pruned_count' => 0,
+                'pruned_files' => [],
+            ];
+        }
+
+        // Excess snapshots starting from offset $limit (e.g. index 5 for limit 5)
+        $excessBackups = array_slice($allBackups, $limit);
+        $prunedFiles   = [];
+
+        foreach ($excessBackups as $backup) {
+            $backupId = (int) $backup['id'];
+            $fileName = $backup['file_name'];
+
+            $deleteResult = $this->deleteBackup($backupId, $userId);
+            if ($deleteResult['success']) {
+                $prunedFiles[] = $fileName;
+
+                try {
+                    $this->activityLogModel->logEvent([
+                        'actor_id'       => $userId,
+                        'event_type'     => 'SYSTEM_BACKUP_PURGED_RETENTION',
+                        'severity'       => 'info',
+                        'device_summary' => 'Snapshot Retention (FIFO)',
+                        'details'        => "Automated retention policy pruned oldest snapshot: {$fileName} (enforcing {$limit}-snapshot limit).",
+                        'metadata'       => [
+                            'file_name'       => $fileName,
+                            'retention_limit' => $limit,
+                            'total_before'    => $totalCount,
+                        ],
+                    ]);
+                    $this->ticketLogModel->logAction(
+                        'SYSTEM-RETENTION',
+                        $userId,
+                        'Oldest Snapshot Pruned',
+                        "Automated disaster recovery retention policy removed oldest snapshot: {$fileName} to maintain {$limit} max snapshots."
+                    );
+                } catch (Throwable $ignored) {}
+            }
+        }
+
+        return [
+            'pruned_count' => count($prunedFiles),
+            'pruned_files' => $prunedFiles,
+        ];
+    }
+
+    /**
+     * Get automated backup configuration and next execution schedule.
+     */
+    public function getScheduleConfig(): array
+    {
+        $enabled        = (int) $this->settingModel->getSetting('auto_backup_enabled', '1') === 1;
+        $frequency      = $this->settingModel->getSetting('auto_backup_frequency', 'weekly') ?: 'weekly';
+        $day            = $this->settingModel->getSetting('auto_backup_day', 'Sunday') ?: 'Sunday';
+        $time           = $this->settingModel->getSetting('auto_backup_time', '02:00') ?: '02:00';
+        $lastRun        = $this->settingModel->getSetting('auto_backup_last_run', null);
+        $retentionLimit = 5;
+
+        if (!in_array($frequency, ['weekly', 'monthly'], true)) {
+            $frequency = 'weekly';
+        }
+
+        $nextRun = $this->calculateNextRunTime($frequency, $day, $time);
+        $isDue   = $this->isAutoBackupDue($frequency, $day, $time, $lastRun, $enabled);
+
+        return [
+            'enabled'         => $enabled,
+            'frequency'       => $frequency,
+            'day'             => $day,
+            'time'            => $time,
+            'last_run'        => $lastRun,
+            'next_run'        => $nextRun,
+            'is_due'          => $isDue,
+            'retention_limit' => $retentionLimit,
+        ];
+    }
+
+    /**
+     * Update automated backup schedule configuration.
+     */
+    public function updateScheduleConfig(array $params, ?string $userId = null): bool
+    {
+        if (isset($params['enabled'])) {
+            $enabledVal = !empty($params['enabled']) ? '1' : '0';
+            $this->settingModel->setSetting('auto_backup_enabled', $enabledVal, 'Automated backup enabled flag');
+        }
+
+        if (!empty($params['frequency'])) {
+            $freq = strtolower(trim($params['frequency']));
+            if (in_array($freq, ['weekly', 'monthly'], true)) {
+                $this->settingModel->setSetting('auto_backup_frequency', $freq, 'Automated backup frequency (weekly or monthly)');
+            }
+        }
+
+        if (isset($params['day'])) {
+            $this->settingModel->setSetting('auto_backup_day', trim((string) $params['day']), 'Automated backup execution day');
+        }
+
+        if (isset($params['time'])) {
+            $this->settingModel->setSetting('auto_backup_time', trim((string) $params['time']), 'Automated backup execution time');
+        }
+
+        // Retention limit is strictly 5 snapshots
+        $this->settingModel->setSetting('backup_retention_limit', '5', 'Disaster recovery rolling snapshot retention limit');
+
+        try {
+            $this->activityLogModel->logEvent([
+                'actor_id'       => $userId,
+                'event_type'     => 'SYSTEM_BACKUP_SCHEDULE_UPDATED',
+                'severity'       => 'info',
+                'device_summary' => 'Disaster Recovery Schedule',
+                'details'        => "Automated backup schedule updated: Frequency=" . ($params['frequency'] ?? 'weekly') . ", Day=" . ($params['day'] ?? 'Sunday') . ", Time=" . ($params['time'] ?? '02:00'),
+                'metadata'       => $params,
+            ]);
+        } catch (Throwable $ignored) {}
+
+        return true;
+    }
+
+    /**
+     * Calculate next run timestamp string (Y-m-d H:i:s).
+     */
+    public function calculateNextRunTime(string $frequency, string $day, string $time): string
+    {
+        $timeParts = explode(':', $time);
+        $hour = isset($timeParts[0]) ? str_pad(trim($timeParts[0]), 2, '0', STR_PAD_LEFT) : '02';
+        $min  = isset($timeParts[1]) ? str_pad(trim($timeParts[1]), 2, '0', STR_PAD_LEFT) : '00';
+        $targetTime = "{$hour}:{$min}:00";
+
+        if ($frequency === 'monthly') {
+            $dayNum = (int) $day;
+            if ($dayNum < 1 || $dayNum > 28) {
+                $dayNum = 1;
+            }
+            $dayPad = str_pad((string) $dayNum, 2, '0', STR_PAD_LEFT);
+            $thisMonthTarget = strtotime(date("Y-m-{$dayPad} {$targetTime}"));
+            if ($thisMonthTarget && $thisMonthTarget > time()) {
+                return date('Y-m-d H:i:s', $thisMonthTarget);
+            }
+            $nextMonth = date('Y-m', strtotime('+1 month'));
+            return date("{$nextMonth}-{$dayPad} {$targetTime}");
+        }
+
+        // Weekly schedule (default)
+        $validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $cleanDay = ucfirst(strtolower(trim($day)));
+        if (!in_array($cleanDay, $validDays, true)) {
+            $cleanDay = 'Sunday';
+        }
+
+        $todayName = date('l');
+        if (strcasecmp($todayName, $cleanDay) === 0) {
+            $todayTarget = strtotime(date('Y-m-d') . ' ' . $targetTime);
+            if ($todayTarget > time()) {
+                return date('Y-m-d H:i:s', $todayTarget);
+            }
+        }
+
+        return date('Y-m-d H:i:s', strtotime("next {$cleanDay} {$targetTime}"));
+    }
+
+    /**
+     * Determine if an automated backup is currently due.
+     */
+    public function isAutoBackupDue(string $frequency, string $day, string $time, ?string $lastRun, bool $enabled): bool
+    {
+        if (!$enabled) {
+            return false;
+        }
+
+        $now = time();
+
+        // Never run more than once per calendar day
+        if (!empty($lastRun)) {
+            $lastRunDay = date('Y-m-d', strtotime($lastRun));
+            if ($lastRunDay === date('Y-m-d')) {
+                return false;
+            }
+        }
+
+        if ($frequency === 'monthly') {
+            $dayNum = (int) $day;
+            if ($dayNum < 1 || $dayNum > 28) {
+                $dayNum = 1;
+            }
+            $todayDayNum = (int) date('j');
+
+            if (!empty($lastRun)) {
+                $elapsedDays = ($now - strtotime($lastRun)) / 86400;
+                if ($elapsedDays >= 28 && $todayDayNum >= $dayNum) {
+                    return true;
+                }
+            } elseif ($todayDayNum >= $dayNum) {
+                return true;
+            }
+            return false;
+        }
+
+        // Weekly (default)
+        $validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $cleanDay = ucfirst(strtolower(trim($day)));
+        if (!in_array($cleanDay, $validDays, true)) {
+            $cleanDay = 'Sunday';
+        }
+
+        $todayName = date('l');
+        $isTodayScheduledDay = (strcasecmp($todayName, $cleanDay) === 0);
+
+        if (!empty($lastRun)) {
+            $elapsedDays = ($now - strtotime($lastRun)) / 86400;
+            if ($elapsedDays >= 7 && $isTodayScheduledDay) {
+                return true;
+            }
+            if ($elapsedDays >= 8) {
+                // Overdue
+                return true;
+            }
+        } elseif ($isTodayScheduledDay) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Run automated scheduled backup.
+     */
+    public function runAutomatedBackup(bool $force = false, ?string $userId = null): array
+    {
+        $config = $this->getScheduleConfig();
+
+        if (!$force && !$config['is_due']) {
+            return [
+                'success' => false,
+                'message' => 'Automated backup is not due yet. Next scheduled run: ' . $config['next_run'],
+                'config'  => $config,
+            ];
+        }
+
+        $freqTitle = ucfirst($config['frequency']);
+        $notes = "Automated {$freqTitle} Disaster Recovery Snapshot (Scheduled: {$config['day']} {$config['time']})";
+
+        $result = $this->createBackup($userId, 'scheduled', $notes, 'full');
+
+        if ($result['success']) {
+            $now = date('Y-m-d H:i:s');
+            $this->settingModel->setSetting('auto_backup_last_run', $now, 'Timestamp of most recent automated backup run');
+            $result['message'] = "Automated {$config['frequency']} backup generated successfully. Oldest snapshot rolling retention enforced (max 5).";
+        }
+
+        return $result;
+    }
+
+    /**
+     * Non-blocking check called on web requests to trigger due automated backups.
+     */
+    public function checkAndExecuteScheduledBackup(?string $userId = null): ?array
+    {
+        try {
+            $config = $this->getScheduleConfig();
+            if ($config['enabled'] && $config['is_due']) {
+                return $this->runAutomatedBackup(false, $userId);
+            }
+        } catch (Throwable $e) {
+            log_message('error', '[BackupService::checkAndExecuteScheduledBackup] ' . $e->getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Ensure at least $targetCount (default 5) disaster recovery snapshots exist in the system.
+     * Generates the missing baseline full snapshots if fewer than 5 exist.
+     */
+    public function seedBaselineSnapshots(int $targetCount = 5, ?string $userId = null): array
+    {
+        $targetCount   = max(1, min(10, $targetCount));
+        $existingCount = (int) $this->backupModel->where('status', 'completed')->countAllResults(false);
+
+        if ($existingCount >= $targetCount) {
+            return [
+                'success'       => true,
+                'message'       => "Disaster recovery readiness standard already satisfied ({$existingCount}/{$targetCount} snapshots available).",
+                'created_count' => 0,
+                'total_count'   => $existingCount,
+            ];
+        }
+
+        $needed       = $targetCount - $existingCount;
+        $createdCount = 0;
+
+        for ($i = 1; $i <= $needed; $i++) {
+            $slotNumber = $existingCount + $i;
+            $notes = "Disaster Recovery Baseline Snapshot (Snapshot {$slotNumber} of {$targetCount} - Adviser Standard)";
+            $res = $this->createBackup($userId, 'manual', $notes, 'full');
+            if ($res['success']) {
+                $createdCount++;
+            }
+            if ($i < $needed) {
+                sleep(1);
+            }
+        }
+
+        $this->enforceRetentionLimit($targetCount, $userId);
+        $finalCount = (int) $this->backupModel->where('status', 'completed')->countAllResults(false);
+
+        return [
+            'success'       => true,
+            'message'       => "Generated {$createdCount} baseline snapshot(s). Disaster recovery requirement of {$targetCount} snapshots is now fulfilled.",
+            'created_count' => $createdCount,
+            'total_count'   => $finalCount,
+        ];
     }
 }

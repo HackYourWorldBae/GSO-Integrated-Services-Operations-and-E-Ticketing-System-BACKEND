@@ -59,6 +59,9 @@ class SystemBackupModel extends Model
             'total_size_bytes'     => (int) $totalBytes,
             'latest_backup_at'     => $latest ? $latest['created_at'] : null,
             'gdrive_synced_count'  => (int) $gdriveCount,
+            'retention_limit'      => 5,
+            'target_snapshots'     => 5,
+            'is_compliant'         => (int) $totalCount >= 5,
         ];
     }
 

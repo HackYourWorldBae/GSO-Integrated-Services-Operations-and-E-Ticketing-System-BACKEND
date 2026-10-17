@@ -39,8 +39,12 @@ class BackupController extends BaseController
     public function index(): ResponseInterface
     {
         try {
-            $backups = $this->backupModel->getBackupsWithUser();
-            $stats   = $this->backupModel->getBackupStats();
+            // Check if automated scheduled backup is due and execute
+            $this->backupService->checkAndExecuteScheduledBackup($this->currentUserId());
+
+            $backups  = $this->backupModel->getBackupsWithUser();
+            $stats    = $this->backupModel->getBackupStats();
+            $schedule = $this->backupService->getScheduleConfig();
 
             // Enrich each backup with file presence check
             foreach ($backups as &$b) {
@@ -65,6 +69,8 @@ class BackupController extends BaseController
                         'SYSTEM_RESTORE_EXECUTED',
                         'SYSTEM_BACKUP_SYNCED',
                         'SYSTEM_BACKUP_DELETED',
+                        'SYSTEM_BACKUP_PURGED_RETENTION',
+                        'SYSTEM_BACKUP_SCHEDULE_UPDATED',
                     ])
                     ->orderBy('account_activity_logs.created_at', 'DESC')
                     ->limit(15)
@@ -74,9 +80,11 @@ class BackupController extends BaseController
             }
 
             return $this->successResponse('Backups retrieved successfully.', [
-                'backups'      => $backups,
-                'stats'        => $stats,
-                'recent_logs'  => $recentLogs,
+                'backups'         => $backups,
+                'stats'           => $stats,
+                'schedule'        => $schedule,
+                'retention_limit' => 5,
+                'recent_logs'     => $recentLogs,
                 'google_drive' => [
                     'is_configured'         => $this->driveService->isConfigured(),
                     'connected'             => $gdriveTest['success'] ?? false,
@@ -540,6 +548,94 @@ class BackupController extends BaseController
             ]);
         } catch (Throwable $e) {
             return $this->errorResponse('Failed to update Google Drive configuration: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Get automated backup schedule configuration.
+     * GET /api/v1/superadmin/backups/schedule
+     */
+    public function getSchedule(): ResponseInterface
+    {
+        try {
+            $config = $this->backupService->getScheduleConfig();
+            return $this->successResponse('Automated backup schedule retrieved.', [
+                'schedule' => $config,
+            ]);
+        } catch (Throwable $e) {
+            return $this->errorResponse('Failed to retrieve backup schedule: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Update automated backup schedule configuration.
+     * POST /api/v1/superadmin/backups/schedule
+     */
+    public function updateSchedule(): ResponseInterface
+    {
+        try {
+            $body   = $this->request->getJSON(true) ?? [];
+            $userId = $this->currentUserId();
+
+            $updated = $this->backupService->updateScheduleConfig($body, $userId);
+            if (!$updated) {
+                return $this->errorResponse('Failed to update automated backup schedule.', [], ResponseInterface::HTTP_BAD_REQUEST);
+            }
+
+            $newConfig = $this->backupService->getScheduleConfig();
+            return $this->successResponse('Automated backup schedule updated successfully.', [
+                'schedule' => $newConfig,
+            ]);
+        } catch (Throwable $e) {
+            return $this->errorResponse('Failed to update backup schedule: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Trigger scheduled or forced automated backup run.
+     * POST /api/v1/superadmin/backups/auto-run
+     */
+    public function runAutoBackup(): ResponseInterface
+    {
+        try {
+            $body   = $this->request->getJSON(true) ?? [];
+            $force  = (bool) ($body['force'] ?? true);
+            $userId = $this->currentUserId();
+
+            $result = $this->backupService->runAutomatedBackup($force, $userId);
+
+            if (!$result['success']) {
+                return $this->errorResponse($result['message'], $result, ResponseInterface::HTTP_BAD_REQUEST);
+            }
+
+            return $this->successResponse($result['message'], [
+                'backup'   => $result['backup'] ?? null,
+                'schedule' => $this->backupService->getScheduleConfig(),
+            ]);
+        } catch (Throwable $e) {
+            return $this->errorResponse('Failed to run automated backup: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Generate baseline snapshots to fulfill the 5-snapshot disaster recovery standard.
+     * POST /api/v1/superadmin/backups/seed-snapshots
+     */
+    public function seedSnapshots(): ResponseInterface
+    {
+        try {
+            $body   = $this->request->getJSON(true) ?? [];
+            $target = (int) ($body['target'] ?? 5);
+            $userId = $this->currentUserId();
+
+            $result = $this->backupService->seedBaselineSnapshots($target, $userId);
+
+            return $this->successResponse($result['message'], [
+                'created_count' => $result['created_count'],
+                'total_count'   => $result['total_count'],
+            ]);
+        } catch (Throwable $e) {
+            return $this->errorResponse('Failed to generate baseline snapshots: ' . $e->getMessage(), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 }

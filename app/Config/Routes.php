@@ -18,6 +18,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->post('auth/login',    'AuthController::login',    ['filter' => 'throttle:10,60']);
     $routes->post('auth/register', 'AuthController::register', ['filter' => 'throttle:10,60']);
 
+    // Multifactor Authentication (MFA with Email OTP)
+    $routes->post('auth/verify-mfa', 'AuthController::verifyMfa', ['filter' => 'throttle:10,60']);
+    $routes->post('auth/resend-mfa', 'AuthController::resendMfa', ['filter' => 'throttle:5,60']);
+
     // Password Recovery via Email Link (Rate limited to prevent abuse)
     $routes->post('auth/forgot-password',    'AuthController::forgotPassword',   ['filter' => 'throttle:5,60']);
     $routes->post('auth/verify-reset-token', 'AuthController::verifyResetToken', ['filter' => 'throttle:15,60']);

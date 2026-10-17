@@ -10,6 +10,7 @@ use App\Models\UserModel;
 use App\Models\UserSessionModel;
 use App\Models\AccountActivityLogModel;
 use App\Models\PasswordResetModel;
+use App\Models\UserMfaChallengeModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -19,6 +20,8 @@ use CodeIgniter\HTTP\ResponseInterface;
  *
  * Endpoints:
  *  POST /api/v1/auth/login            - Login (student ID or email)
+ *  POST /api/v1/auth/verify-mfa       - Verify 6-digit MFA OTP code
+ *  POST /api/v1/auth/resend-mfa       - Resend 6-digit MFA OTP code
  *  POST /api/v1/auth/logout           - Logout (revokes active session & clears HttpOnly cookie)
  *  GET  /api/v1/auth/me               - Get authenticated user's profile
  *  PATCH /api/v1/auth/profile         - Update own profile (name, contact number)
@@ -32,6 +35,7 @@ class AuthController extends BaseController
     private UserSessionModel $userSessionModel;
     private AccountActivityLogModel $activityLogModel;
     private PasswordResetModel $passwordResetModel;
+    private UserMfaChallengeModel $mfaChallengeModel;
     private ResendEmailService $emailService;
     private JwtService $jwt;
 
@@ -41,6 +45,7 @@ class AuthController extends BaseController
         $this->userSessionModel   = new UserSessionModel();
         $this->activityLogModel   = new AccountActivityLogModel();
         $this->passwordResetModel = new PasswordResetModel();
+        $this->mfaChallengeModel  = new UserMfaChallengeModel();
         $this->emailService       = new ResendEmailService();
         $this->jwt                = new JwtService();
     }
@@ -324,6 +329,8 @@ class AuthController extends BaseController
             'id_card_image'     => $idCardRelativePath,
             'status'            => 'Pending',
             'is_verified'       => 0, // Unverified initially
+            'email_notifications_enabled' => 0, // Off by default
+            'is_mfa_enabled'              => 0, // Off by default
         ];
 
         if ($this->userModel->db->fieldExists('id_selfie_image', 'users')) {
@@ -582,6 +589,35 @@ class AuthController extends BaseController
             $this->userModel->resetLockout($user['id']);
         }
 
+        // --- Optional Multi-Factor Authentication (MFA) Check ---
+        $isMfaEnabled = (int) ($user['is_mfa_enabled'] ?? 0) === 1;
+        if ($isMfaEnabled && !empty($user['email']) && filter_var($user['email'], FILTER_VALIDATE_EMAIL)) {
+            $ipAddress = $this->request->getIPAddress();
+            $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+            $challenge = $this->mfaChallengeModel->createChallenge($user['id'], $ipAddress, $userAgent, 600);
+
+            $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
+            $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $challenge['otp_code'], 10);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_MFA_CHALLENGE_ISSUED',
+                'severity'       => 'info',
+                'actor_id'       => $user['id'],
+                'target_user_id' => $user['id'],
+                'details'        => "Two-factor authentication code dispatched via email to user {$user['id']}.",
+                'metadata'       => ['masked_email' => $this->maskEmail($user['email'])],
+                'ip_address'     => $ipAddress,
+                'user_agent'     => $userAgent,
+            ]);
+
+            return $this->successResponse('Multifactor authentication required. Please enter the verification code sent to your email.', [
+                'mfa_required' => true,
+                'mfa_token'    => $challenge['temp_token'],
+                'masked_email' => $this->maskEmail($user['email']),
+                'expires_in'   => 600,
+            ]);
+        }
+
         // --- Generate Unique Session ID & Enforce "One Session Per User" ---
         $sessionId = bin2hex(random_bytes(16));
         $ipAddress = $this->request->getIPAddress();
@@ -667,6 +703,177 @@ class AuthController extends BaseController
         $this->response->deleteCookie('gso_jwt_token', '', '/', '');
 
         return $this->successResponse('Logged out successfully.');
+    }
+
+    /**
+     * Verify Multi-Factor Authentication (MFA) OTP code and complete login.
+     * Public throttled endpoint: POST /api/v1/auth/verify-mfa
+     */
+    public function verifyMfa(): ResponseInterface
+    {
+        $body      = $this->request->getJSON(true) ?? [];
+        $tempToken = trim((string) ($body['mfa_token'] ?? ''));
+        $otpCode   = trim((string) ($body['otp_code'] ?? ''));
+
+        if ($tempToken === '' || $otpCode === '') {
+            return $this->errorResponse('Verification token and 6-digit code are required.', [
+                'otp_code' => 'Please enter the 6-digit verification code.',
+            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->mfaChallengeModel->verifyChallenge($tempToken, $otpCode);
+        if (!$result['valid']) {
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_MFA_FAILED',
+                'severity'       => 'warning',
+                'actor_id'       => null,
+                'target_user_id' => null,
+                'details'        => "MFA verification failed: " . ($result['message'] ?? 'Invalid code.'),
+                'metadata'       => ['remaining_attempts' => $result['remaining_attempts'] ?? null],
+                'ip_address'     => $this->request->getIPAddress(),
+                'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
+            ]);
+
+            return $this->errorResponse($result['message'], [
+                'remaining_attempts' => $result['remaining_attempts'] ?? null,
+            ], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $userId = $result['user_id'];
+        $user   = $this->userModel->find($userId);
+        if (!$user || (int) ($user['is_active'] ?? 1) === 0) {
+            return $this->errorResponse('Account is deactivated or does not exist.', [], ResponseInterface::HTTP_FORBIDDEN);
+        }
+
+        // --- Generate Unique Session ID & Enforce "One Session Per User" ---
+        $sessionId = bin2hex(random_bytes(16));
+        $ipAddress = $this->request->getIPAddress();
+        $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+        $this->userSessionModel->registerSession($user['id'], $sessionId, $ipAddress, $userAgent);
+
+        // --- Record Last Login Timestamp on Users Table ---
+        try {
+            $this->userModel->update($user['id'], [
+                'last_login_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $ignored) {
+        }
+
+        // --- Build JWT Payload with sid (Session ID) ---
+        $tokenPayload = [
+            'id'      => $user['id'],
+            'role'    => $user['role'],
+            'unit_id' => $user['unit_id'],
+            'sid'     => $sessionId,
+        ];
+
+        $accessToken  = $this->jwt->generateAccessToken($tokenPayload);
+        $refreshToken = $this->jwt->generateRefreshToken($tokenPayload);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'AUTH_LOGIN_SUCCESS',
+            'severity'       => 'info',
+            'actor_id'       => $user['id'],
+            'target_user_id' => $user['id'],
+            'details'        => "User successfully authenticated via Two-Factor Authentication. Single active session registered.",
+            'metadata'       => ['role' => $user['role'], 'session_id' => $sessionId, 'auth_method' => 'mfa_email_otp'],
+            'ip_address'     => $ipAddress,
+            'user_agent'     => $userAgent,
+        ]);
+
+        // --- Issue HttpOnly Secure Cookie ---
+        $expiresIn = $this->jwt->getExpiresIn();
+        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $this->response->setCookie([
+            'name'     => 'gso_jwt_token',
+            'value'    => $accessToken,
+            'expire'   => $expiresIn,
+            'domain'   => '',
+            'path'     => '/',
+            'secure'   => $isSecure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+
+        // Fetch safe user payload enriched with dynamic RBAC permissions and avatar URL
+        $safeUser = $this->userModel->getSafeUser($user['id']);
+
+        return $this->successResponse('Verification successful. Welcome back!', [
+            'access_token'  => $accessToken,
+            'refresh_token' => $refreshToken,
+            'token_type'    => 'Bearer',
+            'expires_in'    => $expiresIn,
+            'user'          => $safeUser ?? $user,
+        ]);
+    }
+
+    /**
+     * Resend Multi-Factor Authentication (MFA) OTP code to user's registered email.
+     * Public throttled endpoint: POST /api/v1/auth/resend-mfa
+     */
+    public function resendMfa(): ResponseInterface
+    {
+        $body      = $this->request->getJSON(true) ?? [];
+        $tempToken = trim((string) ($body['mfa_token'] ?? ''));
+
+        if ($tempToken === '') {
+            return $this->errorResponse('Verification session token is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $ipAddress = $this->request->getIPAddress();
+        $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+
+        $resendResult = $this->mfaChallengeModel->resendChallenge($tempToken, $ipAddress, $userAgent);
+        if (!$resendResult['success']) {
+            return $this->errorResponse($resendResult['message'], [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+        }
+
+        $user = $this->userModel->find($resendResult['user_id']);
+        if (!$user || empty($user['email'])) {
+            return $this->errorResponse('Account could not be resolved. Please log in again.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
+        $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $resendResult['otp_code'], 10);
+
+        $this->activityLogModel->logEvent([
+            'event_type'     => 'AUTH_MFA_CHALLENGE_RESENT',
+            'severity'       => 'info',
+            'actor_id'       => $user['id'],
+            'target_user_id' => $user['id'],
+            'details'        => "Two-factor authentication code resent via email to user {$user['id']}.",
+            'metadata'       => ['masked_email' => $this->maskEmail($user['email'])],
+            'ip_address'     => $ipAddress,
+            'user_agent'     => $userAgent,
+        ]);
+
+        return $this->successResponse('A new verification code has been dispatched to your email.', [
+            'mfa_token'    => $resendResult['temp_token'],
+            'masked_email' => $this->maskEmail($user['email']),
+            'expires_in'   => $resendResult['expires_in'] ?? 600,
+        ]);
+    }
+
+    /**
+     * Helper to mask an email address for privacy (e.g., j***e@domain.com)
+     */
+    private function maskEmail(string $email): string
+    {
+        $parts = explode('@', $email);
+        if (count($parts) !== 2) {
+            return '***@***.***';
+        }
+        $name   = $parts[0];
+        $domain = $parts[1];
+        $len    = strlen($name);
+
+        if ($len <= 2) {
+            $masked = substr($name, 0, 1) . '***';
+        } else {
+            $masked = substr($name, 0, 1) . str_repeat('*', max(3, $len - 2)) . substr($name, -1);
+        }
+
+        return $masked . '@' . $domain;
     }
 
     /**
@@ -1171,6 +1378,21 @@ class AuthController extends BaseController
                 $raw = $body['email_notifications_enabled'];
                 $updateData['email_notifications_enabled'] = ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') ? 1 : 0;
             }
+            if (array_key_exists('is_mfa_enabled', $body)) {
+                $rawMfa  = $body['is_mfa_enabled'];
+                $enabled = ($rawMfa === true || $rawMfa === 1 || $rawMfa === '1' || $rawMfa === 'true') ? 1 : 0;
+                if ($enabled === 1) {
+                    $targetEmail = $updateData['email'] ?? ($currentUser['email'] ?? '');
+                    if (empty($targetEmail) || !filter_var($targetEmail, FILTER_VALIDATE_EMAIL)) {
+                        return $this->errorResponse(
+                            'A valid email address is required to enable Two-Factor Authentication (MFA).',
+                            ['is_mfa_enabled' => 'A valid email address is required to enable Two-Factor Authentication.'],
+                            ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                        );
+                    }
+                }
+                $updateData['is_mfa_enabled'] = $enabled;
+            }
 
             // Handle identifier: Username for personnel/field workers; institutional email for requestors & staff
             if ($isPersonnel) {
@@ -1262,6 +1484,19 @@ class AuthController extends BaseController
                 'details'        => "User updated own profile fields: " . implode(', ', array_keys($updateData)) . ".",
                 'metadata'       => array_keys($updateData),
             ]);
+
+            if (array_key_exists('is_mfa_enabled', $updateData)) {
+                $this->activityLogModel->logEvent([
+                    'event_type'     => $updateData['is_mfa_enabled'] === 1 ? 'AUTH_MFA_ENABLED' : 'AUTH_MFA_DISABLED',
+                    'severity'       => 'info',
+                    'actor_id'       => $userId,
+                    'target_user_id' => $userId,
+                    'details'        => $updateData['is_mfa_enabled'] === 1
+                        ? "User enabled Multifactor Authentication (MFA with Email OTP)."
+                        : "User disabled Multifactor Authentication (MFA with Email OTP).",
+                    'metadata'       => ['is_mfa_enabled' => $updateData['is_mfa_enabled']],
+                ]);
+            }
 
             $user = $this->userModel->getSafeUser($userId);
 

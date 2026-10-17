@@ -45,6 +45,7 @@ class UserModel extends Model
         'status',
         'is_verified',
         'email_notifications_enabled',
+        'is_mfa_enabled',
         'failed_login_attempts',
         'lockout_until',
         'last_login_at',
@@ -131,7 +132,10 @@ class UserModel extends Model
         $user['is_verified'] = (int) ($user['is_verified'] ?? 0);
         $user['email_notifications_enabled'] = isset($user['email_notifications_enabled'])
             ? (int) $user['email_notifications_enabled']
-            : 1;
+            : 0;
+        $user['is_mfa_enabled'] = isset($user['is_mfa_enabled'])
+            ? (int) $user['is_mfa_enabled']
+            : 0;
 
         // Ensure name_extension is null-safe for frontend consumers
         $user['name_extension'] = $user['name_extension'] ?? null;

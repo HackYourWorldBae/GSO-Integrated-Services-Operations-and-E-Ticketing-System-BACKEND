@@ -88,7 +88,11 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'email_notifications_enabled') THEN
-            ALTER TABLE `users` ADD COLUMN `email_notifications_enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-account opt-in for ticket/request email updates' AFTER `is_verified`;
+            ALTER TABLE `users` ADD COLUMN `email_notifications_enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Per-account opt-in for ticket/request email updates' AFTER `is_verified`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'is_mfa_enabled') THEN
+            ALTER TABLE `users` ADD COLUMN `is_mfa_enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Optional two-factor authentication via email OTP' AFTER `email_notifications_enabled`;
         END IF;
 
         -- Update Role ENUM to include 'staff' and 'worker'
@@ -1226,6 +1230,27 @@ INSERT IGNORE INTO `system_settings` (`key`, `value`, `description`) VALUES
 ('lunch_start_time', '12:00', 'Daily lunch break window start time (HH:mm in 24-hr format)'),
 ('lunch_end_time', '13:00', 'Daily lunch break window end time (HH:mm in 24-hr format)'),
 ('standard_daily_hours', '8.0', 'Standard net operational working hours per business day');
+
+-- ----------------------------------------------------------------------------
+-- OPTIONAL MULTIFACTOR AUTHENTICATION (MFA with Email OTP)
+-- ----------------------------------------------------------------------------
+-- Table structure for table `user_mfa_challenges`
+CREATE TABLE IF NOT EXISTS `user_mfa_challenges` (
+  `id` varchar(36) NOT NULL,
+  `user_id` varchar(36) NOT NULL,
+  `temp_token` varchar(64) NOT NULL,
+  `otp_code` varchar(10) NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `attempts` tinyint(3) UNSIGNED NOT NULL DEFAULT 0,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` varchar(255) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_mfa_temp_token` (`temp_token`),
+  KEY `idx_mfa_user_id` (`user_id`),
+  KEY `idx_mfa_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- COMPLETION

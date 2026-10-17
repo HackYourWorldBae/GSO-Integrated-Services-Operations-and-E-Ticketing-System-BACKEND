@@ -210,6 +210,48 @@ class ResendEmailService
     }
 
     /**
+     * Send Multifactor Authentication (MFA) One-Time Password (OTP) verification email.
+     */
+    public function sendMfaOtpEmail(string $toEmail, string $userName, string $otpCode, int $expiresMinutes = 10): array
+    {
+        $subject  = "Your Two-Factor Authentication Code: {$otpCode} — GSO E-Ticketing";
+        $safeName = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
+        $safeOtp  = htmlspecialchars($otpCode, ENT_QUOTES, 'UTF-8');
+
+        $html = $this->wrapLayout(
+            'Two-Factor Authentication',
+            'Account Security Verification',
+            "
+            <p style=\"margin: 0 0 16px 0; font-size: 15px; color: #334155; line-height: 1.6;\">
+                Hello <strong>{$safeName}</strong>,
+            </p>
+            <p style=\"margin: 0 0 20px 0; font-size: 14px; color: #475569; line-height: 1.6;\">
+                You have enabled Two-Factor Authentication on your <strong>Benguet State University — GSO E-Ticketing System</strong> account. Please use the verification code below to complete your sign-in:
+            </p>
+            <div style=\"text-align: center; margin: 32px 0;\">
+                <div style=\"display: inline-block; background-color: #f0fdf4; border: 2px dashed #10b981; padding: 18px 36px; border-radius: 14px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);\">
+                    <span style=\"font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #065f46;\">
+                        {$safeOtp}
+                    </span>
+                </div>
+            </div>
+            <div style=\"background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin: 24px 0;\">
+                <p style=\"margin: 0 0 8px 0; font-size: 13px; color: #334155; font-weight: 700;\">
+                    Security Notice:
+                </p>
+                <ul style=\"margin: 0; padding-left: 18px; font-size: 12px; color: #64748b; line-height: 1.6;\">
+                    <li>This code is valid for <strong>{$expiresMinutes} minutes</strong> only.</li>
+                    <li>Never share this code with anyone, including GSO administrators or staff.</li>
+                    <li>If you did not attempt to sign in, someone may know your password. Change your password immediately in your account settings.</li>
+                </ul>
+            </div>
+            "
+        );
+
+        return $this->sendRawEmail($toEmail, $subject, $html);
+    }
+
+    /**
      * Send Ticket Intake Submission Confirmation to Requestor.
      */
     public function sendTicketIntakeConfirmation(string $toEmail, string $userName, array $ticketDetails): array

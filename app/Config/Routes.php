@@ -190,6 +190,20 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('director/analytics',           'DirectorController::analytics',        ['filter' => 'role:director,superadmin']);
         $routes->get('director/analytics/(:segment)','DirectorController::unitAnalytics/$1', ['filter' => 'role:director,superadmin']);
 
+        // -- Operations Central Hub (Materials, Holidays, Working Hours) --
+        $routes->get('operations/config',                   'OperationsHubController::getConfig');
+        $routes->get('operations/materials',                'OperationsHubController::getMaterials');
+        $routes->post('operations/materials',               'OperationsHubController::createMaterial',     ['filter' => 'role:director,superadmin']);
+        $routes->patch('operations/materials/(:num)',       'OperationsHubController::updateMaterial/$1',  ['filter' => 'role:director,superadmin']);
+        $routes->delete('operations/materials/(:num)',      'OperationsHubController::deleteMaterial/$1',  ['filter' => 'role:director,superadmin']);
+        $routes->post('operations/materials/seed-defaults', 'OperationsHubController::seedDefaults',       ['filter' => 'role:director,superadmin']);
+        $routes->get('operations/holidays',                 'OperationsHubController::getHolidays');
+        $routes->post('operations/holidays',                'OperationsHubController::createHoliday',      ['filter' => 'role:director,superadmin']);
+        $routes->patch('operations/holidays/(:num)',        'OperationsHubController::updateHoliday/$1',   ['filter' => 'role:director,superadmin']);
+        $routes->delete('operations/holidays/(:num)',       'OperationsHubController::deleteHoliday/$1',   ['filter' => 'role:director,superadmin']);
+        $routes->get('operations/working-hours',            'OperationsHubController::getWorkingHours');
+        $routes->post('operations/working-hours',           'OperationsHubController::updateWorkingHours', ['filter' => 'role:director,superadmin']);
+
         // -- Superadmin (Master Administration, User Lifecycle & Verification) --
         $routes->get('superadmin/stats',                  'SuperadminController::stats',          ['filter' => 'role:superadmin']);
         $routes->get('superadmin/users',                  'SuperadminController::users',          ['filter' => 'role:superadmin']);

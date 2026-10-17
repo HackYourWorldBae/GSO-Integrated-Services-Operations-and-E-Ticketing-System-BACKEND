@@ -1182,6 +1182,51 @@ CREATE TABLE IF NOT EXISTS `system_backups` (
   CONSTRAINT `fk_backups_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------------------------
+-- Table structure for table `catalog_materials` (Central Editing Hub)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `catalog_materials` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `unit_code` varchar(10) NOT NULL COMMENT 'Sub-unit identifier: FGMU or LEAU',
+  `category` varchar(60) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `unit` varchar(50) NOT NULL DEFAULT 'pcs',
+  `default_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_catalog_unit_active` (`unit_code`, `is_active`),
+  KEY `idx_catalog_category` (`category`),
+  KEY `idx_catalog_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- Table structure for table `special_holidays` (Duration & SLA Counting)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `special_holidays` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `holiday_date` date NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `type` varchar(50) NOT NULL DEFAULT 'special_non_working',
+  `is_recurring` tinyint(1) NOT NULL DEFAULT 0,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `notes` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_special_holidays_date` (`holiday_date`, `is_active`),
+  KEY `idx_special_holidays_recurring` (`is_recurring`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Working Hours defaults in system_settings
+INSERT IGNORE INTO `system_settings` (`key`, `value`, `description`) VALUES
+('work_start_time', '08:00', 'Daily operational starting time (HH:mm in 24-hr format)'),
+('work_end_time', '17:00', 'Daily operational ending time (HH:mm in 24-hr format)'),
+('lunch_start_time', '12:00', 'Daily lunch break window start time (HH:mm in 24-hr format)'),
+('lunch_end_time', '13:00', 'Daily lunch break window end time (HH:mm in 24-hr format)'),
+('standard_daily_hours', '8.0', 'Standard net operational working hours per business day');
+
 -- ============================================================================
 -- COMPLETION
 -- ============================================================================

@@ -10,9 +10,9 @@ use DateTimeInterface;
  *
  * Institutional Work Calendar for GSO E-Ticketing.
  * Implements Philippine Civil Service / University standard working hours:
- * - 8 working hours per day (8:00 AM to 5:00 PM with 1-hour lunch break 12:00 PM - 1:00 PM).
+ * - Net working hours per day (dynamically configurable, default 8:00 AM to 5:00 PM with 12:00 PM - 1:00 PM lunch break).
  * - Excludes weekends (Saturdays & Sundays).
- * - Excludes official Philippine regular and special non-working holidays (plus Holy Week).
+ * - Excludes official Philippine regular and special non-working holidays (plus Holy Week and custom non-working holidays).
  * - Accounts for approved overtime hours.
  */
 class WorkCalendar
@@ -44,6 +44,73 @@ class WorkCalendar
     ];
 
     /**
+     * Runtime caches to prevent redundant database queries during iteration loops.
+     */
+    private static ?array $customHolidaysCache = null;
+    private static ?array $workingHoursConfigCache = null;
+
+    /**
+     * Clear memoized settings and holiday cache (used on update or in tests).
+     */
+    public static function clearCache(): void
+    {
+        self::$customHolidaysCache = null;
+        self::$workingHoursConfigCache = null;
+    }
+
+    /**
+     * Retrieve active operational working hours configuration with database fallback.
+     */
+    public static function getWorkingHoursConfig(): array
+    {
+        if (self::$workingHoursConfigCache !== null) {
+            return self::$workingHoursConfigCache;
+        }
+
+        $config = [
+            'start_hour'   => self::WORK_START_HOUR,
+            'start_min'    => 0,
+            'end_hour'     => self::WORK_END_HOUR,
+            'end_min'      => 0,
+            'lunch_start'  => self::LUNCH_START,
+            'lunch_end'    => self::LUNCH_END,
+            'daily_hours'  => self::STANDARD_DAILY_HOURS,
+        ];
+
+        try {
+            $settingModel = new \App\Models\SystemSettingModel();
+            $startTime = $settingModel->getSetting('work_start_time', '08:00');
+            $endTime   = $settingModel->getSetting('work_end_time', '17:00');
+            $lunchStart = $settingModel->getSetting('lunch_start_time', '12:00');
+            $lunchEnd   = $settingModel->getSetting('lunch_end_time', '13:00');
+            $dailyHours = (float) $settingModel->getSetting('standard_daily_hours', '8.0');
+
+            if (preg_match('/^(\d{1,2}):(\d{2})$/', trim($startTime), $sm)) {
+                $config['start_hour'] = (int) $sm[1];
+                $config['start_min']  = (int) $sm[2];
+            }
+            if (preg_match('/^(\d{1,2}):(\d{2})$/', trim($endTime), $em)) {
+                $config['end_hour'] = (int) $em[1];
+                $config['end_min']  = (int) $em[2];
+            }
+            if (preg_match('/^(\d{1,2}):(\d{2})$/', trim($lunchStart), $lm)) {
+                $config['lunch_start'] = (int) $lm[1];
+            }
+            if (preg_match('/^(\d{1,2}):(\d{2})$/', trim($lunchEnd), $lem)) {
+                $config['lunch_end'] = (int) $lem[1];
+            }
+            if ($dailyHours > 0) {
+                $config['daily_hours'] = $dailyHours;
+            }
+        } catch (\Throwable $e) {
+            // Defensive fallback to standard constants
+        }
+
+        self::$workingHoursConfigCache = $config;
+        return $config;
+    }
+
+    /**
      * Checks if a given date falls on a weekend (Saturday or Sunday).
      */
     public static function isWeekend(DateTimeInterface $date): bool
@@ -53,7 +120,7 @@ class WorkCalendar
     }
 
     /**
-     * Checks if a given date is an official Philippine holiday.
+     * Checks if a given date is an official Philippine holiday or custom special non-working holiday.
      */
     public static function isHoliday(DateTimeInterface $date): bool
     {
@@ -86,6 +153,43 @@ class WorkCalendar
             $currentYmd = $date->format('Y-m-d');
             if (in_array($currentYmd, [$maundyThursday, $goodFriday, $blackSaturday], true)) {
                 return true;
+            }
+        }
+
+        // Check dynamically configured special non-working holidays
+        if (self::isSpecialHolidayDate($date)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if date matches dynamically configured special non-working holidays.
+     */
+    private static function isSpecialHolidayDate(DateTimeInterface $date): bool
+    {
+        $ymd = $date->format('Y-m-d');
+        $md  = $date->format('m-d');
+
+        if (self::$customHolidaysCache === null) {
+            try {
+                $holidayModel = new \App\Models\SpecialHolidayModel();
+                self::$customHolidaysCache = $holidayModel->getActiveHolidays();
+            } catch (\Throwable $e) {
+                self::$customHolidaysCache = [];
+            }
+        }
+
+        foreach (self::$customHolidaysCache as $holiday) {
+            if (!empty($holiday['holiday_date']) && $holiday['holiday_date'] === $ymd) {
+                return true;
+            }
+            if (!empty($holiday['is_recurring']) && !empty($holiday['holiday_date'])) {
+                $recMd = date('m-d', strtotime($holiday['holiday_date']));
+                if ($recMd === $md) {
+                    return true;
+                }
             }
         }
 
@@ -153,7 +257,7 @@ class WorkCalendar
 
     /**
      * Calculate net working hours between two timestamps, strictly adhering to
-     * 8:00 AM - 5:00 PM (with 12:00 PM - 1:00 PM lunch break excluded),
+     * configured operational work hours (with lunch break excluded),
      * omitting weekends and holidays, and adding any approved overtime hours.
      *
      * @param DateTimeInterface $start
@@ -170,6 +274,15 @@ class WorkCalendar
             return max(0.0, round($overtimeHours, 2));
         }
 
+        $cfg = self::getWorkingHoursConfig();
+        $workStartHour = $cfg['start_hour'];
+        $workStartMin  = $cfg['start_min'];
+        $workEndHour   = $cfg['end_hour'];
+        $workEndMin    = $cfg['end_min'];
+        $lunchStartH   = $cfg['lunch_start'];
+        $lunchEndH     = $cfg['lunch_end'];
+        $standardDaily = $cfg['daily_hours'];
+
         $totalHours = 0.0;
         $startDate = (new DateTime($start->format('Y-m-d')))->setTime(0, 0, 0);
         $endDate   = (new DateTime($end->format('Y-m-d')))->setTime(0, 0, 0);
@@ -184,11 +297,11 @@ class WorkCalendar
             if (self::isWorkingDay($current)) {
                 if (!$isStartDay && !$isEndDay) {
                     // Full intermediate working day
-                    $totalHours += self::STANDARD_DAILY_HOURS;
+                    $totalHours += $standardDaily;
                 } else {
                     // Start day, end day, or same day
-                    $dayStart = (new DateTime($dayYmd))->setTime(self::WORK_START_HOUR, 0, 0);
-                    $dayEnd   = (new DateTime($dayYmd))->setTime(self::WORK_END_HOUR, 0, 0);
+                    $dayStart = (new DateTime($dayYmd))->setTime($workStartHour, $workStartMin, 0);
+                    $dayEnd   = (new DateTime($dayYmd))->setTime($workEndHour, $workEndMin, 0);
 
                     // On start day, count from actual start timestamp so early starts are not discarded
                     $windowStart = $isStartDay ? $start : $dayStart;
@@ -198,15 +311,17 @@ class WorkCalendar
                         $seconds = $windowEnd->getTimestamp() - $windowStart->getTimestamp();
                         $hours = $seconds / 3600.0;
 
-                        // Deduct lunch break (12:00 - 13:00) if window intersects it
-                        $lunchStart = (new DateTime($dayYmd))->setTime(self::LUNCH_START, 0, 0);
-                        $lunchEnd   = (new DateTime($dayYmd))->setTime(self::LUNCH_END, 0, 0);
+                        // Deduct lunch break if window intersects it
+                        if ($lunchStartH < $lunchEndH) {
+                            $lunchStart = (new DateTime($dayYmd))->setTime($lunchStartH, 0, 0);
+                            $lunchEnd   = (new DateTime($dayYmd))->setTime($lunchEndH, 0, 0);
 
-                        if ($windowStart < $lunchEnd && $windowEnd > $lunchStart) {
-                            $overlapStart = max($windowStart, $lunchStart);
-                            $overlapEnd   = min($windowEnd, $lunchEnd);
-                            $lunchOverlapHours = ($overlapEnd->getTimestamp() - $overlapStart->getTimestamp()) / 3600.0;
-                            $hours = max(0.0, $hours - $lunchOverlapHours);
+                            if ($windowStart < $lunchEnd && $windowEnd > $lunchStart) {
+                                $overlapStart = max($windowStart, $lunchStart);
+                                $overlapEnd   = min($windowEnd, $lunchEnd);
+                                $lunchOverlapHours = ($overlapEnd->getTimestamp() - $overlapStart->getTimestamp()) / 3600.0;
+                                $hours = max(0.0, $hours - $lunchOverlapHours);
+                            }
                         }
 
                         $totalHours += $hours;
@@ -227,8 +342,11 @@ class WorkCalendar
      */
     public static function formatDuration(float $workingHours, float $overtimeHours = 0.0): string
     {
-        $baseDays = floor($workingHours / self::STANDARD_DAILY_HOURS);
-        $remHours = fmod($workingHours, self::STANDARD_DAILY_HOURS);
+        $cfg = self::getWorkingHoursConfig();
+        $dailyHours = $cfg['daily_hours'] > 0 ? $cfg['daily_hours'] : self::STANDARD_DAILY_HOURS;
+
+        $baseDays = floor($workingHours / $dailyHours);
+        $remHours = fmod($workingHours, $dailyHours);
 
         $parts = [];
         if ($baseDays > 0) {

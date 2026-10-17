@@ -237,6 +237,10 @@ BEGIN
             ALTER TABLE `tickets` ADD COLUMN `ssu_notation` TEXT DEFAULT NULL COMMENT 'SSU only: staff recommendation/notation communicated to reporter' AFTER `is_under_investigation`;
         END IF;
 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'staff_notation') THEN
+            ALTER TABLE `tickets` ADD COLUMN `staff_notation` TEXT DEFAULT NULL COMMENT 'Staff notation/update communicated to requester' AFTER `ssu_notation`;
+        END IF;
+
         -- Indexes
         IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'tickets' AND index_name = 'idx_tickets_approval_delayed') THEN
             ALTER TABLE `tickets` ADD INDEX `idx_tickets_approval_delayed` (`is_approval_delayed`);
@@ -735,6 +739,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `materials_stage` varchar(20) NOT NULL DEFAULT 'none',
   `is_under_investigation` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'SSU only: 1 when flagged for active investigation',
   `ssu_notation` text DEFAULT NULL COMMENT 'SSU only: staff recommendation/notation communicated to reporter',
+  `staff_notation` text DEFAULT NULL COMMENT 'Staff notation/update communicated to requester',
   `submitted_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `reviewed_at` timestamp NULL DEFAULT NULL,
   `reviewed_by` varchar(36) DEFAULT NULL,

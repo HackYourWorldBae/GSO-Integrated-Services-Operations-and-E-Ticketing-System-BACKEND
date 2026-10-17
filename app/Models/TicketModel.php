@@ -50,6 +50,7 @@ class TicketModel extends Model
         'materials_stage',
         'is_under_investigation',
         'ssu_notation',
+        'staff_notation',
         'submitted_at',
         'reviewed_at',
         'reviewed_by',

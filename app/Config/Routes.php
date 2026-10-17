@@ -110,6 +110,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/complete',       'TicketActionController::complete/$1',              ['filter' => 'role:admin,worker,director']);
         $routes->post('tickets/(:segment)/materials',       'TicketActionController::saveMaterials/$1',         ['filter' => 'role:admin,worker,director']);
         $routes->patch('tickets/(:segment)/extend',         'TicketActionController::extendTicket/$1',          ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/reschedule',     'TicketActionController::rescheduleTicket/$1',      ['filter' => 'role:admin,director']);
 
         // -- SSU Incident Report Workflow (Admin & Director Roles) --
         $routes->get('tickets/investigating/(:segment)',    'TicketQueueController::investigatingQueue/$1',    ['filter' => 'role:admin,director,superadmin']);

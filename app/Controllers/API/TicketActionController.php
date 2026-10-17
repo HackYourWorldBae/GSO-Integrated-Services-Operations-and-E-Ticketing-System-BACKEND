@@ -527,10 +527,11 @@ class TicketActionController extends BaseController
     }
 
     /**
-     * Adds a recommendation/notation to an SSU Incident Report.
-     * Ticket remains open — this is a communication to the reporter, not a resolution.
-     * The notation is displayed as an extension card in the requestor dashboard,
-     * outside the progress timeline.
+     * Adds a recommendation, news, or notation to a ticket to update the end user.
+     * Works for all sub-units (FGMU, LEAU, SSU) including scheduled jobs, active jobs,
+     * and SSU incident reports.
+     * Ticket remains open — this is communication/news to the reporter, not a resolution.
+     * The notation is displayed as an extension card in the requestor dashboard.
      *
      * PATCH /tickets/:id/notation
      */
@@ -542,12 +543,9 @@ class TicketActionController extends BaseController
             return $this->notFoundResponse('Ticket');
         }
 
-        if ($forbidden = $this->assertUnitAccess(3)) {
+        $unitId = (int) $ticket['unit_id'];
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
             return $forbidden;
-        }
-
-        if ((int) $ticket['unit_id'] !== 3 || $ticket['service_type'] !== 'Incident Report') {
-            return $this->errorResponse('This action is only valid for SSU Incident Reports.');
         }
 
         if ($ticket['is_archived']) {
@@ -555,7 +553,7 @@ class TicketActionController extends BaseController
         }
 
         $body     = $this->request->getJSON(true) ?? [];
-        $notation = trim(sanitize_string($body['notation'] ?? ''));
+        $notation = trim(sanitize_string($body['notation'] ?? $body['staff_notation'] ?? ''));
 
         if (empty($notation)) {
             return $this->errorResponse(
@@ -565,40 +563,79 @@ class TicketActionController extends BaseController
             );
         }
 
-        $isUnderInvestigation = (bool) $ticket['is_under_investigation'];
+        $isSsuIncident = ($unitId === 3 && $ticket['service_type'] === 'Incident Report');
 
-        // If the ticket is not yet under investigation, preserve 'pending' status so it
-        // remains visible in the Submitted queue. Only use 'processing' when already flagged.
-        $this->ticketModel->update($ticketId, [
-            'ssu_notation' => $notation,
-            'status'       => $isUnderInvestigation ? 'processing' : 'pending',
-            'status_label' => $isUnderInvestigation ? 'Under Investigation' : 'Pending Review (Notated)',
-            'current_step' => $isUnderInvestigation ? 3 : 2,
-            'reviewed_at'  => date('Y-m-d H:i:s'),
-            'reviewed_by'  => $this->currentUserId(),
-            'updated_at'   => date('Y-m-d H:i:s'),
-        ]);
+        if ($isSsuIncident) {
+            $isUnderInvestigation = (bool) $ticket['is_under_investigation'];
 
-        $this->logModel->logAction(
-            $ticketId,
-            $this->currentUserId(),
-            'Notation Added',
-            'SSU staff added a recommendation/notation to the incident report.'
-        );
+            // If the ticket is not yet under investigation, preserve 'pending' status so it
+            // remains visible in the Submitted queue. Only use 'processing' when already flagged.
+            $this->ticketModel->update($ticketId, [
+                'ssu_notation'   => $notation,
+                'staff_notation' => $notation,
+                'status'         => $isUnderInvestigation ? 'processing' : 'pending',
+                'status_label'   => $isUnderInvestigation ? 'Under Investigation' : 'Pending Review (Notated)',
+                'current_step'   => $isUnderInvestigation ? 3 : 2,
+                'reviewed_at'    => date('Y-m-d H:i:s'),
+                'reviewed_by'    => $this->currentUserId(),
+                'updated_at'     => date('Y-m-d H:i:s'),
+            ]);
 
-        $this->notificationModel->createNotification(
-            $ticket['user_id'],
-            'info',
-            "SSU Update on Incident #{$ticketId}",
-            'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
-        );
+            $this->logModel->logAction(
+                $ticketId,
+                $this->currentUserId(),
+                'Notation Added',
+                'SSU staff added a recommendation/notation to the incident report.'
+            );
 
-        $this->notifyRequestorByEmail(
-            $ticket['user_id'],
-            $ticketId,
-            'SSU Notation Added',
-            'SSU staff has added a recommendation/notation to your incident report: "' . $notation . '"'
-        );
+            $this->notificationModel->createNotification(
+                $ticket['user_id'],
+                'info',
+                "SSU Update on Incident #{$ticketId}",
+                'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
+            );
+
+            $this->notifyRequestorByEmail(
+                $ticket['user_id'],
+                $ticketId,
+                'SSU Notation Added',
+                'SSU staff has added a recommendation/notation to your incident report: "' . $notation . '"'
+            );
+        } else {
+            $unitCode = match ($unitId) {
+                1       => 'FGMU',
+                2       => 'LEAU',
+                3       => 'SSU',
+                default => 'GSO',
+            };
+
+            $this->ticketModel->update($ticketId, [
+                'staff_notation' => $notation,
+                'ssu_notation'   => $notation,
+                'updated_at'     => date('Y-m-d H:i:s'),
+            ]);
+
+            $this->logModel->logAction(
+                $ticketId,
+                $this->currentUserId(),
+                'Notation Added',
+                "{$unitCode} staff posted a ticket update/notation: {$notation}"
+            );
+
+            $this->notificationModel->createNotification(
+                $ticket['user_id'],
+                'info',
+                "{$unitCode} Update on Ticket #{$ticketId}",
+                "Staff posted an update regarding your request: {$notation}"
+            );
+
+            $this->notifyRequestorByEmail(
+                $ticket['user_id'],
+                $ticketId,
+                "{$unitCode} Ticket Update",
+                "Staff from {$unitCode} has posted an update regarding your ticket #{$ticketId}: \"{$notation}\""
+            );
+        }
 
         return $this->successResponse(
             'Notation added successfully.',
@@ -1165,6 +1202,138 @@ class TicketActionController extends BaseController
             'extension_days'           => $totalExtensionDays,
             'extended_completion_date' => $extendedDate,
             'overtime_hours'           => $totalOvertime,
+        ]);
+    }
+
+    /**
+     * Reschedules a scheduled ticket or adjusts implementation date and/or working days.
+     * Updates active assignments, recalculates target completion date via institutional WorkCalendar,
+     * logs the audit action, and dispatches in-app and email notifications to the requestor.
+     *
+     * PATCH /tickets/:id/reschedule
+     */
+    public function rescheduleTicket(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $unitId = (int) $ticket['unit_id'];
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot be rescheduled.');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+
+        $newImplDate      = !empty($body['implementation_date']) ? sanitize_string($body['implementation_date']) : null;
+        $workingDays      = isset($body['working_days']) ? max(1, (int) $body['working_days']) : null;
+        $extensionDays    = isset($body['extension_days']) ? max(0, (int) $body['extension_days']) : 0;
+        $reason           = trim(sanitize_string($body['reason'] ?? $body['extension_reason'] ?? 'Schedule adjusted by operations'));
+        $notation         = trim(sanitize_string($body['notation'] ?? $body['staff_notation'] ?? ''));
+        $notifyRequestor  = !isset($body['notify_requestor']) || (bool) $body['notify_requestor'];
+
+        if (empty($newImplDate) && $workingDays === null && $extensionDays === 0) {
+            return $this->errorResponse(
+                'Please specify a new implementation date, number of working days, or extension days.',
+                [],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $db = Database::connect();
+        $assignment = $db->table('ticket_assignments')
+                         ->where('ticket_id', $ticketId)
+                         ->where('completed_at IS NULL')
+                         ->orderBy('id', 'DESC')
+                         ->get()
+                         ->getRowArray();
+
+        $currentImplDate = $newImplDate ?: ($assignment['implementation_date'] ?? $ticket['target_completion_date'] ?? date('Y-m-d'));
+        // Strip time if included
+        $currentImplDateOnly = substr((string) $currentImplDate, 0, 10);
+        $finalWorkingDays    = $workingDays ?: max(1, (int) ($assignment['working_days'] ?? $ticket['project_working_days'] ?? 1) + $extensionDays);
+
+        // Calculate new target completion date using institutional WorkCalendar (excluding weekends and official Philippine non-working holidays)
+        $baseDateObj = new \DateTime($currentImplDateOnly);
+        $calculatedTargetDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDateObj, max(1, $finalWorkingDays))->format('Y-m-d H:i:s');
+
+        // Update active assignment
+        if ($assignment) {
+            $assignmentUpdate = [
+                'implementation_date' => $currentImplDateOnly,
+                'working_days'        => $finalWorkingDays,
+            ];
+            if (!empty($reason)) {
+                $assignmentUpdate['dispatcher_notes'] = $reason;
+            }
+            $db->table('ticket_assignments')
+               ->where('id', $assignment['id'])
+               ->update($assignmentUpdate);
+        }
+
+        // Update ticket record
+        $ticketUpdate = [
+            'target_completion_date' => $calculatedTargetDate,
+            'updated_at'             => date('Y-m-d H:i:s'),
+        ];
+
+        if ($extensionDays > 0) {
+            $totalExtension = (int) ($ticket['extension_days'] ?? 0) + $extensionDays;
+            $ticketUpdate['extension_days']           = $totalExtension;
+            $ticketUpdate['extended_completion_date'] = substr($calculatedTargetDate, 0, 10);
+            $ticketUpdate['extension_reason']         = $reason;
+        }
+
+        if (!empty($notation)) {
+            $ticketUpdate['staff_notation'] = $notation;
+            $ticketUpdate['ssu_notation']   = $notation;
+        }
+
+        $this->ticketModel->update($ticketId, $ticketUpdate);
+
+        $unitCode = match ($unitId) {
+            1       => 'FGMU',
+            2       => 'LEAU',
+            3       => 'SSU',
+            default => 'GSO',
+        };
+
+        // Audit log
+        $logDetails = "Schedule Updated: Implementation Date set to {$currentImplDateOnly}, Working Days: {$finalWorkingDays} (Target: " . substr($calculatedTargetDate, 0, 10) . "). Reason: {$reason}";
+        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Schedule Updated', $logDetails);
+
+        // Notify Requestor
+        if ($notifyRequestor) {
+            $notifTitle = "Ticket #{$ticketId} Schedule Updated";
+            $notifBody  = "The schedule for your request has been updated to {$currentImplDateOnly} ({$finalWorkingDays} working day(s))." . ($reason ? " Reason: {$reason}" : "");
+
+            $this->notificationModel->createNotification(
+                $ticket['user_id'],
+                'info',
+                $notifTitle,
+                $notifBody
+            );
+
+            $this->notifyRequestorByEmail(
+                $ticket['user_id'],
+                $ticketId,
+                "Schedule Updated",
+                "Your service schedule for Ticket #{$ticketId} has been updated to {$currentImplDateOnly} ({$finalWorkingDays} working day(s)). Reason: {$reason}"
+            );
+        }
+
+        return $this->successResponse('Ticket schedule updated successfully.', [
+            'ticket_id'              => $ticketId,
+            'implementation_date'    => $currentImplDateOnly,
+            'working_days'           => $finalWorkingDays,
+            'target_completion_date' => $calculatedTargetDate,
+            'reason'                 => $reason,
         ]);
     }
 

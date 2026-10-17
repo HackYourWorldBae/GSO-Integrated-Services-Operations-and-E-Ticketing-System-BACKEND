@@ -43,7 +43,7 @@
     },
     "scripts": {
         "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
-        "test": "phpunit"
+        "test": "phpunit --no-coverage"
     },
     "extra": {
         "google/apiclient-services": [

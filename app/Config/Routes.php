@@ -23,19 +23,19 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
     $routes->post('auth/resend-mfa', 'AuthController::resendMfa', ['filter' => 'throttle:5,60']);
 
     // Password Recovery via Email Link (Rate limited to prevent abuse)
-    $routes->post('auth/forgot-password',    'AuthController::forgotPassword',   ['filter' => 'throttle:5,60']);
-    $routes->post('auth/verify-reset-token', 'AuthController::verifyResetToken', ['filter' => 'throttle:15,60']);
-    $routes->post('auth/reset-password',     'AuthController::resetPassword',    ['filter' => 'throttle:5,60']);
+    $routes->post('auth/forgot-password',    'PasswordRecoveryController::forgotPassword',   ['filter' => 'throttle:5,60']);
+    $routes->post('auth/verify-reset-token', 'PasswordRecoveryController::verifyResetToken', ['filter' => 'throttle:15,60']);
+    $routes->post('auth/reset-password',     'PasswordRecoveryController::resetPassword',    ['filter' => 'throttle:5,60']);
 
     // Public Scheduled Projects Announcements (FGMU & LEAU)
     $routes->get('projects',          'TicketController::getProjects', ['filter' => 'throttle:60,60']);
     $routes->get('projects/archives', 'TicketController::getProjectArchives', ['filter' => 'throttle:60,60']);
 
     // Public Avatar & Institutional ID Card / Selfie / Signature Stream
-    $routes->get('auth/avatar/(:segment)',    'AuthController::getAvatar/$1');
-    $routes->get('auth/signature/(:segment)', 'AuthController::getSignature/$1');
-    $routes->get('auth/id-card/(:segment)',   'AuthController::getIdCard/$1');
-    $routes->get('auth/id-selfie/(:segment)', 'AuthController::getIdSelfie/$1');
+    $routes->get('auth/avatar/(:segment)',    'UserProfileController::getAvatar/$1');
+    $routes->get('auth/signature/(:segment)', 'UserProfileController::getSignature/$1');
+    $routes->get('auth/id-card/(:segment)',   'UserProfileController::getIdCard/$1');
+    $routes->get('auth/id-selfie/(:segment)', 'UserProfileController::getIdSelfie/$1');
 
     // System Maintenance Status (Public)
     $routes->get('auth/maintenance-status',   'AuthController::maintenanceStatus');
@@ -60,19 +60,19 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('auth/logout',          'AuthController::logout');
         $routes->get('auth/me',               'AuthController::me');
         $routes->get('auth/check-session',    'AuthController::checkSession');
-        $routes->patch('auth/profile',        'AuthController::updateProfile');
-        $routes->post('auth/change-password', 'AuthController::changePassword');
-        $routes->post('auth/avatar',          'AuthController::uploadAvatar');
-        $routes->get('auth/avatar/(:segment)','AuthController::getAvatar/$1');
-        $routes->post('auth/signature',          'AuthController::uploadSignature');
-        $routes->delete('auth/signature',        'AuthController::deleteSignature');
-        $routes->get('auth/signature/(:segment)','AuthController::getSignature/$1');
-        $routes->get('auth/document-signatures', 'AuthController::getDocumentSignatures');
+        $routes->patch('auth/profile',        'UserProfileController::updateProfile');
+        $routes->post('auth/change-password', 'UserProfileController::changePassword');
+        $routes->post('auth/avatar',          'UserProfileController::uploadAvatar');
+        $routes->get('auth/avatar/(:segment)','UserProfileController::getAvatar/$1');
+        $routes->post('auth/signature',          'UserProfileController::uploadSignature');
+        $routes->delete('auth/signature',        'UserProfileController::deleteSignature');
+        $routes->get('auth/signature/(:segment)','UserProfileController::getSignature/$1');
+        $routes->get('auth/document-signatures', 'UserProfileController::getDocumentSignatures');
 
         // -- Sub-Unit Head Delegation & Coverage (Acting Unit Head) --
-        $routes->get('auth/delegation/units',    'AuthController::getDelegationUnits');
-        $routes->post('auth/assume-unit-head',   'AuthController::assumeUnitHead');
-        $routes->post('auth/revert-unit-head',   'AuthController::revertUnitHead');
+        $routes->get('auth/delegation/units',    'DirectorDelegationController::getDelegationUnits');
+        $routes->post('auth/assume-unit-head',   'DirectorDelegationController::assumeUnitHead');
+        $routes->post('auth/revert-unit-head',   'DirectorDelegationController::revertUnitHead');
 
         // -- Ticket Intake (Users / Requestors) --
         $routes->post('tickets/intake',           'TicketController::submitIntake');

@@ -627,14 +627,6 @@ class PersonnelController extends BaseController
             $currentRole   = $this->currentUserRole();
             $db            = \Config\Database::connect();
 
-            // Self-healing schema check: Ensure personnel.user_id column exists
-            if ($db->tableExists('personnel') && !$db->fieldExists('user_id', 'personnel')) {
-                try {
-                    $db->query("ALTER TABLE `personnel` ADD COLUMN `user_id` VARCHAR(36) NULL DEFAULT NULL AFTER `unit_id`");
-                } catch (\Throwable $ignored) {
-                }
-            }
-
             $personnel = null;
             $targetPersonnelId = sanitize_string($this->request->getGet('personnel_id') ?? '');
             $candidatePersonnelIds = [];

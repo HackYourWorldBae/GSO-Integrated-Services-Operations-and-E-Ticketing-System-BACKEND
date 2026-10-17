@@ -85,7 +85,9 @@ class BorrowingController extends BaseController
 
         $body = $this->request->getJSON(true) ?? [];
         $notes = sanitize_string($body['notes'] ?? '');
-        $approverTitle = in_array($role, ['director', 'superadmin'], true) ? 'Director' : 'LEAU Unit Head';
+        $destUnitId = (int) $ticket['unit_id'];
+        $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
+        $approverTitle = in_array($role, ['director', 'superadmin'], true) ? 'Director' : "{$unitCode} Unit Head";
 
         $this->borrowingModel->update($borrowing['id'], [
             'status'           => 'approved_director',
@@ -102,9 +104,6 @@ class BorrowingController extends BaseController
             'reviewed_by'           => $this->currentUserId(),
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);
-
-        $destUnitId = (int) $ticket['unit_id'];
-        $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Approved', "Borrowing request approved by {$approverTitle}. Notes: {$notes}");
 

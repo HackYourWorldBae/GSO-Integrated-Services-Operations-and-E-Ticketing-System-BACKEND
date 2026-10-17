@@ -112,7 +112,9 @@ class TicketActionController extends BaseController
         $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
         $isBorrowing  = str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools') || str_contains($serviceLower, 'borrowing request');
 
-        $approverTitle = $isExecutive ? 'Director' : 'Unit Head';
+        $destUnitId = (int) $ticket['unit_id'];
+        $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
+        $approverTitle = $isExecutive ? 'Director' : "{$unitCode} Unit Head";
 
         if ($isBorrowing) {
             $statusLabel = 'Approved - Awaiting Inventory Assignment';
@@ -151,8 +153,8 @@ class TicketActionController extends BaseController
 
         $this->ticketModel->update($ticketId, $updateData);
 
-        // Borrowing sync: LEAU borrowing tickets move from pending_director -> approved_director
-        // so they appear in the LEAU Admin approved queue ready for inventory assignment.
+        // Borrowing sync: borrowing tickets move from pending_director -> approved_director
+        // so they appear in the unit Admin approved queue ready for inventory assignment.
         try {
             if ($isBorrowing) {
                 $db = Database::connect();
@@ -172,7 +174,7 @@ class TicketActionController extends BaseController
         $notifBody  = ($isEmergency === 1)
             ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the {$approverTitle}."
             : ($isBorrowing
-                ? "Your borrowing request for {$ticket['service_type']} has been approved by the {$approverTitle}. LEAU Admin will assign inventory."
+                ? "Your borrowing request for {$ticket['service_type']} has been approved by the {$approverTitle}. {$unitCode} Admin will assign inventory."
                 : "Your request for {$ticket['service_type']} has been approved by the {$approverTitle}.");
 
         $this->notificationModel->createNotification(

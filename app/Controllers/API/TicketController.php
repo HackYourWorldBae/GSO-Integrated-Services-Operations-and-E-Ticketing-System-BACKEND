@@ -553,6 +553,7 @@ class TicketController extends BaseController
                         'location'    => sanitize_string($borrowingDetails['department_major'] ?? ''),
                         'office_room' => '',
                         'is_archived' => 0,
+                        'is_escalated_to_director' => 0,
                         'submitted_at'=> date('Y-m-d H:i:s'),
                         'updated_at'  => date('Y-m-d H:i:s'),
                     ]);

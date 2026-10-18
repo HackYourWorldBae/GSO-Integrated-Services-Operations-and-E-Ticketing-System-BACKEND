@@ -110,7 +110,20 @@ class TicketActionController extends BaseController
         $wasEscalated = !empty($ticket['is_escalated_to_director']);
 
         $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-        $isBorrowing  = str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools') || str_contains($serviceLower, 'borrowing request');
+        $isBorrowing  = str_starts_with($serviceLower, 'borrow')
+                     || str_contains($serviceLower, 'borrowing')
+                     || str_contains($serviceLower, 'borrowed');
+        if (!$isBorrowing) {
+            try {
+                $dbConn = Database::connect();
+                $borrowCount = $dbConn->table('borrowing_requests')->where('ticket_id', $ticketId)->countAllResults();
+                if ($borrowCount > 0) {
+                    $isBorrowing = true;
+                }
+            } catch (\Throwable $e) {
+                // Ignore DB error fallback
+            }
+        }
 
         $destUnitId = (int) $ticket['unit_id'];
         $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
@@ -142,12 +155,14 @@ class TicketActionController extends BaseController
             'updated_at'               => date('Y-m-d H:i:s'),
         ];
 
-        if ($isEmergency !== null) {
+        // Borrowing requests cannot and should not be marked as emergency
+        if ($isBorrowing) {
+            $isEmergency = 0;
+            $updateData['is_emergency'] = 0;
+        } elseif ($isEmergency !== null) {
             $updateData['is_emergency'] = $isEmergency;
             if ($isEmergency === 1) {
-                $logMessage = $isBorrowing
-                    ? "Borrowing request approved as EMERGENCY PRIORITY by {$approverTitle} — awaiting immediate inventory assignment."
-                    : "Ticket approved as EMERGENCY PRIORITY by {$approverTitle} — queued for immediate dispatch.";
+                $logMessage = "Ticket approved as EMERGENCY PRIORITY by {$approverTitle} — queued for immediate dispatch.";
             }
         }
 

@@ -97,6 +97,7 @@ class BorrowingController extends BaseController
         $this->ticketModel->update($ticketId, [
             'status'                => 'approved',
             'status_label'          => 'Approved - Awaiting Inventory Assignment',
+            'is_emergency'          => 0,
             'is_approval_delayed'   => 0,
             'approval_delay_reason' => null,
             'current_step'          => 3,

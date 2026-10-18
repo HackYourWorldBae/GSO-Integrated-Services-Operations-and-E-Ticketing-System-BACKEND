@@ -9,6 +9,7 @@ use App\Models\NotificationModel;
 use App\Models\UserModel;
 use App\Models\BorrowingRequestModel;
 use App\Libraries\ResendEmailService;
+use App\Libraries\BorrowingWorkflow;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
@@ -109,13 +110,7 @@ class TicketActionController extends BaseController
         $isExecutive = in_array($userRole, ['director', 'superadmin'], true);
         $wasEscalated = !empty($ticket['is_escalated_to_director']);
 
-        $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-        $isBorrowing  = str_starts_with($serviceLower, 'borrow')
-                     || str_contains($serviceLower, 'borrowing')
-                     || str_contains($serviceLower, 'borrowed');
-        if (!$isBorrowing) {
-            $isBorrowing = (new BorrowingRequestModel())->hasBorrowingRequest($ticketId);
-        }
+        $isBorrowing = BorrowingWorkflow::isBorrowingTicket($ticket);
 
         $destUnitId = (int) $ticket['unit_id'];
         $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
@@ -761,13 +756,12 @@ class TicketActionController extends BaseController
 
         // Borrowing sync: declined borrowing tickets are cancelled in the borrowing workflow.
         try {
-            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-            if (str_contains($serviceLower, 'borrowing of plants') || str_contains($serviceLower, 'borrowing of tools')) {
-                $db = Database::connect();
-                $db->table('borrowing_requests')
+            if (BorrowingWorkflow::isBorrowingTicket($ticket)) {
+                (new BorrowingRequestModel())
                     ->where('ticket_id', $ticketId)
-                    ->where('status', 'pending_director')
-                    ->update(['status' => 'cancelled', 'updated_at' => date('Y-m-d H:i:s')]);
+                    ->where('status', BorrowingWorkflow::STATUS_PENDING_DIRECTOR)
+                    ->set(['status' => BorrowingWorkflow::STATUS_CANCELLED, 'updated_at' => date('Y-m-d H:i:s')])
+                    ->update();
             }
         } catch (\Throwable $borrowSyncErr) {
             log_message('error', '[TicketActionController::decline] Borrowing sync failed: ' . $borrowSyncErr->getMessage());

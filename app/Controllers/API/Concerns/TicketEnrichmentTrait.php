@@ -3,6 +3,7 @@
 namespace App\Controllers\API\Concerns;
 
 use Config\Database;
+use App\Libraries\BorrowingWorkflow;
 
 /**
  * TicketEnrichmentTrait - shared ticket enrichment helpers.
@@ -215,11 +216,7 @@ trait TicketEnrichmentTrait
             $ticket['escalated_by_name']        = $escUser ? trim(($escUser['first_name'] ?? '') . ' ' . ($escUser['last_name'] ?? '')) : null;
 
             // Defensively normalize borrowing ticket status_label so it never shows "Queued for Dispatch"
-            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-            $isBorrowingTicket = !empty($ticket['borrowing'])
-                || str_contains($serviceLower, 'borrowing of plants')
-                || str_contains($serviceLower, 'borrowing of tools')
-                || str_contains($serviceLower, 'borrowing request');
+            $isBorrowingTicket = BorrowingWorkflow::isBorrowingTicket($ticket);
 
             if ($isBorrowingTicket) {
                 $rawLabel = (string) ($ticket['status_label'] ?? '');

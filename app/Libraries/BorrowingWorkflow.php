@@ -150,4 +150,45 @@ class BorrowingWorkflow
             default                         => ($ticketStatus === 'approved' ? 'Approved - Awaiting Inventory Assignment' : 'Pending Approval'),
         };
     }
+
+    /**
+     * Checks if a service type string represents a borrowing request.
+     */
+    public static function isBorrowingService(?string $serviceType): bool
+    {
+        if (empty($serviceType)) {
+            return false;
+        }
+
+        $lower = strtolower(trim($serviceType));
+
+        return str_starts_with($lower, 'borrow')
+            || str_contains($lower, 'borrowing')
+            || str_contains($lower, 'borrowed');
+    }
+
+    /**
+     * Checks if a ticket represents a borrowing request.
+     * Evaluates explicit borrowing relation, service type string, or borrowing_requests table entry.
+     *
+     * @param array<string, mixed> $ticket
+     */
+    public static function isBorrowingTicket(array $ticket): bool
+    {
+        if (!empty($ticket['borrowing'])) {
+            return true;
+        }
+
+        if (self::isBorrowingService($ticket['service_type'] ?? null)) {
+            return true;
+        }
+
+        $ticketId = (string) ($ticket['id'] ?? $ticket['ticket_id'] ?? '');
+        if ($ticketId !== '') {
+            return (new \App\Models\BorrowingRequestModel())->hasBorrowingRequest($ticketId);
+        }
+
+        return false;
+    }
 }
+

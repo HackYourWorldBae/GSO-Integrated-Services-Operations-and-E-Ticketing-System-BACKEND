@@ -7,6 +7,7 @@ use App\Models\TicketModel;
 use App\Models\TicketAttachmentModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
+use App\Libraries\BorrowingWorkflow;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -148,11 +149,7 @@ class TicketQueueController extends BaseController
 
             // Borrowing requests are date-driven by pickup date and move only via
             // explicit pickup action — never auto-start them into Active/In Progress.
-            $serviceLower = strtolower((string) ($ticket['service_type'] ?? ''));
-            $isBorrowing = !empty($ticket['borrowing'])
-                || str_contains($serviceLower, 'borrowing of plants')
-                || str_contains($serviceLower, 'borrowing of tools')
-                || str_contains($serviceLower, 'borrowing request');
+            $isBorrowing = BorrowingWorkflow::isBorrowingTicket($ticket);
             if ($isBorrowing) {
                 // Self-heal tickets marked ready before the step-4 fix: awaiting
                 // pickup must stay scheduled, never Active/In Progress.

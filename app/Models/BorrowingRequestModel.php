@@ -113,63 +113,40 @@ class BorrowingRequestModel extends Model
     {
         $today = date('Y-m-d');
 
-        $flaggedBuilder = $this->select('borrowing_requests.*')
+        $builder = $this->select('borrowing_requests.*')
             ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
-            ->where('borrowing_requests.status', 'overdue');
+            ->groupStart()
+                ->where('borrowing_requests.status', 'overdue')
+                ->orGroupStart()
+                    ->where('borrowing_requests.status', 'picked_up')
+                    ->where('borrowing_requests.expected_return_date <', $today)
+                ->groupEnd()
+            ->groupEnd();
+
         if ($unitId > 0) {
-            $flaggedBuilder->where('tickets.unit_id', $unitId);
-        }
-        $flagged = $flaggedBuilder->orderBy('borrowing_requests.expected_return_date', 'ASC')->findAll();
-
-        $pastDueBuilder = $this->select('borrowing_requests.*')
-            ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
-            ->where('borrowing_requests.status', 'picked_up')
-            ->where('borrowing_requests.expected_return_date <', $today);
-        if ($unitId > 0) {
-            $pastDueBuilder->where('tickets.unit_id', $unitId);
-        }
-        $pastDue = $pastDueBuilder->orderBy('borrowing_requests.expected_return_date', 'ASC')->findAll();
-
-        $merged = [...$flagged];
-        foreach ($pastDue as $row) {
-            $exists = false;
-            foreach ($merged as $m) {
-                if ((string) ($m['ticket_id'] ?? '') === (string) ($row['ticket_id'] ?? '') && (string) ($m['id'] ?? '') === (string) ($row['id'] ?? '')) {
-                    $exists = true;
-                    break;
-                }
-            }
-            if (!$exists) {
-                $merged[] = $row;
-            }
+            $builder->where('tickets.unit_id', $unitId);
         }
 
-        return $merged;
+        return $builder->orderBy('borrowing_requests.expected_return_date', 'ASC')->findAll();
     }
 
     /**
-     * Mark overdue items
+     * Mark overdue items atomically in a single batch update.
      */
     public function markOverdue(): int
     {
         $today = date('Y-m-d');
         $now = date('Y-m-d H:i:s');
 
-        // Find picked_up items past their return date
-        $overdueItems = $this->where('status', 'picked_up')
+        $this->builder()
+            ->where('status', 'picked_up')
             ->where('expected_return_date <', $today)
-            ->findAll();
-
-        $updated = 0;
-        foreach ($overdueItems as $item) {
-            $this->update($item['id'], [
-                'status'      => 'overdue',
-                'updated_at'  => $now,
+            ->update([
+                'status'     => 'overdue',
+                'updated_at' => $now,
             ]);
-            $updated++;
-        }
 
-        return $updated;
+        return (int) $this->db->affectedRows();
     }
 
     /**

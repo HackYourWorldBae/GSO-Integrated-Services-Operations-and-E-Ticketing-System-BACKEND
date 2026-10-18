@@ -7,6 +7,7 @@ use App\Models\TicketModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
 use App\Models\UserModel;
+use App\Models\BorrowingRequestModel;
 use App\Libraries\ResendEmailService;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
@@ -114,10 +115,7 @@ class TicketActionController extends BaseController
                      || str_contains($serviceLower, 'borrowing')
                      || str_contains($serviceLower, 'borrowed');
         if (!$isBorrowing) {
-            $isBorrowing = Database::connect()
-                ->table('borrowing_requests')
-                ->where('ticket_id', $ticketId)
-                ->countAllResults() > 0;
+            $isBorrowing = (new BorrowingRequestModel())->hasBorrowingRequest($ticketId);
         }
 
         $destUnitId = (int) $ticket['unit_id'];
@@ -167,11 +165,11 @@ class TicketActionController extends BaseController
         // so they appear in the unit Admin approved queue ready for inventory assignment.
         try {
             if ($isBorrowing) {
-                $db = Database::connect();
-                $db->table('borrowing_requests')
+                (new BorrowingRequestModel())
                     ->where('ticket_id', $ticketId)
                     ->where('status', 'pending_director')
-                    ->update(['status' => 'approved_director', 'updated_at' => date('Y-m-d H:i:s')]);
+                    ->set(['status' => 'approved_director', 'updated_at' => date('Y-m-d H:i:s')])
+                    ->update();
                 $logMessage .= " Borrowing {$approverTitle} approval synced.";
             }
         } catch (\Throwable $borrowSyncErr) {

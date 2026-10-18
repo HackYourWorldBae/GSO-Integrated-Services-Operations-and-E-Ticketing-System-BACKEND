@@ -171,4 +171,12 @@ class BorrowingRequestModel extends Model
 
         return $updated;
     }
+
+    /**
+     * Check if a borrowing request exists for a given ticket ID.
+     */
+    public function hasBorrowingRequest(string $ticketId): bool
+    {
+        return $this->where('ticket_id', $ticketId)->countAllResults() > 0;
+    }
 }

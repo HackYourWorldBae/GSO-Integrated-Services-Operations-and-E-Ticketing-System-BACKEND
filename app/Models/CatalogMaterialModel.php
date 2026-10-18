@@ -36,7 +36,7 @@ class CatalogMaterialModel extends Model
 
     protected $validationRules = [
         'unit_code'     => 'required|in_list[FGMU,LEAU]',
-        'category'      => 'required|min_length[2]|max_length[60]',
+        'category'      => 'permit_empty|max_length[60]',
         'name'          => 'required|min_length[2]|max_length[255]',
         'unit'          => 'required|max_length[50]',
         'default_price' => 'permit_empty|numeric|greater_than_equal_to[0]',

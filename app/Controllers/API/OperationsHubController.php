@@ -142,7 +142,10 @@ class OperationsHubController extends BaseController
         $body = $this->request->getJSON(true) ?? [];
 
         $unitCode     = strtoupper(trim($body['unit_code'] ?? ''));
-        $category     = sanitize_string($body['category'] ?? '');
+        $category     = sanitize_string($body['category'] ?? 'General');
+        if (empty($category)) {
+            $category = 'General';
+        }
         $name         = sanitize_string($body['name'] ?? '');
         $unit         = sanitize_string($body['unit'] ?? 'pcs');
         $defaultPrice = max(0.00, (float) ($body['default_price'] ?? 0));
@@ -150,10 +153,6 @@ class OperationsHubController extends BaseController
 
         if (!in_array($unitCode, ['FGMU', 'LEAU'], true)) {
             return $this->errorResponse('Sub-unit must be either FGMU or LEAU.');
-        }
-
-        if (empty($category)) {
-            return $this->errorResponse('Material category is required.');
         }
 
         if (empty($name)) {
@@ -218,7 +217,8 @@ class OperationsHubController extends BaseController
         }
 
         if (isset($body['category'])) {
-            $updateData['category'] = sanitize_string($body['category']);
+            $cat = sanitize_string($body['category']);
+            $updateData['category'] = $cat ?: 'General';
         }
 
         if (isset($body['name'])) {

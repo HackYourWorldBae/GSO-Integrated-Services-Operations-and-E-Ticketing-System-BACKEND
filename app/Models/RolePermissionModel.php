@@ -52,7 +52,7 @@ class RolePermissionModel extends Model
             'key'         => 'tickets.approve_decline',
             'name'        => 'Approve / Decline Tickets',
             'category'    => 'Triage & Approval',
-            'description' => 'Perform initial triage, set EODB tiers, and approve/decline tickets.',
+            'description' => 'Perform initial triage and approve/decline tickets.',
         ],
         [
             'key'         => 'tickets.dispatch',
@@ -88,7 +88,7 @@ class RolePermissionModel extends Model
             'key'         => 'reports.view',
             'name'        => 'View Analytics & Reports',
             'category'    => 'Reports & Compliance',
-            'description' => 'Access EODB compliance metrics, completion stats, and performance logs.',
+            'description' => 'Access turnaround metrics, completion stats, and performance logs.',
         ],
         [
             'key'         => 'users.provision',

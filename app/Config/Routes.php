@@ -88,7 +88,6 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->post('tickets/(:segment)/accomplishment',  'TicketAttachmentController::uploadAccomplishment/$1', ['filter' => 'role:admin,worker']);
         $routes->get('tickets/(:segment)/accomplishment',   'TicketAttachmentController::downloadAccomplishment/$1');
         $routes->match(['post', 'patch'], 'tickets/(:segment)/verify-close', 'TicketActionController::verifyAndClose/$1', ['filter' => 'role:admin,director,student,employee,superadmin']);
-        $routes->patch('tickets/(:segment)/eodb',           'TicketActionController::updateEodb/$1',           ['filter' => 'role:admin']);
 
         // -- Ticket Queues (Per Unit — Admin, Director, Superadmin) --
         $routes->get('tickets/queue/(:segment)',          'TicketQueueController::pendingQueue/$1',   ['filter' => 'role:admin,director,superadmin']);

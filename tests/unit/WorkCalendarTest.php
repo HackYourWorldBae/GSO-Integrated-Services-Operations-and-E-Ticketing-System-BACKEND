@@ -7,7 +7,7 @@ use CodeIgniter\Test\CIUnitTestCase;
  * Level 1 — Unit tests for the institutional Work Calendar.
  *
  * Covers every public method of App\Libraries\WorkCalendar, which drives
- * dispatch scheduling (EODB 3/7/21-day tiers), target completion dates,
+ * dispatch scheduling, target completion dates,
  * and working-hours accounting across ticket operations.
  *
  * @internal

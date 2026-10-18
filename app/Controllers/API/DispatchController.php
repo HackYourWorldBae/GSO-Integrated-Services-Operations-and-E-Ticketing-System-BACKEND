@@ -232,15 +232,7 @@ class DispatchController extends BaseController
         $taskNotes          = sanitize_string($body['task_notes'] ?? '');
         $dispatcherNotes    = sanitize_string($body['dispatcher_notes'] ?? '');
 
-        // EODB (RA 11032) Turnaround Calculation: 3 (Simple), 7 (Moderate), 21 (Complex)
-        $eodbTier = sanitize_string($body['eodb_tier'] ?? ($ticket['eodb_tier'] ?: 'simple_3d'));
-        $eodbDays = match($eodbTier) {
-            'moderate_7d' => 7,
-            'complex_21d' => 21,
-            default       => 3,
-        };
-
-        // Strict limit: Working days must be between 1 and 31 days
+        // Working days validation: strictly between 1 and 31 days (defaults to 3 working days)
         if (isset($body['working_days'])) {
             $parsedDays = (int) $body['working_days'];
             if ($parsedDays < 1 || $parsedDays > 31) {
@@ -251,7 +243,7 @@ class DispatchController extends BaseController
                 );
             }
         }
-        $workingDays = !empty($body['working_days']) ? min(31, max(1, (int) $body['working_days'])) : $eodbDays;
+        $workingDays = !empty($body['working_days']) ? min(31, max(1, (int) $body['working_days'])) : 3;
 
         $baseDate = new \DateTime($implementationDate);
         $targetCompletionDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDate, $workingDays)->format('Y-m-d H:i:s');
@@ -465,8 +457,6 @@ class DispatchController extends BaseController
             'status'                 => 'processing',
             'status_label'           => $statusLabel,
             'current_step'           => $isImmediate ? 5 : 4,
-            'eodb_tier'              => $eodbTier,
-            'eodb_days'              => $workingDays,
             'target_completion_date' => $targetCompletionDate,
             'project_working_days'   => $workingDays,
             'updated_at'             => $now,
@@ -531,7 +521,7 @@ class DispatchController extends BaseController
 
         $detail = ($isEmergency ? "EMERGENCY: " : "") . "Assigned to {$worker['name']}";
         if ($implementationDate) {
-            $detail .= " — scheduled for {$implementationDate} (EODB: {$workingDays} working days)";
+            $detail .= " — scheduled for {$implementationDate} ({$workingDays} working days)";
         }
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Worker Assigned', $detail);
 

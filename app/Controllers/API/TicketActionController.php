@@ -28,7 +28,6 @@ use Config\Database;
  * - PATCH /api/v1/tickets/{id}/notation
  * - PATCH /api/v1/tickets/{id}/resolve
  * - POST/PATCH /api/v1/tickets/{id}/verify-close
- * - PATCH /api/v1/tickets/{id}/eodb
  */
 class TicketActionController extends BaseController
 {
@@ -1811,52 +1810,4 @@ class TicketActionController extends BaseController
 
         return $this->successResponse('Ticket verified and closed successfully.');
     }
-
-    /**
-     * Update EODB turnaround classification on a ticket.
-     * 3 days: Simple, 7 days: Moderate, 21 days: Complex
-     */
-    public function updateEodb(string $ticketId): ResponseInterface
-    {
-        $ticket = $this->ticketModel->find($ticketId);
-        if (!$ticket) {
-            return $this->notFoundResponse('Ticket');
-        }
-
-        $body = $this->request->getJSON(true) ?? [];
-        $tier = sanitize_string($body['eodb_tier'] ?? 'simple_3d');
-
-        $days = match($tier) {
-            'moderate_7d' => 7,
-            'complex_21d' => 21,
-            default       => 3,
-        };
-
-        $implDate = !empty($body['implementation_date'])
-            ? new \DateTime($body['implementation_date'])
-            : new \DateTime();
-
-        $targetDate = \App\Libraries\WorkCalendar::addWorkingDays($implDate, $days)->format('Y-m-d H:i:s');
-
-        $this->ticketModel->update($ticketId, [
-            'eodb_tier'              => $tier,
-            'eodb_days'              => $days,
-            'target_completion_date' => $targetDate,
-            'updated_at'             => date('Y-m-d H:i:s'),
-        ]);
-
-        $this->logModel->logAction(
-            $ticketId,
-            $this->currentUserId(),
-            'EODB Classification Set',
-            "EODB tier set to {$tier} ({$days} working days). Target completion: {$targetDate}."
-        );
-
-        return $this->successResponse('EODB classification updated successfully.', [
-            'eodb_tier'              => $tier,
-            'eodb_days'              => $days,
-            'target_completion_date' => $targetDate,
-        ]);
-    }
-
 }

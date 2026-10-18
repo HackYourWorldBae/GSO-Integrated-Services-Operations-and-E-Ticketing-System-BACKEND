@@ -286,8 +286,6 @@ trait TicketEnrichmentTrait
             $ticket['verification_status']        = $ticket['verification_status'] ?? 'pending_report';
             $ticket['verified_by_user_id']        = $ticket['verified_by_user_id'] ?? null;
             $ticket['verified_at']                = $ticket['verified_at'] ?? null;
-            $ticket['eodb_tier']                  = $isUnscheduled ? null : ($ticket['eodb_tier'] ?? null);
-            $ticket['eodb_days']                  = ($isUnscheduled || empty($ticket['eodb_days'])) ? null : (int) $ticket['eodb_days'];
             $ticket['target_completion_date']     = $isUnscheduled ? null : ($ticket['target_completion_date'] ?? null);
             $ticket['is_emergency']               = (int) ($ticket['is_emergency'] ?? 0);
             $ticket['is_vip']                     = (int) ($ticket['is_vip'] ?? 0);

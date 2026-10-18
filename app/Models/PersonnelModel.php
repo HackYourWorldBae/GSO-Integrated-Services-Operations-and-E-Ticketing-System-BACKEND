@@ -98,7 +98,7 @@ class PersonnelModel extends Model
         }
 
         $assignments = $db->table('ticket_assignments ta')
-            ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status, t.eodb_tier, t.target_completion_date')
+            ->select('ta.*, t.service_type, t.is_project, t.project_title, t.status as ticket_status, t.target_completion_date')
             ->join('tickets t', 't.id = ta.ticket_id', 'left')
             ->whereIn('ta.personnel_id', $personnelIds)
             ->where('ta.completed_at IS NULL')
@@ -176,7 +176,6 @@ class PersonnelModel extends Model
                     'is_emergency'           => (int) ($a['is_emergency'] ?? 0),
                     'queue_order'            => (int) ($a['queue_order'] ?? ($idx + 1)),
                     'status'                 => $a['status'] ?? 'active',
-                    'eodb_tier'              => $a['eodb_tier'] ?? null,
                     'target_completion_date' => $a['target_completion_date'] ?? null,
                     'is_solo'                => $isSolo,
                     'team_size'              => $totalTeam,

@@ -504,8 +504,8 @@ class CollaborationController extends BaseController
             if (empty($workingDays)) {
                 if (!empty($row['project_working_days'])) {
                     $workingDays = (int)$row['project_working_days'];
-                } elseif (!empty($row['eodb_days'])) {
-                    $workingDays = (int)$row['eodb_days'];
+                } elseif (!empty($row['working_days'])) {
+                    $workingDays = (int)$row['working_days'];
                 }
             }
 

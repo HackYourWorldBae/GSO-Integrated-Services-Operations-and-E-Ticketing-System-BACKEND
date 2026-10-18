@@ -23,6 +23,34 @@ class NotificationModel extends Model
     protected $updatedField  = 'updated_at';
 
     /**
+     * Remove ticket numbers/identifiers from notification titles
+     */
+    public static function cleanTitle(?string $title): string
+    {
+        if (empty($title)) {
+            return '';
+        }
+
+        // 1. Remove parenthesized ticket hashes or codes, e.g. " (#123)" or " (FGMU-TIC-1-2026)"
+        $cleaned = preg_replace('/\s*\(\s*(?:#\s*[A-Za-z0-9\-_]+|(?:FGMU|LEAU|SSU)-(?:TIC|PRJ|INC)-[A-Za-z0-9\-_]+|\d+)\s*\)/i', '', $title);
+
+        // 2. Remove trailing ": <ticketId>", e.g. "Collaboration Request: 123" or ": FGMU-TIC-1-2026"
+        $cleaned = preg_replace('/:\s*(?:#\s*[A-Za-z0-9\-_]+|(?:FGMU|LEAU|SSU)-(?:TIC|PRJ|INC)-[A-Za-z0-9\-_]+|\d+)\s*$/i', '', $cleaned);
+
+        // 3. Remove "#123", "#FGMU-TIC-4-2026", "# 123", etc.
+        $cleaned = preg_replace('/#\s*[A-Za-z0-9\-_]+/i', '', $cleaned);
+
+        // 4. Remove standalone ticket codes like "FGMU-TIC-1-2026" if any remain in title
+        $cleaned = preg_replace('/\b(?:FGMU|LEAU|SSU)-(?:TIC|PRJ|INC)-[A-Za-z0-9\-_]+\b/i', '', $cleaned);
+
+        // 5. Clean up multiple spaces, trailing colons or dashes
+        $cleaned = preg_replace('/\s{2,}/', ' ', $cleaned);
+        $cleaned = preg_replace('/\s*[:\-]\s*$/', '', $cleaned);
+
+        return trim($cleaned);
+    }
+
+    /**
      * Helper to create a notification for a user
      */
     public function createNotification(string $userId, string $type, string $title, string $message)
@@ -30,7 +58,7 @@ class NotificationModel extends Model
         return $this->insert([
             'user_id' => $userId,
             'type'    => $type,
-            'title'   => $title,
+            'title'   => self::cleanTitle($title),
             'message' => $message,
             'is_read' => 0
         ]);

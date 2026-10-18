@@ -349,7 +349,7 @@ class TicketAttachmentController extends BaseController
         $notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Ticket #{$ticketId} Accomplishment Submitted",
+            "Ticket Accomplishment Submitted",
             "Field services have been completed with accomplishment report. Verification in progress."
         );
 

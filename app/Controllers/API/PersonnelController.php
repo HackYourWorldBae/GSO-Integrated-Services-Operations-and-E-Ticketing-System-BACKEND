@@ -146,7 +146,7 @@ class PersonnelController extends BaseController
                     $notificationModel->createNotification(
                         $ticket['user_id'],
                         'info',
-                        "Ticket #{$assignment['ticket_id']} Schedule Update",
+                        "Ticket Schedule Update",
                         "Staff assignment updated. Ticket queued for dispatch."
                     );
                 }
@@ -208,7 +208,7 @@ class PersonnelController extends BaseController
                         $notificationModel->createNotification(
                             $ticket['user_id'],
                             'info',
-                            "Ticket #{$assignment['ticket_id']} Personnel Updated",
+                            "Ticket Personnel Updated",
                             "Staff assignment updated to {$targetWorker['name']}."
                         );
                     }
@@ -335,7 +335,7 @@ class PersonnelController extends BaseController
                         $notificationModel->createNotification(
                             $ticket['user_id'],
                             'warning',
-                            "Ticket #{$ticket['id']} Extended",
+                            "Ticket Extended",
                             "Schedule adjusted to {$newTargetDate} due to staff leave."
                         );
 

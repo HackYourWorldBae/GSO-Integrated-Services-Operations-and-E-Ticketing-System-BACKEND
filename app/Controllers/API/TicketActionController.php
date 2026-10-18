@@ -170,7 +170,7 @@ class TicketActionController extends BaseController
 
         $this->logModel->logAction($ticketId, $userId, 'Status Changed', $logMessage);
 
-        $notifTitle = ($isEmergency === 1) ? "Ticket #{$ticketId} Approved (Emergency Priority)" : "Ticket #{$ticketId} Approved";
+        $notifTitle = ($isEmergency === 1) ? "Ticket Approved (Emergency Priority)" : "Ticket Approved";
         $notifBody  = ($isEmergency === 1)
             ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the {$approverTitle}."
             : ($isBorrowing
@@ -200,8 +200,8 @@ class TicketActionController extends BaseController
             )->getResultArray();
 
             $adminNotifTitle = ($isEmergency === 1)
-                ? "New Emergency Ticket Approved (#{$ticketId})"
-                : ($wasEscalated ? "Escalated Ticket Approved by Director (#{$ticketId})" : "New Ticket Approved (#{$ticketId})");
+                ? "New Emergency Ticket Approved"
+                : ($wasEscalated ? "Escalated Ticket Approved by Director" : "New Ticket Approved");
 
             $adminNotifBody = ($isEmergency === 1)
                 ? "Ticket #{$ticketId} ({$ticket['service_type']}) has been approved as EMERGENCY PRIORITY by the Director and requires immediate dispatch."
@@ -294,7 +294,7 @@ class TicketActionController extends BaseController
             $this->notificationModel->createNotification(
                 $director['id'],
                 'warning',
-                "Executive Approval Requested (#{$ticketId})",
+                "Executive Approval Requested",
                 "{$unitName} Head requested your executive approval for Ticket #{$ticketId} ({$ticket['service_type']}). Reason: {$reason}"
             );
         }
@@ -325,7 +325,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Ticket #{$ticketId} Endorsed to Director",
+            "Ticket Endorsed to Director",
             "Your service request #{$ticketId} ({$ticket['service_type']}) has been endorsed by the Unit Head to the Director for executive approval."
         );
 
@@ -397,7 +397,7 @@ class TicketActionController extends BaseController
                 $this->notificationModel->createNotification(
                     $uAdmin['id'],
                     'info',
-                    "Ticket #{$ticketId} Returned by Director",
+                    "Ticket Returned by Director",
                     "The Director returned Ticket #{$ticketId} ({$ticket['service_type']}) for Unit Head handling. Notes: " . ($notes ?: 'Proceed with unit discretion.')
                 );
             }
@@ -460,7 +460,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Incident #{$ticketId} Under Investigation",
+            "Incident Under Investigation",
             'Your incident report is now being actively investigated by SSU staff.'
         );
 
@@ -591,7 +591,7 @@ class TicketActionController extends BaseController
             $this->notificationModel->createNotification(
                 $ticket['user_id'],
                 'info',
-                "SSU Update on Incident #{$ticketId}",
+                "SSU Update on Incident",
                 'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
             );
 
@@ -625,7 +625,7 @@ class TicketActionController extends BaseController
             $this->notificationModel->createNotification(
                 $ticket['user_id'],
                 'info',
-                "{$unitCode} Update on Ticket #{$ticketId}",
+                "{$unitCode} Update on Ticket",
                 "Staff posted an update regarding your request: {$notation}"
             );
 
@@ -697,7 +697,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'success',
-            "Incident #{$ticketId} Resolved",
+            "Incident Resolved",
             'Your incident report has been resolved by SSU staff and has been archived.'
         );
 
@@ -771,7 +771,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'], 
             'warning', 
-            "Ticket #{$ticketId} Declined", 
+            "Ticket Declined", 
             "Your request was declined. Reason: {$reason}"
         );
 
@@ -848,7 +848,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Ticket #{$ticketId} Approval Delayed",
+            "Ticket Approval Delayed",
             "Your ticket for {$ticket['service_type']} has been delayed for approval: {$reason}"
         );
 
@@ -908,7 +908,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Ticket #{$ticketId} Approval Resumed",
+            "Ticket Approval Resumed",
             "Your ticket for {$ticket['service_type']} has been returned to the active approval queue."
         );
 
@@ -1057,7 +1057,7 @@ class TicketActionController extends BaseController
         $this->logModel->logAction($ticketId, $userId, 'Nature of Work Changed', $logMessage);
 
         // 2. In-app notification to requester
-        $notifTitle = "Ticket #{$ticketId} Recategorized";
+        $notifTitle = "Ticket Recategorized";
         $notifBody  = "The {$actorRole} updated the nature of work for your request from \"{$oldService}\" to \"{$newService}\" to properly categorize your ticket according to your description. Note: {$reason}";
 
         $this->notificationModel->createNotification(
@@ -1091,7 +1091,7 @@ class TicketActionController extends BaseController
                 $this->notificationModel->createNotification(
                     $admin['id'],
                     'info',
-                    "Ticket #{$ticketId} Transferred to Your Unit",
+                    "Ticket Transferred to Your Unit",
                     "Ticket #{$ticketId} has been recategorized as \"{$newService}\" and transferred to your queue by the Director."
                 );
             }
@@ -1193,7 +1193,7 @@ class TicketActionController extends BaseController
         $notificationModel->createNotification(
             $ticket['user_id'],
             'warning',
-            "Ticket #{$ticketId} Timeline Extended",
+            "Ticket Timeline Extended",
             "Project schedule adjusted to {$extendedDate} due to unforeseen circumstance: {$reason}"
         );
 
@@ -1310,7 +1310,7 @@ class TicketActionController extends BaseController
 
         // Notify Requestor
         if ($notifyRequestor) {
-            $notifTitle = "Ticket #{$ticketId} Schedule Updated";
+            $notifTitle = "Ticket Schedule Updated";
             $notifBody  = "The schedule for your request has been updated to {$currentImplDateOnly} ({$finalWorkingDays} working day(s))." . ($reason ? " Reason: {$reason}" : "");
 
             $this->notificationModel->createNotification(
@@ -1564,7 +1564,7 @@ class TicketActionController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'], 
             'success', 
-            "Ticket #{$ticketId} Completed", 
+            "Ticket Completed", 
             "Your request for {$ticket['service_type']} has been marked as completed."
         );
 
@@ -1790,7 +1790,7 @@ class TicketActionController extends BaseController
         $notificationModel->createNotification(
             $ticket['user_id'],
             'success',
-            "Ticket #{$ticketId} Closed",
+            "Ticket Closed",
             "Your service request has been verified and officially closed. Thank you!"
         );
 

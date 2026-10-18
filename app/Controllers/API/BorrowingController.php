@@ -123,7 +123,7 @@ class BorrowingController extends BaseController
                     $this->notificationModel->createNotification(
                         $uAdmin['id'],
                         'info',
-                        "New Borrowing Ticket Approved (#{$ticketId})",
+                        "New Borrowing Ticket Approved",
                         "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
                     );
                 }

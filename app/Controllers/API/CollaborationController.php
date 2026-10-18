@@ -130,7 +130,7 @@ class CollaborationController extends BaseController
             $this->notifModel->createNotification(
                 $adminUser['id'],
                 'collaboration_request',
-                "Collaboration Request: {$ticketId}",
+                "Collaboration Request",
                 "{$reqUnit} is requesting collaboration on ticket #{$ticketId}: {$reason}"
             );
         }
@@ -236,7 +236,7 @@ class CollaborationController extends BaseController
             $this->notifModel->createNotification(
                 $adminUser['id'],
                 'collaboration_response',
-                "Collaboration {$statusLabel}: {$collab['ticket_id']}",
+                "Collaboration {$statusLabel}",
                 "{$collabUnit} has {$action} the collaboration request for ticket #{$collab['ticket_id']}." . ($notes ? " Note: {$notes}" : "")
             );
         }

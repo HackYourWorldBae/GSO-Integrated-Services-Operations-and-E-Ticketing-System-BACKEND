@@ -114,6 +114,12 @@ class NotificationController extends BaseController
             unset($n);
         }
 
+        // Clean ticket numbers from notification titles
+        foreach ($notifications as &$n) {
+            $n['title'] = NotificationModel::cleanTitle($n['title'] ?? '');
+        }
+        unset($n);
+
         $unreadQuery = $this->notificationModel
             ->where('user_id', $userId)
             ->where('is_read', 0);

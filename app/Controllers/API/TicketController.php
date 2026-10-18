@@ -162,7 +162,7 @@ class TicketController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'],
             'info',
-            "Ticket #{$ticketId} Cancelled",
+            "Ticket Cancelled",
             "Your service request #{$ticketId} has been successfully cancelled."
         );
 
@@ -177,7 +177,7 @@ class TicketController extends BaseController
                 $this->notificationModel->createNotification(
                     $uAdmin['id'],
                     'info',
-                    "Ticket #{$ticketId} Cancelled",
+                    "Ticket Cancelled",
                     "Ticket #{$ticketId} ({$ticket['service_type']}) was cancelled. Reason: {$reason}"
                 );
             }
@@ -192,7 +192,7 @@ class TicketController extends BaseController
                 $this->notificationModel->createNotification(
                     $dir['id'],
                     'info',
-                    "Ticket #{$ticketId} Cancelled",
+                    "Ticket Cancelled",
                     "Ticket #{$ticketId} ({$ticket['service_type']}) was cancelled. Reason: {$reason}"
                 );
             }
@@ -720,7 +720,7 @@ class TicketController extends BaseController
                         $this->notificationModel->createNotification(
                             $uAdmin['id'],
                             'info',
-                            "New Request Awaiting Review (#{$tId})",
+                            "New Request Awaiting Review",
                             "Ticket #{$tId} for {$t['service_type']} ({$unitNameStr}) has been routed to your unit for review and approval."
                         );
                     }

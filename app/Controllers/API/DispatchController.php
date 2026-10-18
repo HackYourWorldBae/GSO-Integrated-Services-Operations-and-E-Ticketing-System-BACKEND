@@ -410,7 +410,7 @@ class DispatchController extends BaseController
                         $this->notificationModel->createNotification(
                             $preemptedTicket['user_id'],
                             'warning',
-                            "Ticket #{$preemptedTicketId} Schedule Extended",
+                            "Ticket Schedule Extended",
                             "Work is temporarily paused and target completion adjusted to {$newTargetDate} as assigned personnel is responding to an urgent emergency."
                         );
                     } else {
@@ -538,7 +538,7 @@ class DispatchController extends BaseController
         $this->notificationModel->createNotification(
             $ticket['user_id'], 
             'info', 
-            "Ticket #{$ticketId} Dispatched", 
+            "Ticket Dispatched", 
             $implementationDate ? "Your ticket has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket."
         );
 

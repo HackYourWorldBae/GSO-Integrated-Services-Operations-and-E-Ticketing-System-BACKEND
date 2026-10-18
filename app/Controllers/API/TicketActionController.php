@@ -114,15 +114,10 @@ class TicketActionController extends BaseController
                      || str_contains($serviceLower, 'borrowing')
                      || str_contains($serviceLower, 'borrowed');
         if (!$isBorrowing) {
-            try {
-                $dbConn = Database::connect();
-                $borrowCount = $dbConn->table('borrowing_requests')->where('ticket_id', $ticketId)->countAllResults();
-                if ($borrowCount > 0) {
-                    $isBorrowing = true;
-                }
-            } catch (\Throwable $e) {
-                // Ignore DB error fallback
-            }
+            $isBorrowing = Database::connect()
+                ->table('borrowing_requests')
+                ->where('ticket_id', $ticketId)
+                ->countAllResults() > 0;
         }
 
         $destUnitId = (int) $ticket['unit_id'];

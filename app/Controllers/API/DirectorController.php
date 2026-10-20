@@ -152,6 +152,7 @@ class DirectorController extends BaseController
                 'stats'            => $stats,
                 'completion_rate'  => min(100, $compRate),
                 'avg_ratings'      => $ratings,
+                'unresolved'       => max(0, $uTotal - ($uResolved + $uDeclined)),
                 'total'            => $uTotal,
                 'resolved'         => $uResolved,
                 'declined'         => $uDeclined,
@@ -565,6 +566,7 @@ class DirectorController extends BaseController
             'summary' => [
                 'total_requests'        => $totalRequestsAcross,
                 'total_service_requests'=> $totalServiceRequestsAcross,
+                'total_unresolved'      => max(0, $totalRequestsAcross - ($totalResolvedAcross + $totalDeclinedAcross)),
                 'total_resolved'        => $totalResolvedAcross,
                 'total_declined'        => $totalDeclinedAcross,
                 'total_pending'         => $totalPendingAcross,

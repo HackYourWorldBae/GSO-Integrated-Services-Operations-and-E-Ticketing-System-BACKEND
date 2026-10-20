@@ -326,6 +326,7 @@ class DirectorController extends BaseController
 
         $completionHealthRows = $db->query("
             SELECT 
+                t.unit_id,
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
                     WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
@@ -336,6 +337,7 @@ class DirectorController extends BaseController
             JOIN tickets t ON t.id = tf.ticket_id
             {$healthWhereSql}
             GROUP BY 
+                t.unit_id,
                 CASE 
                     WHEN tf.completion_status = 'early' THEN 'early'
                     WHEN tf.completion_status = 'on-time' AND t.completed_at IS NOT NULL AND COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date) IS NOT NULL AND DATE(t.completed_at) < DATE(COALESCE(t.extended_completion_date, t.target_completion_date, t.project_target_date)) THEN 'early'
@@ -343,17 +345,66 @@ class DirectorController extends BaseController
                 END
         ", $healthParams)->getResultArray();
 
+        $unitIdToCode = [1 => 'FGMU', 2 => 'LEAU', 3 => 'SSU'];
+        $unitHealthData = [
+            'FGMU' => ['early' => 0, 'on-time' => 0, 'beyond-time' => 0, 'not-completed' => 0],
+            'LEAU' => ['early' => 0, 'on-time' => 0, 'beyond-time' => 0, 'not-completed' => 0],
+        ];
+
         $earlyFinished = 0;
         $onTime = 0;
         $beyondTime = 0;
         $notCompleted = 0;
+
         foreach ($completionHealthRows as $r) {
-            if ($r['completion_status'] === 'early') $earlyFinished = (int)$r['count'];
-            if ($r['completion_status'] === 'on-time') $onTime = (int)$r['count'];
-            if ($r['completion_status'] === 'beyond-time') $beyondTime = (int)$r['count'];
-            if ($r['completion_status'] === 'not-completed') $notCompleted = (int)$r['count'];
+            $uId = (int)($r['unit_id'] ?? 0);
+            $uCode = $unitIdToCode[$uId] ?? null;
+            $status = $r['completion_status'];
+            $cnt = (int)$r['count'];
+
+            if ($status === 'early') $earlyFinished += $cnt;
+            if ($status === 'on-time') $onTime += $cnt;
+            if ($status === 'beyond-time') $beyondTime += $cnt;
+            if ($status === 'not-completed') $notCompleted += $cnt;
+
+            if ($uCode && isset($unitHealthData[$uCode]) && isset($unitHealthData[$uCode][$status])) {
+                $unitHealthData[$uCode][$status] += $cnt;
+            }
         }
+
         $healthTotal = $earlyFinished + $onTime + $beyondTime + $notCompleted;
+
+        $buildHealthStats = function(array $counts) {
+            $early = $counts['early'] ?? 0;
+            $ontime = $counts['on-time'] ?? 0;
+            $beyond = $counts['beyond-time'] ?? 0;
+            $notcomp = $counts['not-completed'] ?? 0;
+            $total = $early + $ontime + $beyond + $notcomp;
+
+            return [
+                'early_finished'         => $early,
+                'on_time'                => $ontime,
+                'beyond_time'            => $beyond,
+                'not_completed'          => $notcomp,
+                'total'                  => $total,
+                'early_finished_percent' => $total > 0 ? round(($early / $total) * 100) : 0,
+                'on_time_percent'        => $total > 0 ? round(($ontime / $total) * 100) : 0,
+                'beyond_time_percent'    => $total > 0 ? round(($beyond / $total) * 100) : 0,
+                'not_completed_percent'  => $total > 0 ? round(($notcomp / $total) * 100) : 0,
+            ];
+        };
+
+        $completionHealthByUnit = [
+            'FGMU' => $buildHealthStats($unitHealthData['FGMU']),
+            'LEAU' => $buildHealthStats($unitHealthData['LEAU']),
+        ];
+
+        if (isset($units['FGMU'])) {
+            $units['FGMU']['completion_health'] = $completionHealthByUnit['FGMU'];
+        }
+        if (isset($units['LEAU'])) {
+            $units['LEAU']['completion_health'] = $completionHealthByUnit['LEAU'];
+        }
 
         // 5. Top Delay Reasons
         $delayRows = $db->query("
@@ -592,6 +643,7 @@ class DirectorController extends BaseController
                 'beyond_time_percent'   => $healthTotal > 0 ? round(($beyondTime / $healthTotal) * 100) : 0,
                 'not_completed_percent' => $healthTotal > 0 ? round(($notCompleted / $healthTotal) * 100) : 0,
             ],
+            'completion_health_by_unit' => $completionHealthByUnit,
             'delay_reasons'           => $delayReasons,
             'approval_delay_reasons'  => $approvalDelayReasons,
             'trends'                  => $trend,

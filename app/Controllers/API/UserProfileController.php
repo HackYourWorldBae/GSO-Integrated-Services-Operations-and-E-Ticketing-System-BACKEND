@@ -348,8 +348,8 @@ class UserProfileController extends BaseController
                 return $this->errorResponse('Signature image size must not exceed 3MB.');
             }
             $ext = strtolower($file->getClientExtension());
-            if (!in_array($ext, ['png', 'jpg', 'jpeg', 'webp'], true)) {
-                return $this->errorResponse('Only PNG, JPG, or WebP images are allowed for signatures.');
+            if ($ext !== 'png') {
+                return $this->errorResponse('Only transparent PNG (.png) images are allowed for signatures.');
             }
 
             if (!$file->move($uploadDir, $fileName)) {

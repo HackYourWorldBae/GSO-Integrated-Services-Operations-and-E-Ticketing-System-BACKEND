@@ -386,6 +386,19 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------
+    -- 9b. TICKET LOGS AUDIT TRAIL UPGRADES (Harmonizes legacy 'notes' to 'details')
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'ticket_logs') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_logs' AND column_name = 'notes')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_logs' AND column_name = 'details') THEN
+            ALTER TABLE `ticket_logs` CHANGE COLUMN `notes` `details` TEXT NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'ticket_logs' AND column_name = 'details') THEN
+            ALTER TABLE `ticket_logs` ADD COLUMN `details` TEXT NULL AFTER `action`;
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
     -- 10. NOTIFICATIONS & OTP UPGRADES
     -- ------------------------------------------------------------------------
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'notifications') THEN
@@ -978,8 +991,8 @@ CREATE TABLE IF NOT EXISTS `ticket_attachments` (
 -- Table structure for table `fgmu_ticket_details`
 CREATE TABLE IF NOT EXISTS `fgmu_ticket_details` (
   `ticket_id` varchar(60) NOT NULL,
-  `college_building` varchar(255) NOT NULL,
-  `office_room` varchar(100) NOT NULL,
+  `college_building` varchar(255) NOT NULL DEFAULT '',
+  `office_room` varchar(100) NOT NULL DEFAULT '',
   `source_of_fund` varchar(150) DEFAULT NULL,
   `jr_no` varchar(60) DEFAULT NULL,
   PRIMARY KEY (`ticket_id`),
@@ -989,8 +1002,8 @@ CREATE TABLE IF NOT EXISTS `fgmu_ticket_details` (
 -- Table structure for table `leau_ticket_details`
 CREATE TABLE IF NOT EXISTS `leau_ticket_details` (
   `ticket_id` varchar(60) NOT NULL,
-  `college_building` varchar(255) NOT NULL,
-  `office_room` varchar(100) NOT NULL,
+  `college_building` varchar(255) NOT NULL DEFAULT '',
+  `office_room` varchar(100) NOT NULL DEFAULT '',
   `source_of_fund` varchar(150) DEFAULT NULL,
   PRIMARY KEY (`ticket_id`),
   CONSTRAINT `fk_leau_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
@@ -1220,7 +1233,7 @@ CREATE TABLE IF NOT EXISTS `ticket_logs` (
   `ticket_id` varchar(60) NOT NULL,
   `user_id` varchar(36) DEFAULT NULL,
   `action` varchar(100) NOT NULL,
-  `notes` text DEFAULT NULL,
+  `details` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_logs_ticket` (`ticket_id`),

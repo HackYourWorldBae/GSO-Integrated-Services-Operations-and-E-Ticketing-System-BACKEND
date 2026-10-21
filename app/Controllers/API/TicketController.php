@@ -309,8 +309,10 @@ class TicketController extends BaseController
 
         $db             = Database::connect();
         $createdTickets = [];
+        $pendingAuditLogs = [];
 
         $db->transStart();
+        $db->transException(true);
 
         try {
             // --- 1. FGMU Intake ---
@@ -356,7 +358,12 @@ class TicketController extends BaseController
                         'source_of_fund'  => sanitize_string($fgmuDetails['source_of_fund'] ?? ''),
                     ]);
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "FGMU service request: {$serviceString}");
+                    $pendingAuditLogs[] = [
+                        'ticket_id' => $ticketId,
+                        'user_id'   => $userId,
+                        'action'    => 'Ticket Submitted',
+                        'details'   => "FGMU service request: {$serviceString}",
+                    ];
                     $createdTickets[] = $ticketId;
                 }
             }
@@ -404,7 +411,12 @@ class TicketController extends BaseController
                         'source_of_fund'  => sanitize_string($leauDetails['source_of_fund'] ?? ''),
                     ]);
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "LEAU service request: {$serviceString}");
+                    $pendingAuditLogs[] = [
+                        'ticket_id' => $ticketId,
+                        'user_id'   => $userId,
+                        'action'    => 'Ticket Submitted',
+                        'details'   => "LEAU service request: {$serviceString}",
+                    ];
                     $createdTickets[] = $ticketId;
                 }
             }
@@ -591,7 +603,12 @@ class TicketController extends BaseController
                         );
                     }
 
-                    $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "{$unitKey} borrowing request: {$serviceString}");
+                    $pendingAuditLogs[] = [
+                        'ticket_id' => $ticketId,
+                        'user_id'   => $userId,
+                        'action'    => 'Ticket Submitted',
+                        'details'   => "{$unitKey} borrowing request: {$serviceString}",
+                    ];
                     $createdTickets[] = $ticketId;
                 }
             }
@@ -668,7 +685,12 @@ class TicketController extends BaseController
                     }
                 }
 
-                $this->logModel->logAction($ticketId, $userId, 'Ticket Submitted', "SSU Incident Report: {$typeStr}");
+                $pendingAuditLogs[] = [
+                    'ticket_id' => $ticketId,
+                    'user_id'   => $userId,
+                    'action'    => 'Ticket Submitted',
+                    'details'   => "SSU Incident Report: {$typeStr}",
+                ];
                 $createdTickets[] = $ticketId;
             }
 
@@ -685,13 +707,29 @@ class TicketController extends BaseController
             );
         }
 
+        $dbErr = $db->error();
+        $dbLastQuery = (string) $db->getLastQuery();
+
         $db->transComplete();
 
         if ($db->transStatus() === false) {
+            $errDetail = !empty($dbErr['message']) ? $dbErr['message'] : 'Transaction failed. Please try again.';
+            log_message('error', '[TicketController::submitIntake] Transaction failed. DB Error: ' . json_encode($dbErr) . ' | Last Query: ' . $dbLastQuery);
+
             return $this->errorResponse(
-                'Transaction failed. Please try again.',
-                [],
+                'Transaction failed: ' . $errDetail,
+                ['db_error' => $dbErr, 'last_query' => $dbLastQuery],
                 ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
+
+        // --- Post-Commit: Audit Trail Logging (Never rolls back committed tickets) ---
+        foreach ($pendingAuditLogs as $logItem) {
+            $this->logModel->logAction(
+                $logItem['ticket_id'],
+                $logItem['user_id'],
+                $logItem['action'],
+                $logItem['details']
             );
         }
 

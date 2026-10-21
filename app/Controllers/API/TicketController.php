@@ -581,8 +581,13 @@ class TicketController extends BaseController
                     ]);
                     if (!$borrowingId) {
                         // Never commit a ticket without its borrowing record.
-                        throw new \RuntimeException(
-                            'Borrowing request could not be saved: ' . json_encode($borrowingModel->errors())
+                        $db->transRollback();
+                        $bErrors = $borrowingModel->errors();
+                        $bMsg = !empty($bErrors) ? implode('; ', array_map(fn($v) => is_array($v) ? implode(', ', $v) : $v, $bErrors)) : 'Borrowing request could not be saved to database.';
+                        return $this->errorResponse(
+                            'Borrowing request validation failed: ' . $bMsg,
+                            $bErrors ?: ['borrowing' => 'Database insert failed'],
+                            ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
                         );
                     }
 
@@ -671,11 +676,11 @@ class TicketController extends BaseController
 
         } catch (\Throwable $e) {
             $db->transRollback();
-            log_message('error', '[TicketController::submitIntake] DB Error: ' . $e->getMessage());
+            log_message('error', '[TicketController::submitIntake] DB Error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
 
             return $this->errorResponse(
-                'An error occurred while submitting your request. Please try again.',
-                [],
+                'Unable to submit request: ' . $e->getMessage(),
+                ['detail' => $e->getMessage()],
                 ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
             );
         }

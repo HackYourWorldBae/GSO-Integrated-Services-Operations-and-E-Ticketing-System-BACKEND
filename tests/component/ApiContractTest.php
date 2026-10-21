@@ -258,10 +258,24 @@ final class ApiContractTest extends CIUnitTestCase
             }
             if (!method_exists($fqcn, $method)) {
                 $failures[] = "{$handler} — method {$method} missing on {$controller}";
+                continue;
+            }
+
+            $refl = new \ReflectionMethod($fqcn, $method);
+            preg_match_all('/\$(\d+)/', $route['handler'], $paramMatches);
+            $passedArgsCount = count($paramMatches[1]);
+            $requiredParams = $refl->getNumberOfRequiredParameters();
+            $totalParams = $refl->getNumberOfParameters();
+
+            if ($passedArgsCount < $requiredParams) {
+                $failures[] = "{$route['handler']} — route passes {$passedArgsCount} args but method requires {$requiredParams} params";
+            }
+            if ($passedArgsCount > $totalParams) {
+                $failures[] = "{$route['handler']} — route passes {$passedArgsCount} args but method only accepts {$totalParams} params";
             }
         }
 
-        $this->assertSame([], $failures, 'Unresolvable handlers: ' . implode('; ', $failures));
+        $this->assertSame([], $failures, 'Unresolvable handlers or parameter mismatch: ' . implode('; ', $failures));
     }
 
     public function testSplitControllersAreWiredForEveryTicketOperation(): void
@@ -377,4 +391,74 @@ final class ApiContractTest extends CIUnitTestCase
             'inventory adjust-quantity must stay admin-gated.'
         );
     }
+
+    public function testAllFileUploadContractsMatchFrontendFormData(): void
+    {
+        $authControllerSource = file_get_contents(APPPATH . 'Controllers/API/AuthController.php');
+        $userProfileSource    = file_get_contents(APPPATH . 'Controllers/API/UserProfileController.php');
+        $attachmentSource     = file_get_contents(APPPATH . 'Controllers/API/TicketAttachmentController.php');
+        $backupSource         = file_get_contents(APPPATH . 'Controllers/API/BackupController.php');
+
+        // Registration ID Card & Selfie upload keys
+        $this->assertStringContainsString("getFile('id_card_image')", $authControllerSource);
+        $this->assertStringContainsString("getFile('id_selfie_image')", $authControllerSource);
+
+        // User Profile Avatar and Signature keys
+        $this->assertStringContainsString("getFile('avatar')", $userProfileSource);
+        $this->assertStringContainsString("getFile('signature')", $userProfileSource);
+        $this->assertStringContainsString("'signature_base64'", $userProfileSource);
+
+        // Ticket Attachments and Accomplishment Report keys
+        $this->assertStringContainsString("getFileMultiple('attachments')", $attachmentSource);
+        $this->assertStringContainsString("getFile('accomplishment_report')", $attachmentSource);
+
+        // Backup restore and Google Drive credentials upload keys
+        $this->assertStringContainsString("getFile('backup_file')", $backupSource);
+        $this->assertStringContainsString("getFile('credentials_file')", $backupSource);
+    }
+
+    public function testIntakeContractsSupportAllServiceDomains(): void
+    {
+        $ticketControllerSource = file_get_contents(APPPATH . 'Controllers/API/TicketController.php');
+        $borrowingModel         = new \App\Models\BorrowingRequestModel();
+        $ticketModel            = new \App\Models\TicketModel();
+
+        // 1. Controller must route all 5 intake forms
+        foreach (['fgmu', 'leau', 'fgmuBorrowing', 'leauBorrowing', 'ssu'] as $formKey) {
+            $this->assertStringContainsString(
+                "\$body['{$formKey}']",
+                $ticketControllerSource,
+                "TicketController::submitIntake must parse {$formKey} intake data."
+            );
+        }
+
+        // 2. BorrowingRequestModel must declare all 3NF schema columns
+        $borrowingFields = $borrowingModel->allowedFields;
+        foreach ([
+            'ticket_id', 'item_name_requested', 'quantity_needed', 'purpose_project',
+            'date_needed', 'expected_return_date', 'borrower_contact', 'borrower_email',
+            'borrower_id_number', 'department_major', 'terms_agreed', 'terms_agreed_at',
+            'assigned_inventory_id', 'assigned_quantity', 'status'
+        ] as $col) {
+            $this->assertContains(
+                $col,
+                $borrowingFields,
+                "BorrowingRequestModel must allow {$col} field."
+            );
+        }
+
+        // 3. TicketModel must declare core workflow status columns
+        $ticketFields = $ticketModel->allowedFields;
+        foreach ([
+            'unit_id', 'service_type', 'status', 'status_label', 'current_step',
+            'is_emergency', 'is_approval_delayed', 'is_escalated_to_director'
+        ] as $col) {
+            $this->assertContains(
+                $col,
+                $ticketFields,
+                "TicketModel must allow {$col} field."
+            );
+        }
+    }
 }
+

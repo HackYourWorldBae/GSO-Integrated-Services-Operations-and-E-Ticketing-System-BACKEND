@@ -279,128 +279,153 @@ class AuthController extends BaseController
             return $this->errorResponse('Registration validation failed. Please check the form.', $errors, ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Security inspection using FileSecurityService
-        $securityService = new \App\Libraries\FileSecurityService();
-        $inspectionFront = $securityService->inspectFile($fileFront->getTempName(), $fileFront->getClientName(), $fileFront->getClientMimeType());
-        if (!$inspectionFront['safe']) {
-            return $this->errorResponse('Security check failed: ' . $inspectionFront['reason'], ['id_card_image' => [$inspectionFront['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $inspectionSelfie = $securityService->inspectFile($fileSelfie->getTempName(), $fileSelfie->getClientName(), $fileSelfie->getClientMimeType());
-        if (!$inspectionSelfie['safe']) {
-            return $this->errorResponse('Security check failed: ' . $inspectionSelfie['reason'], ['id_selfie_image' => [$inspectionSelfie['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $userId = generate_uuid();
-
-        // Move files to WRITEPATH uploads/id_cards/
-        $uploadDir = WRITEPATH . 'uploads/id_cards/';
-        if (!is_dir($uploadDir)) {
-            @mkdir($uploadDir, 0775, true);
-        }
-
-        $fileNameFront = 'id_card_' . $userId . '_' . time() . '.' . $extFront;
-        if (!$fileFront->move($uploadDir, $fileNameFront)) {
-            return $this->errorResponse('Failed to save Front ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        $fileNameSelfie = 'id_selfie_' . $userId . '_' . time() . '.' . $extSelfie;
-        if (!$fileSelfie->move($uploadDir, $fileNameSelfie)) {
-            return $this->errorResponse('Failed to save Selfie with ID picture file.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        $idCardRelativePath = 'id_cards/' . $fileNameFront;
-        $idSelfieRelativePath = 'id_cards/' . $fileNameSelfie;
-
-        $insertData = [
-            'id'                => $userId,
-            'first_name'        => $firstName,
-            'last_name'         => $lastName,
-            'email'             => $emailToSave,
-            'password_hash'     => password_hash($password, PASSWORD_DEFAULT),
-            'contact_number'    => $contactNumber,
-            'student_id_number' => $studentIdNumber,
-            'student_type'      => $studentType,
-            'employee_type'     => $employeeType,
-            'organization_name' => $organizationName,
-            'college'           => $college,
-            'role'              => $role,
-            'unit_id'           => null,
-            'id_card_image'     => $idCardRelativePath,
-            'status'            => 'Pending',
-            'is_verified'       => 0, // Unverified initially
-            'email_notifications_enabled' => 0, // Off by default
-            'is_mfa_enabled'              => 0, // Off by default
-        ];
-
-        if ($this->userModel->db->fieldExists('id_selfie_image', 'users')) {
-            $insertData['id_selfie_image'] = $idSelfieRelativePath;
-        }
-
-        if (!empty($nameExtension) && $this->userModel->db->fieldExists('name_extension', 'users')) {
-            $insertData['name_extension'] = sanitize_string($nameExtension);
-        }
-
-        if (!$this->userModel->skipValidation(true)->insert($insertData)) {
-            $dbError = $this->userModel->db->error();
-            return $this->errorResponse('Failed to register account: ' . ($dbError['message'] ?? 'Database error'), [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        $createdUser = $this->userModel->getSafeUser($userId);
-
-        $activityDetails = $role === 'student'
-            ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, College: {$college}, ID: {$studentIdNumber}). Pending ID card verification."
-            : "User self-registered a new employee account ({$employeeType}" . ($college ? ", College: {$college}" : "") . ", ID: {$studentIdNumber}). Pending ID card verification.";
-
-        $this->activityLogModel->logEvent([
-            'event_type'     => 'ACCOUNT_REGISTERED',
-            'severity'       => 'info',
-            'actor_id'       => $userId,
-            'target_user_id' => $userId,
-            'details'        => $activityDetails,
-            'metadata'       => [
-                'role'              => $role,
-                'student_id_number' => $studentIdNumber,
-                'student_type'      => $studentType,
-                'employee_type'     => $employeeType,
-                'organization_name' => $organizationName,
-                'college'           => $college,
-            ],
-        ]);
-
-        // Dispatch in-app notification to active Superadmins for identity document verification
         try {
-            $notificationModel = new \App\Models\NotificationModel();
-            $dbConn = \Config\Database::connect();
-            $superadmins = $dbConn->query("SELECT id FROM users WHERE role = 'superadmin' AND status = 'Active'")->getResultArray();
-            $regFullName = trim(($createdUser['first_name'] ?? '') . ' ' . ($createdUser['last_name'] ?? ''));
-            $roleLabel = ucfirst($role);
-            $notifMsg = "New registration request from {$regFullName} ({$roleLabel}, ID: {$studentIdNumber}). Awaiting identity verification.";
-            foreach ($superadmins as $sa) {
-                $notificationModel->createNotification(
-                    $sa['id'],
-                    'info',
-                    'New User Registration Request',
-                    $notifMsg
+            // Security inspection using FileSecurityService
+            $securityService = new \App\Libraries\FileSecurityService();
+            $inspectionFront = $securityService->inspectFile($fileFront->getTempName(), $fileFront->getClientName(), $fileFront->getClientMimeType());
+            if (!$inspectionFront['safe']) {
+                return $this->errorResponse('Security check failed: ' . $inspectionFront['reason'], ['id_card_image' => [$inspectionFront['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $inspectionSelfie = $securityService->inspectFile($fileSelfie->getTempName(), $fileSelfie->getClientName(), $fileSelfie->getClientMimeType());
+            if (!$inspectionSelfie['safe']) {
+                return $this->errorResponse('Security check failed: ' . $inspectionSelfie['reason'], ['id_selfie_image' => [$inspectionSelfie['reason']]], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $userId = generate_uuid();
+
+            // Move files to WRITEPATH uploads/id_cards/
+            $uploadDir = WRITEPATH . 'uploads/id_cards/';
+            if (!is_dir($uploadDir)) {
+                @mkdir($uploadDir, 0775, true);
+            }
+
+            $fileNameFront = 'id_card_' . $userId . '_' . time() . '.' . $extFront;
+            if (!$fileFront->move($uploadDir, $fileNameFront)) {
+                return $this->errorResponse('Failed to save Front ID picture file. Please check folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            $fileNameSelfie = 'id_selfie_' . $userId . '_' . time() . '.' . $extSelfie;
+            if (!$fileSelfie->move($uploadDir, $fileNameSelfie)) {
+                return $this->errorResponse('Failed to save Selfie with ID picture file. Please check folder permissions.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            $idCardRelativePath = 'id_cards/' . $fileNameFront;
+            $idSelfieRelativePath = 'id_cards/' . $fileNameSelfie;
+
+            $insertData = [
+                'id'                => $userId,
+                'first_name'        => $firstName,
+                'last_name'         => $lastName,
+                'email'             => $emailToSave,
+                'password_hash'     => password_hash($password, PASSWORD_DEFAULT),
+                'contact_number'    => $contactNumber,
+                'student_id_number' => $studentIdNumber,
+                'role'              => $role,
+                'unit_id'           => null,
+                'id_card_image'     => $idCardRelativePath,
+                'status'            => 'Pending',
+                'is_verified'       => 0, // Unverified initially
+            ];
+
+            // Defensively guard database columns
+            if ($this->userModel->db->fieldExists('student_type', 'users')) {
+                $insertData['student_type'] = $studentType;
+            }
+            if ($this->userModel->db->fieldExists('employee_type', 'users')) {
+                $insertData['employee_type'] = $employeeType;
+            }
+            if ($this->userModel->db->fieldExists('organization_name', 'users')) {
+                $insertData['organization_name'] = $organizationName;
+            }
+            if ($this->userModel->db->fieldExists('college', 'users')) {
+                $insertData['college'] = $college;
+            }
+            if ($this->userModel->db->fieldExists('email_notifications_enabled', 'users')) {
+                $insertData['email_notifications_enabled'] = 0;
+            }
+            if ($this->userModel->db->fieldExists('is_mfa_enabled', 'users')) {
+                $insertData['is_mfa_enabled'] = 0;
+            }
+            if ($this->userModel->db->fieldExists('id_selfie_image', 'users')) {
+                $insertData['id_selfie_image'] = $idSelfieRelativePath;
+            }
+            if (!empty($nameExtension) && $this->userModel->db->fieldExists('name_extension', 'users')) {
+                $insertData['name_extension'] = sanitize_string($nameExtension);
+            }
+
+            if (!$this->userModel->skipValidation(true)->insert($insertData)) {
+                $dbError = $this->userModel->db->error();
+                return $this->errorResponse(
+                    'Failed to register account: ' . ($dbError['message'] ?? 'Database error occurred.'),
+                    ['database' => $dbError['message'] ?? 'Database insert failed'],
+                    ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
                 );
             }
 
-            // Welcoming notification for the registrant
-            $notificationModel->createNotification(
-                $userId,
-                'info',
-                'Account Registration Received',
-                'Your account registration has been submitted. Your institutional ID card is currently queued for verification by the Super Administrator.'
-            );
-        } catch (\Throwable $notifErr) {
-            log_message('error', '[AuthController::register] Notification dispatch error: ' . $notifErr->getMessage());
-        }
+            $createdUser = $this->userModel->getSafeUser($userId);
 
-        return $this->successResponse(
-            'Account created successfully! You can now log in to view your dashboard. Please note that an administrator must verify your ID card before you can submit service requests.',
-            ['user' => $createdUser],
-            ResponseInterface::HTTP_CREATED
-        );
+            $activityDetails = $role === 'student'
+                ? "User self-registered a new student representative account (" . strtoupper((string) $studentType) . ": {$organizationName}, College: {$college}, ID: {$studentIdNumber}). Pending ID card verification."
+                : "User self-registered a new employee account ({$employeeType}" . ($college ? ", College: {$college}" : "") . ", ID: {$studentIdNumber}). Pending ID card verification.";
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'ACCOUNT_REGISTERED',
+                'severity'       => 'info',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => $activityDetails,
+                'metadata'       => [
+                    'role'              => $role,
+                    'student_id_number' => $studentIdNumber,
+                    'student_type'      => $studentType,
+                    'employee_type'     => $employeeType,
+                    'organization_name' => $organizationName,
+                    'college'           => $college,
+                ],
+            ]);
+
+            // Dispatch in-app notification to active Superadmins for identity document verification
+            try {
+                $notificationModel = new \App\Models\NotificationModel();
+                $dbConn = \Config\Database::connect();
+                $superadmins = $dbConn->query("SELECT id FROM users WHERE role = 'superadmin' AND status = 'Active'")->getResultArray();
+                $regFullName = trim(($createdUser['first_name'] ?? '') . ' ' . ($createdUser['last_name'] ?? ''));
+                $roleLabel = ucfirst($role);
+                $notifMsg = "New registration request from {$regFullName} ({$roleLabel}, ID: {$studentIdNumber}). Awaiting identity verification.";
+                foreach ($superadmins as $sa) {
+                    $notificationModel->createNotification(
+                        $sa['id'],
+                        'info',
+                        'New User Registration Request',
+                        $notifMsg
+                    );
+                }
+
+                // Welcoming notification for the registrant
+                $notificationModel->createNotification(
+                    $userId,
+                    'info',
+                    'Account Registration Received',
+                    'Your account registration has been submitted. Your institutional ID card is currently queued for verification by the Super Administrator.'
+                );
+            } catch (\Throwable $notifErr) {
+                log_message('error', '[AuthController::register] Notification dispatch error: ' . $notifErr->getMessage());
+            }
+
+            return $this->successResponse(
+                'Account created successfully! You can now log in to view your dashboard. Please note that an administrator must verify your ID card before you can submit service requests.',
+                ['user' => $createdUser],
+                ResponseInterface::HTTP_CREATED
+            );
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::register] Exception: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return $this->errorResponse(
+                'Registration could not be completed: ' . $e->getMessage(),
+                ['detail' => $e->getMessage()],
+                ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
     }
 
     /**

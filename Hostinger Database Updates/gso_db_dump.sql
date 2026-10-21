@@ -63,8 +63,12 @@ BEGIN
             ALTER TABLE `users` ADD COLUMN `employee_type` VARCHAR(100) NULL AFTER `student_type`;
         END IF;
 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'organization_name') THEN
+            ALTER TABLE `users` ADD COLUMN `organization_name` VARCHAR(150) NULL AFTER `employee_type`;
+        END IF;
+
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'college') THEN
-            ALTER TABLE `users` ADD COLUMN `college` VARCHAR(150) NULL AFTER `organization_name`;
+            ALTER TABLE `users` ADD COLUMN `college` VARCHAR(150) NULL;
         END IF;
 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'users' AND column_name = 'id_selfie_image') THEN
@@ -480,6 +484,178 @@ BEGIN
             ALTER TABLE `system_backups` ADD COLUMN `backup_category` ENUM('database','media','full') NOT NULL DEFAULT 'database' AFTER `backup_type`;
         END IF;
     END IF;
+    -- ------------------------------------------------------------------------
+    -- 16. BORROWING REQUESTS & ATTACHMENTS UPGRADES (3NF Schema Harmonization)
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'borrowing_requests') THEN
+        -- Safely migrate legacy column names to 3NF standards if present
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'contact_number')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'borrower_contact') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `contact_number` `borrower_contact` VARCHAR(30) NOT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'borrow_date')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'date_needed') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `borrow_date` `date_needed` DATE NOT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'return_due_date')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'expected_return_date') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `return_due_date` `expected_return_date` DATE NOT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'purpose')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'purpose_project') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `purpose` `purpose_project` TEXT NOT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'item_name')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'item_name_requested') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `item_name` `item_name_requested` VARCHAR(255) NOT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'quantity_requested')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'quantity_needed') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `quantity_requested` `quantity_needed` INT(11) UNSIGNED NOT NULL DEFAULT 1;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'item_id')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'assigned_inventory_id') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `item_id` `assigned_inventory_id` INT(11) UNSIGNED NULL DEFAULT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'released_at')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'picked_up_at') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `released_at` `picked_up_at` DATETIME NULL DEFAULT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'released_by')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'picked_up_by') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `released_by` `picked_up_by` VARCHAR(36) NULL DEFAULT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'received_by')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'returned_by') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `received_by` `returned_by` VARCHAR(36) NULL DEFAULT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'condition_on_return')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'return_condition') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `condition_on_return` `return_condition` ENUM('excellent','good','fair','damaged','lost') NULL DEFAULT NULL;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'remarks')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'return_notes') THEN
+            ALTER TABLE `borrowing_requests` CHANGE COLUMN `remarks` `return_notes` TEXT NULL DEFAULT NULL;
+        END IF;
+
+        -- Ensure all missing 3NF columns exist
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'borrower_id_number') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `borrower_id_number` VARCHAR(50) NOT NULL DEFAULT '' AFTER `borrower_name`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'department_major') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `department_major` VARCHAR(150) NULL DEFAULT NULL AFTER `borrower_type`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'borrower_email') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `borrower_email` VARCHAR(255) NOT NULL DEFAULT '' AFTER `department_major`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'borrower_contact') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `borrower_contact` VARCHAR(30) NOT NULL DEFAULT '' AFTER `borrower_email`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'item_name_requested') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `item_name_requested` VARCHAR(255) NOT NULL DEFAULT '' AFTER `borrower_contact`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'item_model_requested') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `item_model_requested` VARCHAR(255) NULL DEFAULT NULL AFTER `item_name_requested`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'quantity_needed') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `quantity_needed` INT(11) UNSIGNED NOT NULL DEFAULT 1 AFTER `item_model_requested`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'purpose_project') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `purpose_project` TEXT NOT NULL AFTER `quantity_needed`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'date_needed') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `date_needed` DATE NOT NULL AFTER `purpose_project`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'expected_return_date') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `expected_return_date` DATE NOT NULL AFTER `date_needed`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'terms_agreed') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `terms_agreed` TINYINT(1) NOT NULL DEFAULT 1 AFTER `expected_return_date`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'terms_agreed_at') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `terms_agreed_at` DATETIME NULL DEFAULT NULL AFTER `terms_agreed`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'assigned_inventory_id') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `assigned_inventory_id` INT(11) UNSIGNED NULL DEFAULT NULL AFTER `status`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'assigned_quantity') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `assigned_quantity` INT(11) UNSIGNED NULL DEFAULT NULL AFTER `assigned_inventory_id`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'picked_up_at') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `picked_up_at` DATETIME NULL DEFAULT NULL AFTER `assigned_quantity`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'picked_up_by') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `picked_up_by` VARCHAR(36) NULL DEFAULT NULL AFTER `picked_up_at`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'returned_at') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `returned_at` DATETIME NULL DEFAULT NULL AFTER `picked_up_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'returned_by') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `returned_by` VARCHAR(36) NULL DEFAULT NULL AFTER `returned_at`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'return_condition') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `return_condition` ENUM('excellent','good','fair','damaged','lost') NULL DEFAULT NULL AFTER `returned_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND column_name = 'return_notes') THEN
+            ALTER TABLE `borrowing_requests` ADD COLUMN `return_notes` TEXT NULL DEFAULT NULL AFTER `return_condition`;
+        END IF;
+
+        -- Harmonize ENUM values
+        ALTER TABLE `borrowing_requests` 
+        MODIFY COLUMN `borrower_type` ENUM('student','faculty','staff') NOT NULL DEFAULT 'student',
+        MODIFY COLUMN `status` ENUM('pending_director','approved_director','declined_director','inventory_assigned','ready_for_pickup','picked_up','returned','overdue','cancelled') NOT NULL DEFAULT 'pending_director';
+
+        -- Ensure unique constraint on ticket_id if not present
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'borrowing_requests' AND index_name = 'uq_borrowing_ticket') THEN
+            ALTER TABLE `borrowing_requests` ADD UNIQUE KEY `uq_borrowing_ticket` (`ticket_id`);
+        END IF;
+    END IF;
+
+    -- Attachments column harmonization
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'borrowing_attachments') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_attachments' AND column_name = 'request_id')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_attachments' AND column_name = 'borrowing_request_id') THEN
+            ALTER TABLE `borrowing_attachments` CHANGE COLUMN `request_id` `borrowing_request_id` INT(11) UNSIGNED NOT NULL;
+        END IF;
+    END IF;
+
+    -- History column harmonization
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'borrowing_history') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_history' AND column_name = 'request_id')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'borrowing_history' AND column_name = 'borrowing_request_id') THEN
+            ALTER TABLE `borrowing_history` CHANGE COLUMN `request_id` `borrowing_request_id` INT(11) UNSIGNED NOT NULL;
+        END IF;
+    END IF;
 
 END $$
 
@@ -551,14 +727,14 @@ CREATE TABLE IF NOT EXISTS `users` (
   CONSTRAINT `fk_users_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Institutional Seed Users (Default password: 'password') - INSERT IGNORE preserves existing user accounts
+-- Institutional Seed Users (Default password: 'access') - INSERT IGNORE preserves existing user accounts
 INSERT IGNORE INTO `users` (`id`, `first_name`, `last_name`, `email`, `password_hash`, `contact_number`, `role`, `unit_id`, `student_id_number`, `student_type`, `employee_type`, `organization_name`, `college`, `id_card_image`, `avatar_path`, `status`, `is_verified`, `failed_login_attempts`, `lockout_until`) VALUES
-('a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d', 'Super', 'Administrator', 'superadmin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', '09123456789', 'superadmin', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
-('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'director', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
-('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
-('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
-('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', NULL, 'admin', 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
-('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'University', 'Requestor', 'enduser@email.com', '$2y$10$O75lTE/4N11icQzKanbhfuL2uMlCadbsO1vpA8a3X6a7.BOuQoU8m', '09171234567', 'employee', NULL, 'EMP-2301', NULL, 'Teaching Staff', NULL, 'College of Information Sciences (CIS)', NULL, NULL, 'Active', 1, 0, NULL);
+('a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d', 'Super', 'Administrator', 'superadmin@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', '09123456789', 'superadmin', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
+('f12d1cfd-a338-41ca-88de-b29ea8e71f33', 'GSO', 'Director', 'director@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', NULL, 'director', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
+('cfcb614f-ebd4-43ee-afe8-39fb18516ad3', 'FGMU', 'Admin', 'fgmu-admin@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', NULL, 'admin', 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
+('5322c820-a591-452a-be5c-cedb24b45f71', 'LEAU', 'Admin', 'leau-admin@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', NULL, 'admin', 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
+('e6f927fb-aec7-4ab9-85a9-9af83f1d4dc9', 'SSU', 'Admin', 'ssu-admin@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', NULL, 'admin', 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Active', 1, 0, NULL),
+('3a0adf0b-a3ee-4e4a-862e-3d9ca05be3e5', 'University', 'Requestor', 'enduser@email.com', '$2y$10$j3II5TwLDUVkrOcWOKoHPeJJx47imfwZnD6chpP1rByVbkgMnWDoi', '09171234567', 'employee', NULL, 'EMP-2301', NULL, 'Teaching Staff', NULL, 'College of Information Sciences (CIS)', NULL, NULL, 'Active', 1, 0, NULL);
 
 -- Table structure for table `personnel`
 CREATE TABLE IF NOT EXISTS `personnel` (
@@ -636,61 +812,70 @@ CREATE TABLE IF NOT EXISTS `inventory_items` (
 -- Table structure for table `borrowing_requests`
 CREATE TABLE IF NOT EXISTS `borrowing_requests` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `ticket_id` varchar(60) NOT NULL,
+  `ticket_id` varchar(60) NOT NULL UNIQUE,
   `borrower_name` varchar(255) NOT NULL,
-  `borrower_type` enum('student','employee','unit_staff','external') NOT NULL DEFAULT 'student',
-  `contact_number` varchar(50) DEFAULT NULL,
-  `borrow_date` date NOT NULL,
-  `return_due_date` date NOT NULL,
-  `purpose` text NOT NULL,
-  `item_id` int(11) UNSIGNED DEFAULT NULL,
-  `item_name` varchar(255) DEFAULT NULL,
-  `quantity_requested` int(11) UNSIGNED NOT NULL DEFAULT 1,
+  `borrower_id_number` varchar(50) NOT NULL DEFAULT '',
+  `borrower_type` enum('student','faculty','staff') NOT NULL DEFAULT 'student',
+  `department_major` varchar(150) DEFAULT NULL,
+  `borrower_email` varchar(255) NOT NULL DEFAULT '',
+  `borrower_contact` varchar(30) NOT NULL DEFAULT '',
+  `item_name_requested` varchar(255) NOT NULL,
+  `item_model_requested` varchar(255) DEFAULT NULL,
+  `quantity_needed` int(11) UNSIGNED NOT NULL DEFAULT 1,
+  `purpose_project` text NOT NULL,
+  `date_needed` date NOT NULL,
+  `expected_return_date` date NOT NULL,
+  `terms_agreed` tinyint(1) NOT NULL DEFAULT 0,
+  `terms_agreed_at` datetime DEFAULT NULL,
   `status` enum('pending_director','approved_director','declined_director','inventory_assigned','ready_for_pickup','picked_up','returned','overdue','cancelled') NOT NULL DEFAULT 'pending_director',
-  `released_at` datetime DEFAULT NULL,
-  `released_by` varchar(36) DEFAULT NULL,
+  `assigned_inventory_id` int(11) UNSIGNED DEFAULT NULL,
+  `assigned_quantity` int(11) UNSIGNED DEFAULT NULL,
+  `picked_up_at` datetime DEFAULT NULL,
+  `picked_up_by` varchar(36) DEFAULT NULL,
   `returned_at` datetime DEFAULT NULL,
-  `received_by` varchar(36) DEFAULT NULL,
-  `condition_on_return` enum('excellent','good','fair','damaged','lost') DEFAULT NULL,
-  `remarks` text DEFAULT NULL,
+  `returned_by` varchar(36) DEFAULT NULL,
+  `return_condition` enum('excellent','good','fair','damaged','lost') DEFAULT NULL,
+  `return_notes` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_borrowing_ticket` (`ticket_id`),
-  KEY `idx_borrowing_item` (`item_id`),
+  KEY `idx_borrowing_inventory` (`assigned_inventory_id`),
   KEY `idx_borrowing_status` (`status`),
-  CONSTRAINT `fk_borrowing_item` FOREIGN KEY (`item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL
+  KEY `idx_borrowing_dates` (`date_needed`, `expected_return_date`),
+  CONSTRAINT `fk_borrowing_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_borrowing_inventory` FOREIGN KEY (`assigned_inventory_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_borrowing_picked_by` FOREIGN KEY (`picked_up_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_borrowing_returned_by` FOREIGN KEY (`returned_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `borrowing_attachments`
 CREATE TABLE IF NOT EXISTS `borrowing_attachments` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `request_id` int(11) UNSIGNED NOT NULL,
+  `borrowing_request_id` int(11) UNSIGNED NOT NULL,
   `file_name` varchar(255) NOT NULL,
   `file_path` varchar(500) NOT NULL,
   `file_type` varchar(100) DEFAULT NULL,
   `file_size_bytes` int(11) UNSIGNED DEFAULT NULL,
-  `stage` enum('request','release','return') NOT NULL DEFAULT 'request',
-  `uploaded_by` varchar(36) DEFAULT NULL,
   `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `idx_b_att_request` (`request_id`),
-  CONSTRAINT `fk_b_att_request` FOREIGN KEY (`request_id`) REFERENCES `borrowing_requests` (`id`) ON DELETE CASCADE
+  KEY `idx_b_att_request` (`borrowing_request_id`),
+  CONSTRAINT `fk_b_att_request` FOREIGN KEY (`borrowing_request_id`) REFERENCES `borrowing_requests` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `borrowing_history`
 CREATE TABLE IF NOT EXISTS `borrowing_history` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `request_id` int(11) UNSIGNED NOT NULL,
-  `actor_id` varchar(36) DEFAULT NULL,
+  `borrowing_request_id` int(11) UNSIGNED NOT NULL,
   `action` varchar(100) NOT NULL,
-  `old_status` varchar(50) DEFAULT NULL,
-  `new_status` varchar(50) DEFAULT NULL,
+  `performed_by` varchar(36) DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `idx_b_hist_request` (`request_id`),
-  CONSTRAINT `fk_b_hist_request` FOREIGN KEY (`request_id`) REFERENCES `borrowing_requests` (`id`) ON DELETE CASCADE
+  KEY `idx_b_hist_request` (`borrowing_request_id`),
+  KEY `idx_b_hist_user` (`performed_by`),
+  CONSTRAINT `fk_b_hist_request` FOREIGN KEY (`borrowing_request_id`) REFERENCES `borrowing_requests` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_b_hist_user` FOREIGN KEY (`performed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
@@ -929,22 +1114,6 @@ CREATE TABLE IF NOT EXISTS `ticket_collaborations` (
   CONSTRAINT `fk_collab_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_collab_req_unit` FOREIGN KEY (`requesting_unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_collab_collab_unit` FOREIGN KEY (`collaborating_unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Table structure for table `personnel`
-CREATE TABLE IF NOT EXISTS `personnel` (
-  `id` varchar(36) NOT NULL,
-  `user_id` varchar(36) DEFAULT NULL,
-  `unit_id` int(11) UNSIGNED NOT NULL,
-  `name` varchar(255) NOT NULL,
-  `specialty` varchar(100) NOT NULL,
-  `status` enum('available','working','on_leave') NOT NULL DEFAULT 'available',
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `idx_personnel_user` (`user_id`),
-  KEY `idx_personnel_unit_status` (`unit_id`,`status`),
-  CONSTRAINT `fk_personnel_unit` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table structure for table `ticket_assignments`

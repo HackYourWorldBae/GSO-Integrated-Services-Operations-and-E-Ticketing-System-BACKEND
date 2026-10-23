@@ -83,6 +83,15 @@ class DispatchController extends BaseController
             return $forbidden;
         }
 
+        // Borrowing requests use inventory dispatch, not worker assignments
+        if (\App\Libraries\BorrowingWorkflow::isBorrowingTicket($ticket)) {
+            return $this->errorResponse(
+                'Borrowing requests must be dispatched by allocating inventory, not assigning personnel.',
+                [],
+                ResponseInterface::HTTP_BAD_REQUEST
+            );
+        }
+
         if (!in_array($ticket['status'], ['approved', 'pending', 'processing'], true)) {
             return $this->errorResponse("Ticket must be approved, pending, or processing before assigning. Current status: {$ticket['status']}.");
         }

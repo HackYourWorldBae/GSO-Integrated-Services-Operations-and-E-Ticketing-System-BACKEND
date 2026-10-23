@@ -116,6 +116,10 @@ class TicketQueueController extends BaseController
         }
 
         $unitId = $this->resolveUnitId($unitCode);
+
+        // Self-heal any borrowing tickets that were erroneously assigned to workers
+        \App\Libraries\BorrowingWorkflow::healMisdispatchedBorrowingTickets($unitId);
+
         $pg      = $this->paginationParams();
         $tickets = $this->ticketModel->getDispatchQueue($unitId, $pg['limit'], $pg['offset']);
         $tickets = $this->enrichTickets($tickets);
@@ -133,6 +137,9 @@ class TicketQueueController extends BaseController
         }
 
         $unitId = $this->resolveUnitId($unitCode);
+
+        // Self-heal any borrowing tickets that were erroneously assigned to workers
+        \App\Libraries\BorrowingWorkflow::healMisdispatchedBorrowingTickets($unitId);
         $pg      = $this->paginationParams();
         $tickets = $this->ticketModel->getActiveTickets($unitId, $pg['limit'], $pg['offset']);
         $tickets = $this->enrichTickets($tickets);

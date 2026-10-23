@@ -190,5 +190,86 @@ class BorrowingWorkflow
 
         return false;
     }
+
+    /**
+     * Self-heals any borrowing tickets that were erroneously dispatched to workers.
+     * Reverts tickets back to approved, purges rogue ticket_assignments, and frees the worker.
+     */
+    public static function healMisdispatchedBorrowingTickets(?int $unitId = null): void
+    {
+        try {
+            $db = \Config\Database::connect();
+            
+            $sql = "
+                SELECT t.id, t.status, b.status as borrowing_status, a.id as assignment_id, a.personnel_id
+                FROM tickets t
+                JOIN borrowing_requests b ON b.ticket_id = t.id
+                JOIN ticket_assignments a ON a.ticket_id = t.id
+                WHERE (b.status IN ('approved_director', 'pending', 'pending_director') OR b.status IS NULL)
+            ";
+            if ($unitId !== null) {
+                $sql .= " AND t.unit_id = " . (int)$unitId;
+            }
+
+            $misdispatched = $db->query($sql)->getResultArray();
+            if (empty($misdispatched)) {
+                return;
+            }
+
+            $ticketModel = new \App\Models\TicketModel();
+            $personnelModel = new \App\Models\PersonnelModel();
+
+            $processedTicketIds = [];
+            $affectedPersonnelIds = [];
+
+            foreach ($misdispatched as $row) {
+                $tId = $row['id'];
+                $aId = $row['assignment_id'];
+                $pId = $row['personnel_id'];
+
+                // Delete rogue assignment
+                $db->table('ticket_assignments')->where('id', $aId)->delete();
+                $affectedPersonnelIds[] = $pId;
+
+                if (!in_array($tId, $processedTicketIds, true)) {
+                    $processedTicketIds[] = $tId;
+                    $bStatus = $row['borrowing_status'] ?: 'approved_director';
+                    $statusLabel = self::getTicketStatusLabel($bStatus, 'approved');
+
+                    $ticketModel->update($tId, [
+                        'status'                 => 'approved',
+                        'status_label'           => $statusLabel,
+                        'current_step'           => 3,
+                        'target_completion_date' => null,
+                        'project_working_days'   => null,
+                        'updated_at'             => date('Y-m-d H:i:s'),
+                    ]);
+
+                    // Clean up any ticket_materials marked as assessment
+                    $db->table('ticket_materials')->where('ticket_id', $tId)->delete();
+                }
+            }
+
+            // Recheck affected personnel availability
+            foreach (array_unique($affectedPersonnelIds) as $pId) {
+                if (!$pId) {
+                    continue;
+                }
+                $hasOtherActive = $db->table('ticket_assignments')
+                    ->where('personnel_id', $pId)
+                    ->where('completed_at IS NULL')
+                    ->countAllResults() > 0;
+
+                if (!$hasOtherActive) {
+                    $personnelModel->update($pId, [
+                        'status'     => 'available',
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('error', 'BorrowingWorkflow healMisdispatchedBorrowingTickets error: ' . $e->getMessage());
+        }
+    }
 }
 

@@ -110,6 +110,16 @@ class TicketActionController extends BaseController
         $isExecutive = in_array($userRole, ['director', 'superadmin'], true);
         $wasEscalated = !empty($ticket['is_escalated_to_director']);
 
+        // FGMU requests require Director approval; FGMU Admin reviews and requests Director approval.
+        // LEAU Unit Head can still approve routine requests directly.
+        if ($unitId === 1 && !$isExecutive) {
+            return $this->errorResponse(
+                'FGMU requests require Director approval. Please request Director approval.',
+                [],
+                ResponseInterface::HTTP_FORBIDDEN
+            );
+        }
+
         $isBorrowing = BorrowingWorkflow::isBorrowingTicket($ticket);
 
         $destUnitId = (int) $ticket['unit_id'];
@@ -259,11 +269,15 @@ class TicketActionController extends BaseController
         $reason = sanitize_string($body['reason'] ?? $body['escalation_reason'] ?? '');
 
         if (empty($reason)) {
-            return $this->errorResponse(
-                'An escalation reason or justification is required for Director approval.',
-                ['reason' => ['Please state why this request requires executive approval (e.g. heavy structural work, budget clearance, major university event).']],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
+            if ((int) $ticket['unit_id'] === 1) {
+                $reason = 'Reviewed and recommended for Director approval.';
+            } else {
+                return $this->errorResponse(
+                    'A reason or justification is required for Director approval.',
+                    ['reason' => ['Please state why this request requires executive approval (e.g. heavy structural work, budget clearance, major university event).']],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
         }
 
         $userId = $this->currentUserId();
@@ -273,6 +287,7 @@ class TicketActionController extends BaseController
 
         $unitRow = $db->query("SELECT name, code FROM units WHERE id = ?", [$ticket['unit_id']])->getRowArray();
         $unitName = $unitRow['name'] ?? ($unitRow['code'] ?? 'GSO Unit');
+        $isFgmu = ((int) $ticket['unit_id'] === 1);
 
         $this->ticketModel->update($ticketId, [
             'is_escalated_to_director' => 1,
@@ -283,11 +298,16 @@ class TicketActionController extends BaseController
             'updated_at'               => date('Y-m-d H:i:s'),
         ]);
 
+        $actionTitle = $isFgmu ? 'Requested Director Approval' : 'Escalated to Director';
+        $logDesc = $isFgmu
+            ? "Reviewed by {$staffName} and submitted for Director approval. Recommendation: {$reason}"
+            : "Escalated to Director by {$staffName} for executive approval. Justification: {$reason}";
+
         $this->logModel->logAction(
             $ticketId,
             $userId,
-            'Escalated to Director',
-            "Escalated to Director by {$staffName} for executive approval. Justification: {$reason}"
+            $actionTitle,
+            $logDesc
         );
 
         // Notify all active Directors (In-App)
@@ -297,7 +317,7 @@ class TicketActionController extends BaseController
                 $director['id'],
                 'warning',
                 "Executive Approval Requested",
-                "{$unitName} Head requested your executive approval for Ticket #{$ticketId} ({$ticket['service_type']}). Reason: {$reason}"
+                "{$unitName} Head requested your executive approval for Ticket #{$ticketId} ({$ticket['service_type']}). Details: {$reason}"
             );
         }
 
@@ -314,7 +334,7 @@ class TicketActionController extends BaseController
                         $d['first_name'] ?? 'Director',
                         $ticketId,
                         'Executive Approval Requested',
-                        "Ticket #{$ticketId} ({$ticket['service_type']}) has been escalated by the {$unitName} Head for your review and approval.\n\nJustification: {$reason}",
+                        "Ticket #{$ticketId} ({$ticket['service_type']}) has been submitted by the {$unitName} Head for your review and approval.\n\nDetails: {$reason}",
                         ['Unit' => $unitName, 'Service' => $ticket['service_type'], 'Reason' => $reason]
                     );
                 }
@@ -328,17 +348,17 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Ticket Endorsed to Director",
-            "Your service request #{$ticketId} ({$ticket['service_type']}) has been endorsed by the Unit Head to the Director for executive approval."
+            "Your service request #{$ticketId} ({$ticket['service_type']}) has been reviewed by the {$unitName} Admin and submitted to the Director for executive approval."
         );
 
         $this->notifyRequestorByEmail(
             $ticket['user_id'],
             $ticketId,
             'Pending Director Approval',
-            "Your service request has been endorsed by the Unit Head to the Director for executive approval."
+            "Your service request has been reviewed by the {$unitName} Admin and submitted to the Director for executive approval."
         );
 
-        return $this->successResponse('Ticket successfully escalated to the Director for approval.', [
+        return $this->successResponse('Ticket successfully submitted to the Director for approval.', [
             'ticket_id'                => $ticketId,
             'is_escalated_to_director' => 1,
             'status_label'             => 'Pending Director Approval',

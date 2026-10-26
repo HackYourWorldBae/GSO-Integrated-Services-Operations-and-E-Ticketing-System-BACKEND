@@ -232,7 +232,7 @@ class UserProfileController extends BaseController
         }
 
         if (empty($user['password_hash']) || !password_verify($currentPassword, $user['password_hash'])) {
-            return $this->errorResponse('Current password is incorrect.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+            return $this->errorResponse('Current password is incorrect.', ['current_password' => 'Current password is incorrect.'], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         if (password_verify($newPassword, $user['password_hash'])) {

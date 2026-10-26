@@ -229,7 +229,7 @@ class DirectorDelegationController extends BaseController
             ]);
 
             $expiresIn = $this->jwt->getExpiresIn();
-            $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+            $isSecure  = $this->request->isSecure();
             $this->response->setCookie([
                 'name'     => 'gso_jwt_token',
                 'value'    => $accessToken,
@@ -331,7 +331,7 @@ class DirectorDelegationController extends BaseController
             ]);
 
             $expiresIn = $this->jwt->getExpiresIn();
-            $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+            $isSecure  = $this->request->isSecure();
             $this->response->setCookie([
                 'name'     => 'gso_jwt_token',
                 'value'    => $accessToken,

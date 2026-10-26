@@ -102,11 +102,25 @@ class PasswordRecoveryController extends BaseController
     public function verifyResetToken(): ResponseInterface
     {
         $body  = $this->request->getJSON(true) ?? [];
-        $email = strtolower(trim((string) ($body['email'] ?? '')));
-        $token = trim((string) ($body['token'] ?? ''));
+        $email = strtolower(trim((string) ($body['email'] ?? $this->request->getGet('email') ?? '')));
+        $token = trim((string) ($body['token'] ?? $this->request->getGet('token') ?? ''));
 
-        if (empty($email) || empty($token)) {
-            return $this->errorResponse('Email and reset token are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        if (empty($token)) {
+            return $this->errorResponse('Reset token is required.', [], ResponseInterface::HTTP_BAD_REQUEST);
+        }
+
+        // If email is not passed in payload, resolve directly from token record in database
+        if (empty($email)) {
+            $record = $this->passwordResetModel->where('token', $token)->first();
+            if ($record) {
+                $email = strtolower(trim($record['email']));
+            } else {
+                return $this->errorResponse(
+                    'This password reset token is invalid, expired, or has already been used.',
+                    ['is_expired' => true],
+                    ResponseInterface::HTTP_NOT_FOUND
+                );
+            }
         }
 
         $isValid = $this->passwordResetModel->verifyResetToken($email, $token);
@@ -114,7 +128,7 @@ class PasswordRecoveryController extends BaseController
             return $this->errorResponse(
                 'This password reset link is invalid or has expired. Please submit a new password reset request.',
                 ['is_expired' => true],
-                ResponseInterface::HTTP_GONE
+                ResponseInterface::HTTP_NOT_FOUND
             );
         }
 

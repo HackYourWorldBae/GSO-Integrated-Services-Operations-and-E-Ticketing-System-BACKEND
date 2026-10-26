@@ -439,6 +439,11 @@ class AuthController extends BaseController
         // Parse JSON body
         $body = $this->request->getJSON(true) ?? [];
 
+        // Support both 'identifier' and 'email' for seamless client/Postman compatibility
+        if (empty($body['identifier']) && !empty($body['email'])) {
+            $body['identifier'] = $body['email'];
+        }
+
         $rules = [
             'identifier' => 'required',
             'password'   => 'required'
@@ -676,7 +681,7 @@ class AuthController extends BaseController
 
         // --- Issue HttpOnly Secure Cookie ---
         $expiresIn = $this->jwt->getExpiresIn();
-        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $isSecure  = $this->request->isSecure();
         $this->response->setCookie([
             'name'     => 'gso_jwt_token',
             'value'    => $accessToken,
@@ -732,13 +737,13 @@ class AuthController extends BaseController
     public function verifyMfa(): ResponseInterface
     {
         $body      = $this->request->getJSON(true) ?? [];
-        $tempToken = trim((string) ($body['mfa_token'] ?? ''));
-        $otpCode   = trim((string) ($body['otp_code'] ?? ''));
+        $tempToken = trim((string) ($body['mfa_token'] ?? $body['temp_token'] ?? ''));
+        $otpCode   = trim((string) ($body['otp_code'] ?? $body['otp'] ?? ''));
 
         if ($tempToken === '' || $otpCode === '') {
             return $this->errorResponse('Verification token and 6-digit code are required.', [
                 'otp_code' => 'Please enter the 6-digit verification code.',
-            ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            ], ResponseInterface::HTTP_BAD_REQUEST);
         }
 
         $result = $this->mfaChallengeModel->verifyChallenge($tempToken, $otpCode);
@@ -803,7 +808,7 @@ class AuthController extends BaseController
 
         // --- Issue HttpOnly Secure Cookie ---
         $expiresIn = $this->jwt->getExpiresIn();
-        $isSecure  = (ENVIRONMENT === 'production' || $this->request->isSecure());
+        $isSecure  = $this->request->isSecure();
         $this->response->setCookie([
             'name'     => 'gso_jwt_token',
             'value'    => $accessToken,

@@ -206,9 +206,13 @@ class UserProfileController extends BaseController
         $userId = $this->currentUserId();
         $body   = $this->request->getJSON(true) ?? [];
 
-        $currentPassword = $body['current_password'] ?? '';
+        $currentPassword = $body['current_password'] ?? $body['old_password'] ?? '';
         $newPassword     = $body['new_password'] ?? $body['password'] ?? '';
         $confirmPassword = $body['confirm_password'] ?? $body['new_password_confirm'] ?? '';
+
+        if (empty($currentPassword)) {
+            return $this->errorResponse('Current password is required to create a new password.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         if (empty($newPassword) || empty($confirmPassword)) {
             return $this->errorResponse('All password fields are required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
@@ -223,9 +227,16 @@ class UserProfileController extends BaseController
         }
 
         $user = $this->userModel->find($userId);
+        if (!$user) {
+            return $this->errorResponse('User not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+        }
 
-        if (!empty($currentPassword) && !password_verify($currentPassword, $user['password_hash'])) {
+        if (empty($user['password_hash']) || !password_verify($currentPassword, $user['password_hash'])) {
             return $this->errorResponse('Current password is incorrect.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+        }
+
+        if (password_verify($newPassword, $user['password_hash'])) {
+            return $this->errorResponse('New password must be different from your current password.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $this->userModel->update($userId, [

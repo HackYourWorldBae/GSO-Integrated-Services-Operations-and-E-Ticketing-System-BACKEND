@@ -97,4 +97,53 @@ final class OperationsHubTest extends CIUnitTestCase
         $this->assertSame(8, $config['start_hour']);
         $this->assertSame(17, $config['end_hour']);
     }
+
+    public function testAccountActivityLogShorthandLogMethod(): void
+    {
+        $logModel = new \App\Models\AccountActivityLogModel();
+        // Calling log should execute without throwing an undefined method error
+        $result = $logModel->log(
+            'system-test',
+            'TEST_EVENT',
+            'Testing holiday activity logger',
+            '127.0.0.1'
+        );
+        $this->assertIsBool($result);
+    }
+
+    public function testHolidayModelInsertAndRetrieve(): void
+    {
+        if (!class_exists('SQLite3')) {
+            $this->markTestSkipped('SQLite3 extension not installed in CLI environment.');
+        }
+
+        $holidayModel = new SpecialHolidayModel();
+        $testDate = '2099-07-15';
+        
+        // Cleanup if previously present
+        $holidayModel->where('holiday_date', $testDate)->delete();
+
+        $insertId = $holidayModel->insert([
+            'holiday_date' => $testDate,
+            'name'         => 'Test Holiday',
+            'type'         => 'special_non_working',
+            'is_recurring' => 0,
+            'is_active'    => 1,
+            'notes'        => 'Temporary test holiday entry',
+        ]);
+
+        $this->assertNotFalse($insertId, 'Holiday should insert successfully: ' . json_encode($holidayModel->errors()));
+
+        $found = $holidayModel->find($insertId);
+        $this->assertNotNull($found);
+        $this->assertSame('Test Holiday', $found['name']);
+        $this->assertSame($testDate, $found['holiday_date']);
+
+        // Check isSpecialHoliday detects it
+        $this->assertTrue($holidayModel->isSpecialHoliday(new DateTime($testDate)));
+
+        // Clean up
+        $holidayModel->delete($insertId);
+    }
 }
+

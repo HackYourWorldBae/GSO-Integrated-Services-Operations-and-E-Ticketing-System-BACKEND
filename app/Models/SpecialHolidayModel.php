@@ -35,12 +35,81 @@ class SpecialHolidayModel extends Model
     protected $updatedField  = 'updated_at';
 
     protected $validationRules = [
-        'holiday_date' => 'required|valid_date[Y-m-d]',
+        'holiday_date' => 'required',
         'name'         => 'required|min_length[2]|max_length[255]',
         'type'         => 'required|in_list[special_non_working,regular,local_suspension,institutional]',
-        'is_recurring' => 'permit_empty|in_list[0,1]',
-        'is_active'    => 'permit_empty|in_list[0,1]',
+        'is_recurring' => 'permit_empty',
+        'is_active'    => 'permit_empty',
+        'notes'        => 'permit_empty',
     ];
+
+
+    /**
+     * Ensure the special_holidays table exists in case migrations have not been run.
+     */
+    public function ensureTableExists(): void
+    {
+        try {
+            $db = $this->db;
+            if (!$db->tableExists($this->table)) {
+                $forge = \Config\Database::forge();
+                $forge->addField([
+                    'id' => [
+                        'type'           => 'INT',
+                        'constraint'     => 11,
+                        'unsigned'       => true,
+                        'auto_increment' => true,
+                    ],
+                    'holiday_date' => [
+                        'type' => 'DATE',
+                        'null' => false,
+                    ],
+                    'name' => [
+                        'type'       => 'VARCHAR',
+                        'constraint' => 255,
+                        'null'       => false,
+                    ],
+                    'type' => [
+                        'type'       => 'VARCHAR',
+                        'constraint' => 50,
+                        'default'    => 'special_non_working',
+                    ],
+                    'is_recurring' => [
+                        'type'       => 'TINYINT',
+                        'constraint' => 1,
+                        'default'    => 0,
+                    ],
+                    'is_active' => [
+                        'type'       => 'TINYINT',
+                        'constraint' => 1,
+                        'default'    => 1,
+                    ],
+                    'notes' => [
+                        'type' => 'TEXT',
+                        'null' => true,
+                    ],
+                    'created_at' => [
+                        'type'    => 'TIMESTAMP',
+                        'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP'),
+                    ],
+                    'updated_at' => [
+                        'type'    => 'TIMESTAMP',
+                        'default' => new \CodeIgniter\Database\RawSql('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'),
+                    ],
+                ]);
+                $forge->addPrimaryKey('id');
+                $forge->addKey(['holiday_date', 'is_active']);
+                $forge->addKey('is_recurring');
+                $forge->createTable($this->table, true, [
+                    'ENGINE'          => 'InnoDB',
+                    'DEFAULT CHARSET' => 'utf8mb4',
+                    'COLLATE'         => 'utf8mb4_unicode_ci',
+                ]);
+            }
+        } catch (\Throwable $e) {
+            log_message('error', '[SpecialHolidayModel::ensureTableExists] ' . $e->getMessage());
+        }
+    }
 
     /**
      * Standard baseline special non-working holidays.

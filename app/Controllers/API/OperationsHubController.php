@@ -37,6 +37,24 @@ class OperationsHubController extends BaseController
         $this->activityLogModel = new AccountActivityLogModel();
     }
 
+    /**
+     * Safely record an administrative activity log without interrupting core operations.
+     */
+    private function logAction(string $eventType, string $details): void
+    {
+        try {
+            $currentUserId = $this->currentUserId() ?? 'system';
+            $this->activityLogModel->log(
+                $currentUserId,
+                $eventType,
+                $details,
+                $this->request->getIPAddress()
+            );
+        } catch (\Throwable $e) {
+            log_message('error', '[OperationsHubController::logAction] Audit log write failed: ' . $e->getMessage());
+        }
+    }
+
     // =========================================================================
     // 1. Unified Operations Configuration
     // =========================================================================
@@ -183,13 +201,7 @@ class OperationsHubController extends BaseController
 
         $created = $this->materialModel->find($id);
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Material Created',
-            "Added '{$name}' ({$unitCode} - {$category}) to central materials catalog.",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Material Created', "Added '{$name}' ({$unitCode} - {$category}) to central materials catalog.");
 
         return $this->successResponse("Material '{$name}' successfully added to {$unitCode}.", $created, ResponseInterface::HTTP_CREATED);
     }
@@ -256,13 +268,7 @@ class OperationsHubController extends BaseController
         $this->materialModel->update($id, $updateData);
         $updated = $this->materialModel->find($id);
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Material Updated',
-            "Updated material #{$id} ({$updated['name']} - {$updated['unit_code']}) in central catalog.",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Material Updated', "Updated material #{$id} ({$updated['name']} - {$updated['unit_code']}) in central catalog.");
 
         return $this->successResponse("Material '{$updated['name']}' updated successfully.", $updated);
     }
@@ -280,13 +286,7 @@ class OperationsHubController extends BaseController
 
         $this->materialModel->delete($id);
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Material Deleted',
-            "Removed '{$material['name']}' ({$material['unit_code']}) from central materials catalog.",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Material Deleted', "Removed '{$material['name']}' ({$material['unit_code']}) from central materials catalog.");
 
         return $this->successResponse("Material '{$material['name']}' successfully removed from catalog.");
     }
@@ -299,13 +299,7 @@ class OperationsHubController extends BaseController
     {
         $seeded = $this->materialModel->seedDefaultsIfEmpty();
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Catalog Defaults Seeded',
-            "Baseline FGMU and LEAU material library checked/seeded ({$seeded} items).",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Catalog Defaults Seeded', "Baseline FGMU and LEAU material library checked/seeded ({$seeded} items).");
 
         return $this->successResponse("Baseline materials catalog verified. Total items: {$seeded}.");
     }
@@ -379,13 +373,7 @@ class OperationsHubController extends BaseController
 
         WorkCalendar::clearCache();
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Holiday Added',
-            "Registered special non-working holiday '{$name}' on {$holidayDate}.",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Holiday Added', "Registered special non-working holiday '{$name}' on {$holidayDate}.");
 
         $created = $this->holidayModel->find($id);
         return $this->successResponse("Special holiday '{$name}' on {$holidayDate} registered successfully.", $created, ResponseInterface::HTTP_CREATED);
@@ -450,13 +438,7 @@ class OperationsHubController extends BaseController
 
         $updated = $this->holidayModel->find($id);
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Holiday Updated',
-            "Updated holiday #{$id} ({$updated['name']} on {$updated['holiday_date']}).",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Holiday Updated', "Updated holiday #{$id} ({$updated['name']} on {$updated['holiday_date']}).");
 
         return $this->successResponse("Holiday entry '{$updated['name']}' updated.", $updated);
     }
@@ -475,13 +457,7 @@ class OperationsHubController extends BaseController
         $this->holidayModel->delete($id);
         WorkCalendar::clearCache();
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Holiday Deleted',
-            "Deleted special holiday '{$holiday['name']}' on {$holiday['holiday_date']}.",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Holiday Deleted', "Deleted special holiday '{$holiday['name']}' on {$holiday['holiday_date']}.",);
 
         return $this->successResponse("Holiday entry '{$holiday['name']}' deleted.");
     }
@@ -556,13 +532,7 @@ class OperationsHubController extends BaseController
 
         WorkCalendar::clearCache();
 
-        $currentUserId = $this->currentUserId() ?? 'system';
-        $this->activityLogModel->log(
-            $currentUserId,
-            'Working Hours Updated',
-            "Operational hours updated: {$startTime} - {$endTime} (Lunch: {$lunchStart} - {$lunchEnd}, {$dailyHours}h/day).",
-            $this->request->getIPAddress()
-        );
+        $this->logAction('Working Hours Updated', "Operational hours updated: {$startTime} - {$endTime} (Lunch: {$lunchStart} - {$lunchEnd}, {$dailyHours}h/day).");
 
         return $this->successResponse('Working hours and SLA duration parameters successfully updated.', [
             'work_start_time'      => $startTime,

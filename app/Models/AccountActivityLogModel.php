@@ -148,6 +148,21 @@ class AccountActivityLogModel extends Model
     }
 
     /**
+     * Convenient shorthand for logging activity events.
+     * Maps directly to logEvent with standardized parameters.
+     */
+    public function log(?string $actorId, string $eventType, ?string $details = null, ?string $ipAddress = null, string $severity = 'info'): bool
+    {
+        return $this->logEvent([
+            'actor_id'   => $actorId,
+            'event_type' => $eventType,
+            'details'    => $details,
+            'ip_address' => $ipAddress,
+            'severity'   => $severity,
+        ]);
+    }
+
+    /**
      * Log an account or authentication activity event in full compliance with data privacy.
      *
      * @param array $params [

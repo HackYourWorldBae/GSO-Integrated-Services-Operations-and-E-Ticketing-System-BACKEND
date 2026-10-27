@@ -76,6 +76,37 @@ class TicketActionController extends BaseController
         }
     }
 
+    /**
+     * Helper to send email status notification to all active, opted-in administrators/staff of a unit.
+     */
+    private function notifyUnitAdminsByEmail(int $unitId, string $ticketId, string $statusLabel, string $message, array $extra = []): void
+    {
+        try {
+            $emailService = new ResendEmailService();
+            $unitAdmins   = $emailService->getOptedInUnitAdmins($unitId, ['admin', 'staff']);
+
+            if (empty($unitAdmins)) {
+                return;
+            }
+
+            foreach ($unitAdmins as $admin) {
+                $adminEmail = $admin['email'] ?? '';
+                if (!empty($adminEmail)) {
+                    $emailService->sendTicketStatusUpdate(
+                        $adminEmail,
+                        $admin['name'] ?? 'Unit Officer',
+                        $ticketId,
+                        $statusLabel,
+                        $message,
+                        $extra
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('error', '[TicketActionController::notifyUnitAdminsByEmail] ' . $e->getMessage());
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Ticket Status Transitions
     // -------------------------------------------------------------------------
@@ -207,7 +238,7 @@ class TicketActionController extends BaseController
         if ($isExecutive) {
             $dbConn = Database::connect();
             $unitAdmins = $dbConn->query(
-                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                "SELECT id FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'",
                 [$unitId]
             )->getResultArray();
 
@@ -231,6 +262,15 @@ class TicketActionController extends BaseController
                     $adminNotifBody
                 );
             }
+
+            // Dispatch email alert to opted-in unit administrators
+            $this->notifyUnitAdminsByEmail(
+                $unitId,
+                $ticketId,
+                $adminNotifTitle,
+                $adminNotifBody,
+                ['Service' => $ticket['service_type'], 'Approved By' => $approverTitle]
+            );
         }
 
         return $this->successResponse('Ticket approved successfully.', [
@@ -412,17 +452,27 @@ class TicketActionController extends BaseController
         if ($isReturnedByDirector) {
             $db = Database::connect();
             $unitAdmins = $db->query(
-                "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                "SELECT id FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'",
                 [(int) $ticket['unit_id']]
             )->getResultArray();
+            $returnDetail = "The Director returned Ticket #{$ticketId} ({$ticket['service_type']}) for Unit Head handling. Notes: " . ($notes ?: 'Proceed with unit discretion.');
             foreach ($unitAdmins as $uAdmin) {
                 $this->notificationModel->createNotification(
                     $uAdmin['id'],
                     'info',
                     "Ticket Returned by Director",
-                    "The Director returned Ticket #{$ticketId} ({$ticket['service_type']}) for Unit Head handling. Notes: " . ($notes ?: 'Proceed with unit discretion.')
+                    $returnDetail
                 );
             }
+
+            // Dispatch email alert to opted-in unit administrators
+            $this->notifyUnitAdminsByEmail(
+                (int) $ticket['unit_id'],
+                $ticketId,
+                'Ticket Returned by Director',
+                $returnDetail,
+                ['Service' => $ticket['service_type'], 'Notes' => $notes ?: 'Proceed with unit discretion.']
+            );
         }
 
         return $this->successResponse('Escalation cancelled; ticket returned to Unit Head queue.', [
@@ -1595,6 +1645,34 @@ class TicketActionController extends BaseController
             'Completed',
             "Work on your service request #{$ticketId} ({$ticket['service_type']}) has been marked as completed. Please sign in to review accomplishment details."
         );
+
+        // Notify Unit Admins that work is completed and ready for verification/closure
+        $completerRole = $this->currentUserRole();
+        if (in_array($completerRole, ['worker', 'personnel', 'staff'], true)) {
+            $adminCompleteMsg = "Work on Ticket #{$ticketId} ({$ticket['service_type']}) has been marked as completed by field personnel and is awaiting administrative verification and closure.";
+            $dbConn = Database::connect();
+            $unitAdmins = $dbConn->query(
+                "SELECT id FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'",
+                [$unitId]
+            )->getResultArray();
+            foreach ($unitAdmins as $uAdmin) {
+                if ((string)$uAdmin['id'] !== (string)$this->currentUserId()) {
+                    $this->notificationModel->createNotification(
+                        $uAdmin['id'],
+                        'info',
+                        "Job Completed by Personnel",
+                        $adminCompleteMsg
+                    );
+                }
+            }
+            $this->notifyUnitAdminsByEmail(
+                $unitId,
+                $ticketId,
+                'Work Completed — Awaiting Verification',
+                $adminCompleteMsg,
+                ['Service' => $ticket['service_type'], 'Status' => 'Completed / Pending Verification']
+            );
+        }
 
         return $this->successResponse('Ticket completed successfully.', [
             'ticket_id'        => $ticketId, 

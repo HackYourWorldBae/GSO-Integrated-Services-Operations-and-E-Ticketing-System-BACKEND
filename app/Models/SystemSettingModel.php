@@ -32,7 +32,7 @@ class SystemSettingModel extends Model
     {
         try {
             $record = $this->where('key', $key)->first();
-            if ($record && !empty($record['value'])) {
+            if ($record && isset($record['value']) && $record['value'] !== '') {
                 return $record['value'];
             }
         } catch (\Throwable $e) {

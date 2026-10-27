@@ -383,6 +383,47 @@ class ResendEmailService
     }
 
     /**
+     * Return active users in a unit who opted into email updates, with their names and roles.
+     * Used for sending personalized status notifications to unit personnel.
+     *
+     * @param int $unitId
+     * @param string[] $roles
+     * @return array<int, array{id: string, email: string, name: string, role: string}>
+     */
+    public function getOptedInUnitAdmins(int $unitId, array $roles = ['admin', 'staff']): array
+    {
+        try {
+            $db = \Config\Database::connect();
+            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
+            $optInClause = $colExists ? 'AND COALESCE(email_notifications_enabled, 1) = 1' : '';
+            $roleList = implode(',', array_map(fn($r) => $db->escape($r), $roles));
+            $rows = $db->query(
+                "SELECT id, email, first_name, last_name, role FROM users WHERE role IN ({$roleList}) AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}",
+                [$unitId]
+            )->getResultArray();
+
+            $result = [];
+            foreach ($rows as $r) {
+                $cleanEmail = trim((string)($r['email'] ?? ''));
+                if (empty($cleanEmail)) {
+                    continue;
+                }
+                $name = trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? ''));
+                $result[] = [
+                    'id'    => (string) $r['id'],
+                    'email' => $cleanEmail,
+                    'name'  => !empty($name) ? $name : 'Unit Officer',
+                    'role'  => (string) ($r['role'] ?? 'admin'),
+                ];
+            }
+            return $result;
+        } catch (\Throwable $e) {
+            log_message('error', '[ResendEmailService::getOptedInUnitAdmins] ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
      * Return emails of users in a unit who opted into email updates.
      * Used as a filtering helper before dispatching unit-targeted alerts.
      *
@@ -392,23 +433,8 @@ class ResendEmailService
      */
     public function getOptedInUnitEmails(int $unitId, array $roles = ['admin', 'staff']): array
     {
-        try {
-            $db = \Config\Database::connect();
-            $colExists = $db->fieldExists('email_notifications_enabled', 'users');
-            $optInClause = $colExists ? 'AND COALESCE(email_notifications_enabled, 1) = 1' : '';
-            $placeholders = implode(',', array_fill(0, count($roles), '?'));
-            $params = array_merge($roles, [$unitId]);
-            // Roles are bound as values, unit_id as last param — build safely
-            $roleList = implode(',', array_map(fn($r) => $db->escape($r), $roles));
-            $rows = $db->query(
-                "SELECT email FROM users WHERE role IN ({$roleList}) AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}",
-                [$unitId]
-            )->getResultArray();
-            return array_values(array_filter(array_column($rows, 'email')));
-        } catch (\Throwable $e) {
-            log_message('error', '[ResendEmailService::getOptedInUnitEmails] ' . $e->getMessage());
-            return [];
-        }
+        $admins = $this->getOptedInUnitAdmins($unitId, $roles);
+        return array_values(array_unique(array_column($admins, 'email')));
     }
 
     /**
@@ -416,7 +442,8 @@ class ResendEmailService
      */
     public function sendSsuIncidentAlertToAdmins(array $adminEmails, array $incidentData, string $ticketId): array
     {
-        if (empty($adminEmails)) {
+        $cleanEmails = array_values(array_unique(array_filter(array_map('trim', $adminEmails))));
+        if (empty($cleanEmails)) {
             return ['success' => false, 'message' => 'No SSU Admin email addresses found.'];
         }
 
@@ -490,7 +517,25 @@ class ResendEmailService
             "
         );
 
-        return $this->sendRawEmail($adminEmails, $subject, $html);
+        $lastResult = ['success' => false, 'message' => 'No SSU incident emails dispatched.'];
+        $successCount = 0;
+        foreach ($cleanEmails as $recipient) {
+            $dispatchRes = $this->sendRawEmail($recipient, $subject, $html);
+            if (!empty($dispatchRes['success'])) {
+                $successCount++;
+                $lastResult = $dispatchRes;
+            }
+        }
+
+        if ($successCount > 0) {
+            return [
+                'success' => true,
+                'message' => "SSU incident alert dispatched to {$successCount} admin(s).",
+                'id'      => $lastResult['id'] ?? null,
+            ];
+        }
+
+        return $lastResult;
     }
 
     /**

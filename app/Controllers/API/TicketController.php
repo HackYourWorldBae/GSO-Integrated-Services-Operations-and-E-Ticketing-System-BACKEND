@@ -307,9 +307,10 @@ class TicketController extends BaseController
             }
         }
 
-        $db             = Database::connect();
-        $createdTickets = [];
+        $db               = Database::connect();
+        $createdTickets   = [];
         $pendingAuditLogs = [];
+        $ssuTicketId       = null;
 
         $db->transStart();
         $db->transException(true);
@@ -615,9 +616,10 @@ class TicketController extends BaseController
 
             // --- 3. SSU Incident Report ---
             if (!empty($body['ssu']['incidentReport'])) {
-                $inc      = sanitize_array($body['ssu']['incidentReport']);
-                $ticketId = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
-                $typeStr  = is_array($inc['incidents'] ?? null) ? implode(', ', $inc['incidents']) : ($inc['otherIncident'] ?? 'Incident');
+                $inc         = sanitize_array($body['ssu']['incidentReport']);
+                $ticketId    = $this->ticketModel->generateTicketId('SSU', self::UNIT_MAP['SSU']);
+                $ssuTicketId = $ticketId;
+                $typeStr     = is_array($inc['incidents'] ?? null) ? implode(', ', $inc['incidents']) : ($inc['otherIncident'] ?? 'Incident');
 
                 $this->ticketModel->insert([
                     'id'                    => $ticketId,
@@ -735,7 +737,6 @@ class TicketController extends BaseController
 
         // --- Notify Admins (In-App) & Gather Ticket Summaries ---
         $ticketSummaryList = [];
-        $ssuTicketId       = null;
         $emailService      = new ResendEmailService();
 
         try {
@@ -755,7 +756,7 @@ class TicketController extends BaseController
                     // Route newly submitted tickets directly to the concerned Unit Head's dashboard
                     // for their direct review and approval, or escalation to Director if heavy/important.
                     $unitAdmins = $db->query(
-                        "SELECT id, email, first_name, last_name FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
+                        "SELECT id, email, first_name, last_name FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'",
                         [(int) $t['unit_id']]
                     )->getResultArray();
                     $unitNameStr = $ticketSummaryList[count($ticketSummaryList) - 1]['unit_name'] ?? 'GSO Unit';
@@ -786,38 +787,27 @@ class TicketController extends BaseController
 
             // --- 2. High-Priority Email Alerts for SSU Administrators (opt-in only) ---
             if ($ssuTicketId && !empty($body['ssu']['incidentReport'])) {
-                // Respect per-account email opt-in; include both admin and staff of SSU
-                $colExists = $db->fieldExists('email_notifications_enabled', 'users');
-                $optInClause = $colExists
-                    ? "AND COALESCE(email_notifications_enabled, 1) = 1"
-                    : "";
-                $ssuAdmins = $db->query(
-                    "SELECT email FROM users WHERE role IN ('admin','staff') AND unit_id = 3 AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}"
-                )->getResultArray();
-
-                if (!empty($ssuAdmins)) {
-                    $ssuEmails = array_values(array_filter(array_column($ssuAdmins, 'email')));
-                    if (!empty($ssuEmails)) {
-                        $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
-                    }
+                $ssuEmails = $emailService->getOptedInUnitEmails(self::UNIT_MAP['SSU'], ['admin', 'staff']);
+                if (!empty($ssuEmails)) {
+                    $emailService->sendSsuIncidentAlertToAdmins($ssuEmails, $body['ssu']['incidentReport'], $ssuTicketId);
                 }
             }
 
-            // --- 3. New Request Email to Opted-In Unit Heads (FGMU & LEAU Admins) ---
+            // --- 3. New Request Email to Opted-In Unit Heads (FGMU, LEAU, & SSU Admins) ---
             if (!empty($createdTickets)) {
-                $colExists = $db->fieldExists('email_notifications_enabled', 'users');
-                $optInClause = $colExists ? "AND COALESCE(email_notifications_enabled, 1) = 1" : "";
                 foreach ($createdTickets as $tId) {
                     $ticketRow = $this->ticketModel->find($tId);
-                    if ($ticketRow && in_array((int)$ticketRow['unit_id'], [1, 2], true)) {
-                        $unitAdmins = $db->query(
-                            "SELECT email, first_name FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active' AND email IS NOT NULL AND email != '' {$optInClause}",
-                            [(int)$ticketRow['unit_id']]
-                        )->getResultArray();
+                    if ($ticketRow && in_array((int)$ticketRow['unit_id'], [1, 2, 3], true)) {
+                        // Skip generic email if SSU incident alert was already dispatched for this ticket
+                        if ($ssuTicketId && (string)$tId === (string)$ssuTicketId) {
+                            continue;
+                        }
+
+                        $unitAdmins = $emailService->getOptedInUnitAdmins((int)$ticketRow['unit_id'], ['admin', 'staff']);
                         foreach ($unitAdmins as $uAdmin) {
                             $adminEmail = $uAdmin['email'] ?? '';
-                            if ($adminEmail) {
-                                $adminName = $uAdmin['first_name'] ?? 'Unit Head';
+                            if (!empty($adminEmail)) {
+                                $adminName = $uAdmin['name'] ?? 'Unit Officer';
                                 $emailService->sendTicketStatusUpdate(
                                     $adminEmail,
                                     $adminName,

@@ -119,15 +119,23 @@ class BorrowingController extends BaseController
         if (in_array($role, ['director', 'superadmin'], true)) {
             try {
                 $dbConn = \Config\Database::connect();
-                $targetAdmins = $dbConn->query("SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'", [$destUnitId])->getResultArray();
+                $targetAdmins = $dbConn->query("SELECT id FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'", [$destUnitId])->getResultArray();
+                $adminBorrowingMsg = "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment.";
                 foreach ($targetAdmins as $uAdmin) {
                     $this->notificationModel->createNotification(
                         $uAdmin['id'],
                         'info',
                         "New Borrowing Ticket Approved",
-                        "Borrowing ticket #{$ticketId} ({$ticket['service_type']}) has been approved by the Director and is awaiting inventory assignment."
+                        $adminBorrowingMsg
                     );
                 }
+                $this->notifyUnitAdminsByEmail(
+                    $destUnitId,
+                    $ticketId,
+                    'Borrowing Request Approved by Director',
+                    $adminBorrowingMsg,
+                    ['Service' => $ticket['service_type'], 'Approved By' => $approverTitle]
+                );
             } catch (\Throwable $err) {
                 log_message('error', '[BorrowingController::directorApprove] Admin notification error: ' . $err->getMessage());
             }
@@ -744,6 +752,13 @@ class BorrowingController extends BaseController
                 "Your borrowing request #{$ticketId} has been cancelled. Reason: {$reason}"
             );
 
+            $this->sendBorrowingEmail(
+                $ticket['user_id'],
+                $ticketId,
+                'Borrowing Request Cancelled',
+                "Your borrowing request #{$ticketId} has been cancelled. Reason: {$reason}"
+            );
+
             // Also notify concerned unit admins if cancelled by someone else
             $unitAdmins = $db->query(
                 "SELECT id FROM users WHERE role = 'admin' AND unit_id = ? AND status = 'Active'",
@@ -943,6 +958,37 @@ class BorrowingController extends BaseController
             }
         } catch (\Throwable $e) {
             log_message('error', '[BorrowingController::sendBorrowingEmail] ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Helper to send email status notification to all active, opted-in administrators/staff of a unit.
+     */
+    private function notifyUnitAdminsByEmail(int $unitId, string $ticketId, string $statusLabel, string $message, array $extra = []): void
+    {
+        try {
+            $emailService = new ResendEmailService();
+            $unitAdmins   = $emailService->getOptedInUnitAdmins($unitId, ['admin', 'staff']);
+
+            if (empty($unitAdmins)) {
+                return;
+            }
+
+            foreach ($unitAdmins as $admin) {
+                $adminEmail = $admin['email'] ?? '';
+                if (!empty($adminEmail)) {
+                    $emailService->sendTicketStatusUpdate(
+                        $adminEmail,
+                        $admin['name'] ?? 'Unit Officer',
+                        $ticketId,
+                        $statusLabel,
+                        $message,
+                        $extra
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('error', '[BorrowingController::notifyUnitAdminsByEmail] ' . $e->getMessage());
         }
     }
 }

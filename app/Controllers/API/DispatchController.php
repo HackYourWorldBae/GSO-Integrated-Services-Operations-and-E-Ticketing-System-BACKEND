@@ -9,6 +9,8 @@ use App\Models\TicketAssignmentModel;
 use App\Models\TicketMaterialModel;
 use App\Models\TicketLogModel;
 use App\Models\NotificationModel;
+use App\Models\UserModel;
+use App\Libraries\ResendEmailService;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -558,6 +560,42 @@ class DispatchController extends BaseController
                 [],
                 ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
             );
+        }
+
+        // --- Post-Commit: Dispatch Email Notification to Requestor ---
+        try {
+            $userModel = new UserModel();
+            $requestor = $userModel->find($ticket['user_id']);
+            if ($requestor && !empty($requestor['email'])) {
+                $optedIn = !array_key_exists('email_notifications_enabled', $requestor) || (int)($requestor['email_notifications_enabled'] ?? 1) === 1;
+                if ($optedIn) {
+                    $reqName = trim(($requestor['first_name'] ?? '') . ' ' . ($requestor['last_name'] ?? ''));
+                    if (empty($reqName)) {
+                        $reqName = 'Campus Member';
+                    }
+                    $emailService = new ResendEmailService();
+                    $dispatchMsg = $implementationDate
+                        ? "Your service request #{$ticketId} ({$ticket['service_type']}) has been dispatched and scheduled for implementation on {$implementationDate}."
+                        : "A service worker ({$worker['name']}) has been assigned to your request #{$ticketId} ({$ticket['service_type']}) and work is commencing.";
+                    $extraInfo = [
+                        'Service'         => $ticket['service_type'],
+                        'Assigned Worker' => $worker['name'],
+                    ];
+                    if ($implementationDate) {
+                        $extraInfo['Scheduled Date'] = $implementationDate;
+                    }
+                    $emailService->sendTicketStatusUpdate(
+                        $requestor['email'],
+                        $reqName,
+                        $ticketId,
+                        'Dispatched / Work In Progress',
+                        $dispatchMsg,
+                        $extraInfo
+                    );
+                }
+            }
+        } catch (\Throwable $emEx) {
+            log_message('error', '[DispatchController::assign] Dispatch email failed: ' . $emEx->getMessage());
         }
 
         return $this->successResponse('Worker assigned successfully.', [

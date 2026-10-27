@@ -1087,7 +1087,9 @@ class SuperadminController extends BaseController
     public function getMaintenanceStatus(): ResponseInterface
     {
         $details = $this->settingModel->getMaintenanceDetails();
-        return $this->successResponse('Maintenance status retrieved.', $details);
+        return $this->successResponse('Maintenance status retrieved.', array_merge([
+            'maintenance' => $details,
+        ], $details));
     }
 
     /**
@@ -1128,9 +1130,13 @@ class SuperadminController extends BaseController
             ]);
         } catch (\Throwable $ignored) {}
 
+        $maintDetails = $this->settingModel->getMaintenanceDetails();
+
         return $this->successResponse(
             $active ? 'Maintenance mode has been activated.' : 'Maintenance mode has been deactivated.',
-            $this->settingModel->getMaintenanceDetails()
+            array_merge([
+                'maintenance' => $maintDetails,
+            ], $maintDetails)
         );
     }
 }

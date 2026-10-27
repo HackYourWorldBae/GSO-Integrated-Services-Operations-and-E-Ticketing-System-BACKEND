@@ -156,6 +156,14 @@ class BackupController extends BaseController
                 );
             }
 
+            if (!$this->settingModel->isMaintenanceActive()) {
+                return $this->errorResponse(
+                    'Restoration aborted. Website maintenance mode must be active before executing system restoration.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
             $userId = $this->currentUserId();
             $result = $this->backupService->restoreBackup($id, $userId, $source);
 
@@ -190,6 +198,14 @@ class BackupController extends BaseController
                 );
             }
 
+            if (!$this->settingModel->isMaintenanceActive()) {
+                return $this->errorResponse(
+                    'Restoration aborted. Website maintenance mode must be active before executing system restoration.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
             $userId = $this->currentUserId();
             $result = $this->backupService->restoreLatestSnapshot($userId, $source);
 
@@ -215,6 +231,14 @@ class BackupController extends BaseController
             if ($confirmation !== 'CONFIRM RESTORE') {
                 return $this->errorResponse(
                     'Restoration aborted. You must type CONFIRM RESTORE to execute this operation.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
+            if (!$this->settingModel->isMaintenanceActive()) {
+                return $this->errorResponse(
+                    'Restoration aborted. Website maintenance mode must be active before executing system restoration.',
                     [],
                     ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
                 );

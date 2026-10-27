@@ -264,282 +264,301 @@ class DispatchController extends BaseController
         $assignmentStatus = $isEmergency ? 'active' : 'queued';
 
         $db = \Config\Database::connect();
+        $db->transStart();
+        $db->transException(true);
 
-        if ($isEmergency || $pauseCurrent) {
-            // Find active running assignment for this worker on OTHER tickets
-            $activeAss = $db->table('ticket_assignments')
-                ->where('personnel_id', $personnelId)
-                ->where('ticket_id !=', $ticketId)
-                ->where('completed_at IS NULL')
-                ->get()->getResultArray();
-
-            $processedPreemptedTickets = [];
-
-            foreach ($activeAss as $ass) {
-                $preemptedTicketId = $ass['ticket_id'];
-
-                // Pause this worker's individual assignment
-                $db->table('ticket_assignments')
-                    ->where('id', $ass['id'])
-                    ->update(['status' => 'paused']);
-
-                if (in_array($preemptedTicketId, $processedPreemptedTickets, true)) {
-                    continue;
-                }
-                $processedPreemptedTickets[] = $preemptedTicketId;
-
-                $preemptedTicket = $this->ticketModel->find($preemptedTicketId);
-                if (!$preemptedTicket) {
-                    continue;
-                }
-
-                // Find ALL active assignments for this preempted ticket
-                $allTicketAssignments = $db->table('ticket_assignments')
-                    ->where('ticket_id', $preemptedTicketId)
+        try {
+            if ($isEmergency || $pauseCurrent) {
+                // Find active running assignment for this worker on OTHER tickets
+                $activeAss = $db->table('ticket_assignments')
+                    ->where('personnel_id', $personnelId)
+                    ->where('ticket_id !=', $ticketId)
                     ->where('completed_at IS NULL')
                     ->get()->getResultArray();
 
-                $totalWorkersOnTicket = count($allTicketAssignments);
+                $processedPreemptedTickets = [];
 
-                $shouldExtendTicket = false;
-                $extendReasonType   = 'solo';
-                $activeTeamWorkers  = [];
-                $dispatchedWorkers  = [];
+                foreach ($activeAss as $ass) {
+                    $preemptedTicketId = $ass['ticket_id'];
 
-                if ($totalWorkersOnTicket <= 1) {
-                    // Solo job ticket: sole worker is preempted to emergency, so extend timeline!
-                    $shouldExtendTicket = true;
+                    // Pause this worker's individual assignment
+                    $db->table('ticket_assignments')
+                        ->where('id', $ass['id'])
+                        ->update(['status' => 'paused']);
+
+                    if (in_array($preemptedTicketId, $processedPreemptedTickets, true)) {
+                        continue;
+                    }
+                    $processedPreemptedTickets[] = $preemptedTicketId;
+
+                    $preemptedTicket = $this->ticketModel->find($preemptedTicketId);
+                    if (!$preemptedTicket) {
+                        continue;
+                    }
+
+                    // Find ALL active assignments for this preempted ticket
+                    $allTicketAssignments = $db->table('ticket_assignments')
+                        ->where('ticket_id', $preemptedTicketId)
+                        ->where('completed_at IS NULL')
+                        ->get()->getResultArray();
+
+                    $totalWorkersOnTicket = count($allTicketAssignments);
+
+                    $shouldExtendTicket = false;
                     $extendReasonType   = 'solo';
-                    $dispatchedWorkers[] = $worker['name'];
-                } else {
-                    // Team job ticket: Multiple workers assigned.
-                    // Rule: Only extend if ALL personnel assigned to this ticket are dispatched to emergency (or unavailable).
-                    $activeRemainingCount = 0;
+                    $activeTeamWorkers  = [];
+                    $dispatchedWorkers  = [];
 
-                    foreach ($allTicketAssignments as $tAss) {
-                        $assignedWorkerId = $tAss['personnel_id'];
-
-                        if ((string) $assignedWorkerId === (string) $personnelId) {
-                            $dispatchedWorkers[] = $worker['name'];
-                            continue;
-                        }
-
-                        // Check if other worker is assigned to THIS emergency ticket $ticketId
-                        $isAlsoOnThisEmergency = $db->table('ticket_assignments')
-                            ->where('personnel_id', $assignedWorkerId)
-                            ->where('ticket_id', $ticketId)
-                            ->where('completed_at IS NULL')
-                            ->countAllResults() > 0;
-
-                        // Check if other worker has another active emergency assignment
-                        $hasOtherEmergency = $db->table('ticket_assignments')
-                            ->where('personnel_id', $assignedWorkerId)
-                            ->where('is_emergency', 1)
-                            ->where('completed_at IS NULL')
-                            ->countAllResults() > 0;
-
-                        $otherWorkerObj = $this->personnelModel->find($assignedWorkerId);
-                        $otherWorkerStatus = $otherWorkerObj['status'] ?? 'available';
-                        $isOnLeave = in_array($otherWorkerStatus, ['on_leave', 'On Leave'], true);
-                        $isAlreadyPaused = ($tAss['status'] === 'paused');
-
-                        if ($isAlsoOnThisEmergency || $hasOtherEmergency || $isAlreadyPaused || $isOnLeave) {
-                            $dispatchedWorkers[] = $otherWorkerObj['name'] ?? 'Staff member';
-                        } else {
-                            $activeRemainingCount++;
-                            $activeTeamWorkers[] = $otherWorkerObj['name'] ?? 'Staff member';
-                        }
-                    }
-
-                    // Unless all personnels are dispatched to emergency/important ticket
-                    if ($activeRemainingCount === 0) {
+                    if ($totalWorkersOnTicket <= 1) {
+                        // Solo job ticket: sole worker is preempted to emergency, so extend timeline!
                         $shouldExtendTicket = true;
-                        $extendReasonType   = 'all_dispatched';
+                        $extendReasonType   = 'solo';
+                        $dispatchedWorkers[] = $worker['name'];
                     } else {
-                        $shouldExtendTicket = false;
-                        $extendReasonType   = 'team_maintained';
+                        // Team job ticket: Multiple workers assigned.
+                        // Rule: Only extend if ALL personnel assigned to this ticket are dispatched to emergency (or unavailable).
+                        $activeRemainingCount = 0;
+
+                        foreach ($allTicketAssignments as $tAss) {
+                            $assignedWorkerId = $tAss['personnel_id'];
+
+                            if ((string) $assignedWorkerId === (string) $personnelId) {
+                                $dispatchedWorkers[] = $worker['name'];
+                                continue;
+                            }
+
+                            // Check if other worker is assigned to THIS emergency ticket $ticketId
+                            $isAlsoOnThisEmergency = $db->table('ticket_assignments')
+                                ->where('personnel_id', $assignedWorkerId)
+                                ->where('ticket_id', $ticketId)
+                                ->where('completed_at IS NULL')
+                                ->countAllResults() > 0;
+
+                            // Check if other worker has another active emergency assignment
+                            $hasOtherEmergency = $db->table('ticket_assignments')
+                                ->where('personnel_id', $assignedWorkerId)
+                                ->where('is_emergency', 1)
+                                ->where('completed_at IS NULL')
+                                ->countAllResults() > 0;
+
+                            $otherWorkerObj = $this->personnelModel->find($assignedWorkerId);
+                            $otherWorkerStatus = $otherWorkerObj['status'] ?? 'available';
+                            $isOnLeave = in_array($otherWorkerStatus, ['on_leave', 'On Leave'], true);
+                            $isAlreadyPaused = ($tAss['status'] === 'paused');
+
+                            if ($isAlsoOnThisEmergency || $hasOtherEmergency || $isAlreadyPaused || $isOnLeave) {
+                                $dispatchedWorkers[] = $otherWorkerObj['name'] ?? 'Staff member';
+                            } else {
+                                $activeRemainingCount++;
+                                $activeTeamWorkers[] = $otherWorkerObj['name'] ?? 'Staff member';
+                            }
+                        }
+
+                        // Unless all personnels are dispatched to emergency/important ticket
+                        if ($activeRemainingCount === 0) {
+                            $shouldExtendTicket = true;
+                            $extendReasonType   = 'all_dispatched';
+                        } else {
+                            $shouldExtendTicket = false;
+                            $extendReasonType   = 'team_maintained';
+                        }
                     }
-                }
 
-                if ($shouldExtendTicket) {
-                    $emergencyExtensionDays = max(1, (int) ($body['extension_days'] ?? $workingDays ?? 1));
+                    if ($shouldExtendTicket) {
+                        $emergencyExtensionDays = max(1, (int) ($body['extension_days'] ?? $workingDays ?? 1));
 
-                    // Avoid duplicate extensions for the same emergency dispatch
-                    $alreadyExtendedForThis = !empty($preemptedTicket['extension_reason']) &&
-                        str_contains($preemptedTicket['extension_reason'], "Emergency Ticket #{$ticketId}");
+                        // Avoid duplicate extensions for the same emergency dispatch
+                        $alreadyExtendedForThis = !empty($preemptedTicket['extension_reason']) &&
+                            str_contains($preemptedTicket['extension_reason'], "Emergency Ticket #{$ticketId}");
 
-                    if (!$alreadyExtendedForThis) {
-                        $baseDate = !empty($preemptedTicket['extended_completion_date'])
-                            ? new \DateTime($preemptedTicket['extended_completion_date'])
-                            : (!empty($preemptedTicket['target_completion_date'])
-                                ? new \DateTime($preemptedTicket['target_completion_date'])
-                                : (!empty($ass['implementation_date'])
-                                    ? new \DateTime($ass['implementation_date'])
-                                    : new \DateTime()));
+                        if (!$alreadyExtendedForThis) {
+                            $baseDate = !empty($preemptedTicket['extended_completion_date'])
+                                ? new \DateTime($preemptedTicket['extended_completion_date'])
+                                : (!empty($preemptedTicket['target_completion_date'])
+                                    ? new \DateTime($preemptedTicket['target_completion_date'])
+                                    : (!empty($ass['implementation_date'])
+                                        ? new \DateTime($ass['implementation_date'])
+                                        : new \DateTime()));
 
-                        $newTargetDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDate, $emergencyExtensionDays)->format('Y-m-d');
-                        $totalDays     = (int) ($preemptedTicket['extension_days'] ?? 0) + $emergencyExtensionDays;
+                            $newTargetDate = \App\Libraries\WorkCalendar::addWorkingDays($baseDate, $emergencyExtensionDays)->format('Y-m-d');
+                            $totalDays     = (int) ($preemptedTicket['extension_days'] ?? 0) + $emergencyExtensionDays;
 
-                        $reasonText = ($extendReasonType === 'solo')
-                            ? "Solo worker {$worker['name']} preempted for Emergency Ticket #{$ticketId}"
-                            : "All assigned team personnel dispatched to emergency (Emergency Ticket #{$ticketId})";
+                            $reasonText = ($extendReasonType === 'solo')
+                                ? "Solo worker {$worker['name']} preempted for Emergency Ticket #{$ticketId}"
+                                : "All assigned team personnel dispatched to emergency (Emergency Ticket #{$ticketId})";
 
-                        $this->ticketModel->update($preemptedTicketId, [
-                            'status_label'             => 'Paused (Emergency Preempted)',
-                            'extension_days'           => $totalDays,
-                            'extended_completion_date' => $newTargetDate,
-                            'extension_reason'         => $reasonText,
-                            'updated_at'               => date('Y-m-d H:i:s'),
-                        ]);
+                            $this->ticketModel->update($preemptedTicketId, [
+                                'status_label'             => 'Paused (Emergency Preempted)',
+                                'extension_days'           => $totalDays,
+                                'extended_completion_date' => $newTargetDate,
+                                'extension_reason'         => $reasonText,
+                                'updated_at'               => date('Y-m-d H:i:s'),
+                            ]);
 
-                        $db->table('ticket_assignments')
-                            ->where('ticket_id', $preemptedTicketId)
-                            ->where('completed_at IS NULL')
-                            ->update(['implementation_date' => $newTargetDate]);
+                            $db->table('ticket_assignments')
+                                ->where('ticket_id', $preemptedTicketId)
+                                ->where('completed_at IS NULL')
+                                ->update(['implementation_date' => $newTargetDate]);
 
-                        $logDetail = ($extendReasonType === 'solo')
-                            ? "Timeline Extended: Target completion adjusted to {$newTargetDate} (+{$emergencyExtensionDays} working day(s)) because solo worker {$worker['name']} was dispatched to Emergency Ticket #{$ticketId}."
-                            : "Timeline Extended: Target completion adjusted to {$newTargetDate} (+{$emergencyExtensionDays} working day(s)) because all assigned team personnel were dispatched to emergency response.";
+                            $logDetail = ($extendReasonType === 'solo')
+                                ? "Timeline Extended: Target completion adjusted to {$newTargetDate} (+{$emergencyExtensionDays} working day(s)) because solo worker {$worker['name']} was dispatched to Emergency Ticket #{$ticketId}."
+                                : "Timeline Extended: Target completion adjusted to {$newTargetDate} (+{$emergencyExtensionDays} working day(s)) because all assigned team personnel were dispatched to emergency response.";
+
+                            $this->logModel->logAction(
+                                $preemptedTicketId,
+                                $this->currentUserId(),
+                                'Timeline Extended (Emergency Preemption)',
+                                $logDetail
+                            );
+
+                            $this->notificationModel->createNotification(
+                                $preemptedTicket['user_id'],
+                                'warning',
+                                "Ticket Schedule Extended",
+                                "Work is temporarily paused and target completion adjusted to {$newTargetDate} as assigned personnel is responding to an urgent emergency."
+                            );
+                        } else {
+                            // Already extended, ensure status_label reflects paused
+                            $this->ticketModel->update($preemptedTicketId, [
+                                'status_label' => 'Paused (Emergency Preempted)',
+                                'updated_at'   => date('Y-m-d H:i:s'),
+                            ]);
+                        }
+                    } else {
+                        // Team job with other active workers: do not extend timeline, do not pause ticket label
+                        $activeNames = !empty($activeTeamWorkers) ? implode(', ', $activeTeamWorkers) : 'other personnel';
+                        $logDetail = "Staff member {$worker['name']} was dispatched to Emergency Ticket #{$ticketId}. Ticket schedule remains unchanged as other assigned team personnel ({$activeNames}) continue handling the job.";
 
                         $this->logModel->logAction(
                             $preemptedTicketId,
                             $this->currentUserId(),
-                            'Timeline Extended (Emergency Preemption)',
+                            'Emergency Preemption (Team Maintained)',
                             $logDetail
                         );
-
-                        $this->notificationModel->createNotification(
-                            $preemptedTicket['user_id'],
-                            'warning',
-                            "Ticket Schedule Extended",
-                            "Work is temporarily paused and target completion adjusted to {$newTargetDate} as assigned personnel is responding to an urgent emergency."
-                        );
-                    } else {
-                        // Already extended, ensure status_label reflects paused
-                        $this->ticketModel->update($preemptedTicketId, [
-                            'status_label' => 'Paused (Emergency Preempted)',
-                            'updated_at'   => date('Y-m-d H:i:s'),
-                        ]);
                     }
-                } else {
-                    // Team job with other active workers: do not extend timeline, do not pause ticket label
-                    $activeNames = !empty($activeTeamWorkers) ? implode(', ', $activeTeamWorkers) : 'other personnel';
-                    $logDetail = "Staff member {$worker['name']} was dispatched to Emergency Ticket #{$ticketId}. Ticket schedule remains unchanged as other assigned team personnel ({$activeNames}) continue handling the job.";
+                } // end foreach ($activeAss as $ass)
+            } // end if ($isEmergency || $pauseCurrent)
 
-                    $this->logModel->logAction(
-                        $preemptedTicketId,
-                        $this->currentUserId(),
-                        'Emergency Preemption (Team Maintained)',
-                        $logDetail
-                    );
-                }
-            }
-        }
+            $now = date('Y-m-d H:i:s');
+            $implYmd = !empty($implementationDate) ? date('Y-m-d', strtotime($implementationDate)) : date('Y-m-d');
+            $todayYmd = date('Y-m-d');
 
-        $now = date('Y-m-d H:i:s');
-        $implYmd = !empty($implementationDate) ? date('Y-m-d', strtotime($implementationDate)) : date('Y-m-d');
-        $todayYmd = date('Y-m-d');
+            // If scheduled for today or an emergency or past, work starts immediately
+            $isImmediate  = ($implYmd <= $todayYmd || $isEmergency);
+            $dispatchedAt = $isImmediate ? $now : null;
+            $workerStatus = $isImmediate ? 'working' : 'available';
+            $statusLabel  = $isEmergency ? '🚨 Emergency / In Progress' : ($isImmediate ? 'Job Started' : 'Dispatched / Scheduled');
 
-        // If scheduled for today or an emergency or past, work starts immediately
-        $isImmediate  = ($implYmd <= $todayYmd || $isEmergency);
-        $dispatchedAt = $isImmediate ? $now : null;
-        $workerStatus = $isImmediate ? 'working' : 'available';
-        $statusLabel  = $isEmergency ? '🚨 Emergency / In Progress' : ($isImmediate ? 'Job Started' : 'Dispatched / Scheduled');
+            // --- Insert assignment record ---
+            $assignmentId = $this->assignmentModel->insert([
+                'ticket_id'          => $ticketId,
+                'personnel_id'       => $personnelId,
+                'implementation_date'=> $implementationDate,
+                'working_days'       => $workingDays,
+                'task_notes'         => $taskNotes,
+                'dispatcher_notes'   => $dispatcherNotes,
+                'is_emergency'       => $isEmergency,
+                'queue_order'        => $queueOrder,
+                'status'             => $assignmentStatus,
+                'assigned_at'        => $now,
+                'dispatched_at'      => $dispatchedAt,
+            ], true);
 
-        // --- Insert assignment record ---
-        $assignmentId = $this->assignmentModel->insert([
-            'ticket_id'          => $ticketId,
-            'personnel_id'       => $personnelId,
-            'implementation_date'=> $implementationDate,
-            'working_days'       => $workingDays,
-            'task_notes'         => $taskNotes,
-            'dispatcher_notes'   => $dispatcherNotes,
-            'is_emergency'       => $isEmergency,
-            'queue_order'        => $queueOrder,
-            'status'             => $assignmentStatus,
-            'assigned_at'        => $now,
-            'dispatched_at'      => $dispatchedAt,
-        ], true);
-
-        // --- Update ticket status to processing & record initial material assessment ---
-        $ticketUpdateData = [
-            'status'                 => 'processing',
-            'status_label'           => $statusLabel,
-            'current_step'           => $isImmediate ? 5 : 4,
-            'target_completion_date' => $targetCompletionDate,
-            'project_working_days'   => $workingDays,
-            'updated_at'             => $now,
-        ];
-
-        // Process Initial Material Assessment or Labor-Only designation if submitted with dispatch
-        $isLaborOnly = !empty($body['is_labor_only']);
-        if ($isLaborOnly) {
-            $ticketUpdateData['is_labor_only']    = 1;
-            $ticketUpdateData['materials_stage']  = 'assessment';
-            $ticketUpdateData['materials_logged'] = 1;
-            $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
-        } elseif (isset($body['materials']) && is_array($body['materials']) && !empty($body['materials'])) {
-            $ticketUpdateData['is_labor_only']    = 0;
-            $ticketUpdateData['materials_stage']  = 'assessment';
-            $ticketUpdateData['materials_logged'] = 1;
-
-            $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
-            $assessmentTotal = 0.0;
-            foreach ($body['materials'] as $mat) {
-                $mName = sanitize_string($mat['material_name'] ?? $mat['name'] ?? '');
-                if (empty($mName)) {
-                    continue;
-                }
-                $mQty       = max(0.01, (float) ($mat['quantity'] ?? 1));
-                $mUnit      = sanitize_string($mat['unit_measurement'] ?? $mat['unit'] ?? 'pcs');
-                $mPrice     = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
-                $mLineTotal = isset($mat['total_price']) ? (float) $mat['total_price'] : ($mQty * $mPrice);
-                $assessmentTotal += $mLineTotal;
-
-                $this->materialModel->insert([
-                    'ticket_id'        => $ticketId,
-                    'assignment_id'    => $assignmentId,
-                    'material_name'    => $mName,
-                    'quantity'         => $mQty,
-                    'unit_measurement' => $mUnit,
-                    'unit_price'       => $mPrice,
-                    'total_price'      => $mLineTotal,
-                    'stage'            => 'assessment',
-                    'created_at'       => $now,
-                ]);
-            }
-        }
-
-        $this->ticketModel->update($ticketId, $ticketUpdateData);
-
-        // --- Update worker status ---
-        $this->personnelModel->update($personnelId, [
-            'status'     => $workerStatus,
-            'updated_at' => $now,
-        ]);
-
-        // --- If the ticket is a project, persist the admin-set scheduling fields ---
-        if (!empty($ticket['is_project'])) {
-            $projectUpdate = [
-                'updated_at'              => date('Y-m-d H:i:s'),
-                'project_target_date'     => $implementationDate,
-                'project_target_duration' => $workingDays . ' Working Days',
+            // --- Update ticket status to processing & record initial material assessment ---
+            $ticketUpdateData = [
+                'status'                 => 'processing',
+                'status_label'           => $statusLabel,
+                'current_step'           => $isImmediate ? 5 : 4,
+                'target_completion_date' => $targetCompletionDate,
+                'project_working_days'   => $workingDays,
+                'updated_at'             => $now,
             ];
-            $this->ticketModel->update($ticketId, $projectUpdate);
-        }
 
-        $detail = ($isEmergency ? "EMERGENCY: " : "") . "Assigned to {$worker['name']}";
-        if ($implementationDate) {
-            $detail .= " — scheduled for {$implementationDate} ({$workingDays} working days)";
-        }
-        $this->logModel->logAction($ticketId, $this->currentUserId(), 'Worker Assigned', $detail);
+            // Process Initial Material Assessment or Labor-Only designation if submitted with dispatch
+            $isLaborOnly = !empty($body['is_labor_only']);
+            if ($isLaborOnly) {
+                $ticketUpdateData['is_labor_only']    = 1;
+                $ticketUpdateData['materials_stage']  = 'assessment';
+                $ticketUpdateData['materials_logged'] = 1;
+                $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+            } elseif (isset($body['materials']) && is_array($body['materials']) && !empty($body['materials'])) {
+                $ticketUpdateData['is_labor_only']    = 0;
+                $ticketUpdateData['materials_stage']  = 'assessment';
+                $ticketUpdateData['materials_logged'] = 1;
 
-        $this->notificationModel->createNotification(
-            $ticket['user_id'], 
-            'info', 
-            "Ticket Dispatched", 
-            $implementationDate ? "Your ticket has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket."
-        );
+                $db->query("DELETE FROM ticket_materials WHERE ticket_id = ?", [$ticketId]);
+                $assessmentTotal = 0.0;
+                foreach ($body['materials'] as $mat) {
+                    $mName = sanitize_string($mat['material_name'] ?? $mat['name'] ?? '');
+                    if (empty($mName)) {
+                        continue;
+                    }
+                    $mQty       = max(0.01, (float) ($mat['quantity'] ?? 1));
+                    $mUnit      = sanitize_string($mat['unit_measurement'] ?? $mat['unit'] ?? 'pcs');
+                    $mPrice     = max(0.00, (float) ($mat['unit_price'] ?? $mat['price'] ?? 0));
+                    $mLineTotal = isset($mat['total_price']) ? (float) $mat['total_price'] : ($mQty * $mPrice);
+                    $assessmentTotal += $mLineTotal;
+
+                    $this->materialModel->insert([
+                        'ticket_id'        => $ticketId,
+                        'assignment_id'    => $assignmentId,
+                        'material_name'    => $mName,
+                        'quantity'         => $mQty,
+                        'unit_measurement' => $mUnit,
+                        'unit_price'       => $mPrice,
+                        'total_price'      => $mLineTotal,
+                        'stage'            => 'assessment',
+                        'created_at'       => $now,
+                    ]);
+                }
+            }
+
+            $this->ticketModel->update($ticketId, $ticketUpdateData);
+
+            // --- Update worker status ---
+            $this->personnelModel->update($personnelId, [
+                'status'     => $workerStatus,
+                'updated_at' => $now,
+            ]);
+
+            // --- If the ticket is a project, persist the admin-set scheduling fields ---
+            if (!empty($ticket['is_project'])) {
+                $projectUpdate = [
+                    'updated_at'              => date('Y-m-d H:i:s'),
+                    'project_target_date'     => $implementationDate,
+                    'project_target_duration' => $workingDays . ' Working Days',
+                ];
+                $this->ticketModel->update($ticketId, $projectUpdate);
+            }
+
+            $detail = ($isEmergency ? "EMERGENCY: " : "") . "Assigned to {$worker['name']}";
+            if ($implementationDate) {
+                $detail .= " — scheduled for {$implementationDate} ({$workingDays} working days)";
+            }
+            $this->logModel->logAction($ticketId, $this->currentUserId(), 'Worker Assigned', $detail);
+
+            $this->notificationModel->createNotification(
+                $ticket['user_id'], 
+                'info', 
+                "Ticket Dispatched", 
+                $implementationDate ? "Your ticket has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket."
+            );
+
+            $db->transComplete();
+
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Database transaction could not be completed.');
+            }
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[DispatchController::assign] Transaction rolled back due to error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+
+            return $this->errorResponse(
+                'Dispatch operation failed and all changes were rolled back: ' . $e->getMessage(),
+                [],
+                ResponseInterface::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
 
         return $this->successResponse('Worker assigned successfully.', [
             'assignment_id' => $assignmentId,

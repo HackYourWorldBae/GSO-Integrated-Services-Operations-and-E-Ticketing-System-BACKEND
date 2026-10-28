@@ -218,10 +218,21 @@ class UserModel extends Model
             $hasPersonnelSpecialty = false;
         }
 
+        $ticketDateCol = null;
         try {
             $hasTickets = $db->tableExists('tickets');
+            if ($hasTickets) {
+                if ($db->fieldExists('submitted_at', 'tickets')) {
+                    $ticketDateCol = 'submitted_at';
+                } elseif ($db->fieldExists('created_at', 'tickets')) {
+                    $ticketDateCol = 'created_at';
+                } elseif ($db->fieldExists('updated_at', 'tickets')) {
+                    $ticketDateCol = 'updated_at';
+                }
+            }
         } catch (\Throwable $e) {
             $hasTickets = false;
+            $ticketDateCol = null;
         }
 
         try {
@@ -245,6 +256,7 @@ class UserModel extends Model
             'has_personnel_user_id'  => $hasPersonnelUserId,
             'has_personnel_specialty'=> $hasPersonnelSpecialty,
             'has_tickets'            => $hasTickets,
+            'ticket_date_col'        => $ticketDateCol,
             'has_activity_logs'      => $hasActivityLogs,
         ];
 
@@ -374,8 +386,16 @@ class UserModel extends Model
             $ticketMap = [];
             if ($caps['has_tickets']) {
                 try {
+                    $dateCol = $caps['ticket_date_col'] ?? 'submitted_at';
+                    $selectExpr = 'user_id, COUNT(*) AS request_count';
+                    if (!empty($dateCol)) {
+                        $selectExpr .= ", MAX({$dateCol}) AS last_request_at";
+                    } else {
+                        $selectExpr .= ', NULL AS last_request_at';
+                    }
+
                     $ticketRows = $db->table('tickets')
-                                     ->select('user_id, COUNT(*) AS request_count, MAX(created_at) AS last_request_at')
+                                     ->select($selectExpr)
                                      ->whereIn('user_id', $userIds)
                                      ->groupBy('user_id')
                                      ->get()
@@ -758,8 +778,9 @@ class UserModel extends Model
                     $selects[] = 'NULL AS last_login_at';
                 }
 
-                if ($caps['has_tickets']) {
-                    $selects[] = '(SELECT MAX(created_at) FROM tickets WHERE tickets.user_id = users.id) AS last_request_at';
+                if ($caps['has_tickets'] && !empty($caps['ticket_date_col'])) {
+                    $tCol = $caps['ticket_date_col'];
+                    $selects[] = "(SELECT MAX({$tCol}) FROM tickets WHERE tickets.user_id = users.id) AS last_request_at";
                 } else {
                     $selects[] = 'NULL AS last_request_at';
                 }
@@ -800,8 +821,9 @@ class UserModel extends Model
                 $builder->where("NOT EXISTS (SELECT 1 FROM user_sessions WHERE user_sessions.user_id = users.id AND user_sessions.{$actCol} >= '{$sixMonthsAgo}')", null, false);
             }
 
-            if ($caps['has_tickets']) {
-                $builder->where("NOT EXISTS (SELECT 1 FROM tickets WHERE tickets.user_id = users.id AND tickets.created_at >= '{$sixMonthsAgo}')", null, false);
+            if ($caps['has_tickets'] && !empty($caps['ticket_date_col'])) {
+                $tCol = $caps['ticket_date_col'];
+                $builder->where("NOT EXISTS (SELECT 1 FROM tickets WHERE tickets.user_id = users.id AND tickets.{$tCol} >= '{$sixMonthsAgo}')", null, false);
             }
 
             if ($onlyCount) {

@@ -58,7 +58,7 @@ class BackupController extends BaseController
             $backendUrl  = rtrim(env('app.baseURL', config('App')->baseURL ?? 'http://localhost:8080'), '/');
             $redirectUri = $backendUrl . '/api/v1/superadmin/backups/google-oauth-callback';
 
-            // Retrieve recent backup & restore activity logs for disaster recovery audit trail
+            // Retrieve dedicated backup & restore activity logs for disaster recovery audit trail
             $recentLogs = [];
             try {
                 $recentLogs = (new \App\Models\AccountActivityLogModel())
@@ -73,7 +73,7 @@ class BackupController extends BaseController
                         'SYSTEM_BACKUP_SCHEDULE_UPDATED',
                     ])
                     ->orderBy('account_activity_logs.created_at', 'DESC')
-                    ->limit(15)
+                    ->limit(100)
                     ->findAll();
             } catch (Throwable $logErr) {
                 // Non-blocking log query failure

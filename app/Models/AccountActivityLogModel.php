@@ -305,6 +305,12 @@ class AccountActivityLogModel extends Model
             $builder->where('account_activity_logs.event_type', $filters['event_type']);
         }
 
+        // Separate backup & disaster recovery audit logs: only viewable in the Backup & Restore console
+        if (empty($filters['include_system_backup']) && (empty($filters['event_type']) || !str_starts_with((string)$filters['event_type'], 'SYSTEM_'))) {
+            $builder->notLike('account_activity_logs.event_type', 'SYSTEM_BACKUP_', 'after');
+            $builder->notLike('account_activity_logs.event_type', 'SYSTEM_RESTORE_', 'after');
+        }
+
         if (!empty($filters['category'])) {
             switch ($filters['category']) {
                 case 'auth':

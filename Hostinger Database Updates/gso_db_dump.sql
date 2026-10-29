@@ -5,7 +5,7 @@
 -- 
 -- SAFE UPDATER GUARANTEE:
 -- 1. NEVER drops existing tables holding application or alpha test data.
--- 2. Uses CREATE TABLE IF NOT EXISTS for all 33 system entities.
+-- 2. Uses CREATE TABLE IF NOT EXISTS for all 36 system entities.
 -- 3. Automatically detects and adds missing columns/indexes via sp_gso_upgrade_schema.
 -- 4. Uses INSERT IGNORE & ON DUPLICATE KEY UPDATE to protect existing accounts & settings.
 -- ============================================================================
@@ -243,6 +243,27 @@ BEGIN
 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'staff_notation') THEN
             ALTER TABLE `tickets` ADD COLUMN `staff_notation` TEXT DEFAULT NULL COMMENT 'Staff notation/update communicated to requester' AFTER `ssu_notation`;
+        END IF;
+
+        -- Ticket Verification & Accomplishment Report fields
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'verification_status') THEN
+            ALTER TABLE `tickets` ADD COLUMN `verification_status` ENUM('pending_report','pending_verification','verified_closed') NOT NULL DEFAULT 'pending_report' AFTER `escalated_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'accomplishment_report_path') THEN
+            ALTER TABLE `tickets` ADD COLUMN `accomplishment_report_path` VARCHAR(255) DEFAULT NULL AFTER `verification_status`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'accomplishment_notes') THEN
+            ALTER TABLE `tickets` ADD COLUMN `accomplishment_notes` TEXT DEFAULT NULL AFTER `accomplishment_report_path`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'verified_by_user_id') THEN
+            ALTER TABLE `tickets` ADD COLUMN `verified_by_user_id` VARCHAR(36) DEFAULT NULL AFTER `accomplishment_notes`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'verified_at') THEN
+            ALTER TABLE `tickets` ADD COLUMN `verified_at` DATETIME DEFAULT NULL AFTER `verified_by_user_id`;
         END IF;
 
         -- Indexes

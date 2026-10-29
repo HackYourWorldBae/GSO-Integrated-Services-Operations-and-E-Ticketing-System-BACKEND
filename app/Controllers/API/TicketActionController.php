@@ -215,10 +215,10 @@ class TicketActionController extends BaseController
 
         $notifTitle = ($isEmergency === 1) ? "Ticket Approved (Emergency Priority)" : "Ticket Approved";
         $notifBody  = ($isEmergency === 1)
-            ? "Your request for {$ticket['service_type']} has been approved as an EMERGENCY request by the {$approverTitle}."
+            ? "Your request for {$ticket['service_type']} (#{$ticketId}) has been approved as an EMERGENCY request by the {$approverTitle}."
             : ($isBorrowing
-                ? "Your borrowing request for {$ticket['service_type']} has been approved by the {$approverTitle}. {$unitCode} Admin will assign inventory."
-                : "Your request for {$ticket['service_type']} has been approved by the {$approverTitle}.");
+                ? "Your borrowing request for {$ticket['service_type']} (#{$ticketId}) has been approved by the {$approverTitle}. {$unitCode} Admin will assign inventory."
+                : "Your request for {$ticket['service_type']} (#{$ticketId}) has been approved by the {$approverTitle}.");
 
         $this->notificationModel->createNotification(
             $ticket['user_id'],
@@ -533,7 +533,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Incident Under Investigation",
-            'Your incident report is now being actively investigated by SSU staff.'
+            "Your incident report (#{$ticketId}) is now being actively investigated by SSU staff."
         );
 
         $this->notifyRequestorByEmail(
@@ -664,7 +664,7 @@ class TicketActionController extends BaseController
                 $ticket['user_id'],
                 'info',
                 "SSU Update on Incident",
-                'SSU staff has added a recommendation/notation to your incident report. Please check your ticket for details.'
+                "SSU staff has added a recommendation/notation to your incident report (#{$ticketId}). Please check your ticket for details."
             );
 
             $this->notifyRequestorByEmail(
@@ -698,7 +698,7 @@ class TicketActionController extends BaseController
                 $ticket['user_id'],
                 'info',
                 "{$unitCode} Update on Ticket",
-                "Staff posted an update regarding your request: {$notation}"
+                "Staff posted an update regarding your request (#{$ticketId}): {$notation}"
             );
 
             $this->notifyRequestorByEmail(
@@ -770,7 +770,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'success',
             "Incident Resolved",
-            'Your incident report has been resolved by SSU staff and has been archived.'
+            "Your incident report (#{$ticketId}) has been resolved by SSU staff and has been archived."
         );
 
         $this->notifyRequestorByEmail(
@@ -843,7 +843,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'], 
             'warning', 
             "Ticket Declined", 
-            "Your request was declined. Reason: {$reason}"
+            "Your request (#{$ticketId}) was declined. Reason: {$reason}"
         );
 
         $this->notifyRequestorByEmail(
@@ -920,7 +920,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Ticket Approval Delayed",
-            "Your ticket for {$ticket['service_type']} has been delayed for approval: {$reason}"
+            "Your ticket (#{$ticketId}) for {$ticket['service_type']} has been delayed for approval: {$reason}"
         );
 
         $this->notifyRequestorByEmail(
@@ -980,7 +980,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'info',
             "Ticket Approval Resumed",
-            "Your ticket for {$ticket['service_type']} has been returned to the active approval queue."
+            "Your ticket (#{$ticketId}) for {$ticket['service_type']} has been returned to the active approval queue."
         );
 
         $this->notifyRequestorByEmail(
@@ -1265,7 +1265,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'warning',
             "Ticket Timeline Extended",
-            "Project schedule adjusted to {$extendedDate} due to unforeseen circumstance: {$reason}"
+            "Project schedule for ticket #{$ticketId} adjusted to {$extendedDate} due to unforeseen circumstance: {$reason}"
         );
 
         return $this->successResponse('Ticket timeline extended successfully.', [
@@ -1382,7 +1382,7 @@ class TicketActionController extends BaseController
         // Notify Requestor
         if ($notifyRequestor) {
             $notifTitle = "Ticket Schedule Updated";
-            $notifBody  = "The schedule for your request has been updated to {$currentImplDateOnly} ({$finalWorkingDays} working day(s))." . ($reason ? " Reason: {$reason}" : "");
+            $notifBody  = "The schedule for your request (#{$ticketId}) has been updated to {$currentImplDateOnly} ({$finalWorkingDays} working day(s))." . ($reason ? " Reason: {$reason}" : "");
 
             $this->notificationModel->createNotification(
                 $ticket['user_id'],
@@ -1636,7 +1636,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'], 
             'success', 
             "Ticket Completed", 
-            "Your request for {$ticket['service_type']} has been marked as completed."
+            "Your request for {$ticket['service_type']} (#{$ticketId}) has been marked as completed."
         );
 
         $this->notifyRequestorByEmail(
@@ -1890,7 +1890,7 @@ class TicketActionController extends BaseController
             $ticket['user_id'],
             'success',
             "Ticket Closed",
-            "Your service request has been verified and officially closed. Thank you!"
+            "Your service request (#{$ticketId}) has been verified and officially closed. Thank you!"
         );
 
         $this->notifyRequestorByEmail(

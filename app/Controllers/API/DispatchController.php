@@ -417,7 +417,7 @@ class DispatchController extends BaseController
                                 $preemptedTicket['user_id'],
                                 'warning',
                                 "Ticket Schedule Extended",
-                                "Work is temporarily paused and target completion adjusted to {$newTargetDate} as assigned personnel is responding to an urgent emergency."
+                                "Work is temporarily paused on ticket #{$preemptedTicketId} and target completion adjusted to {$newTargetDate} as assigned personnel is responding to an urgent emergency."
                             );
                         } else {
                             // Already extended, ensure status_label reflects paused
@@ -543,7 +543,7 @@ class DispatchController extends BaseController
                 $ticket['user_id'], 
                 'info', 
                 "Ticket Dispatched", 
-                $implementationDate ? "Your ticket has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket."
+                $implementationDate ? "Your ticket (#{$ticketId}) has been scheduled for {$implementationDate}." : "A worker has been assigned to your ticket (#{$ticketId})."
             );
 
             $db->transComplete();

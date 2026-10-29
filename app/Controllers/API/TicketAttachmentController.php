@@ -350,7 +350,7 @@ class TicketAttachmentController extends BaseController
             $ticket['user_id'],
             'info',
             "Ticket Accomplishment Submitted",
-            "Field services have been completed with accomplishment report. Verification in progress."
+            "Field services for Ticket #{$ticketId} have been completed with accomplishment report. Verification in progress."
         );
 
         return $this->successResponse('Accomplishment report submitted successfully. Ticket is pending verification.', [

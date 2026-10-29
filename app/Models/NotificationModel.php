@@ -55,6 +55,19 @@ class NotificationModel extends Model
      */
     public function createNotification(string $userId, string $type, string $title, string $message)
     {
+        // Safety guard: if title had a ticket identifier and message does not, ensure message retains (#ID)
+        if (preg_match('/\b((?:FGMU|LEAU|SSU)-(?:TIC|PRJ|INC)-[A-Za-z0-9\-_]+)\b/i', $title, $m)) {
+            $code = $m[1];
+            if (!str_contains($message, $code)) {
+                $message .= " (#{$code})";
+            }
+        } elseif (preg_match('/#([A-Za-z0-9\-_]+)/', $title, $m)) {
+            $code = $m[1];
+            if (!str_contains($message, "#{$code}")) {
+                $message .= " (#{$code})";
+            }
+        }
+
         return $this->insert([
             'user_id' => $userId,
             'type'    => $type,

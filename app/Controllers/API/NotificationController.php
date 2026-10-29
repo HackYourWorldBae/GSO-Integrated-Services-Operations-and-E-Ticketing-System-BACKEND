@@ -95,6 +95,59 @@ class NotificationController extends BaseController
         }
         unset($n);
 
+        // Fallback Healing: resolve ticket_id for historical notifications where ticket ID was omitted in text
+        $missingIndices = [];
+        foreach ($notifications as $idx => $n) {
+            if (empty($n['ticket_id']) && !empty($n['created_at'])) {
+                $text = strtolower(($n['title'] ?? '') . ' ' . ($n['message'] ?? ''));
+                if (!str_contains($text, 'registration') && !str_contains($text, 'new user') && !str_contains($text, 'identity') && !str_contains($text, 'otp') && !str_contains($text, 'password')) {
+                    $missingIndices[] = $idx;
+                }
+            }
+        }
+
+        if (!empty($missingIndices)) {
+            try {
+                $db = \Config\Database::connect();
+                foreach ($missingIndices as $idx) {
+                    $n = $notifications[$idx];
+                    $notifTime = strtotime($n['created_at']);
+                    if (!$notifTime) continue;
+                    $timeFrom = date('Y-m-d H:i:s', $notifTime - 180);
+                    $timeTo   = date('Y-m-d H:i:s', $notifTime + 180);
+
+                    // 1. Check ticket_logs near notification timestamp
+                    $logRow = $db->table('ticket_logs')
+                        ->select('ticket_id')
+                        ->where('created_at >=', $timeFrom)
+                        ->where('created_at <=', $timeTo)
+                        ->orderBy('id', 'DESC')
+                        ->get(1)
+                        ->getRowArray();
+
+                    if (!empty($logRow['ticket_id'])) {
+                        $notifications[$idx]['ticket_id'] = $logRow['ticket_id'];
+                        $ticketIds[] = $logRow['ticket_id'];
+                    } else {
+                        // 2. Fallback: check requester recent tickets
+                        $userTicket = $ticketModel->select('id')
+                            ->where('user_id', $userId)
+                            ->where('updated_at >=', date('Y-m-d H:i:s', $notifTime - 600))
+                            ->where('updated_at <=', date('Y-m-d H:i:s', $notifTime + 600))
+                            ->orderBy('updated_at', 'DESC')
+                            ->first();
+
+                        if (!empty($userTicket['id'])) {
+                            $notifications[$idx]['ticket_id'] = $userTicket['id'];
+                            $ticketIds[] = $userTicket['id'];
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Non-fatal fallback
+            }
+        }
+
         if (!empty($ticketIds)) {
             $foundTickets = $ticketModel->select('id, unit_id, status, is_archived, service_type')
                 ->whereIn('id', array_unique($ticketIds))

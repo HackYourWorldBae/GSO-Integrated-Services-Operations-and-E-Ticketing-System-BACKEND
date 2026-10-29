@@ -147,7 +147,7 @@ class PersonnelController extends BaseController
                         $ticket['user_id'],
                         'info',
                         "Ticket Schedule Update",
-                        "Staff assignment updated. Ticket queued for dispatch."
+                        "Staff assignment updated for ticket #{$assignment['ticket_id']}. Ticket queued for dispatch."
                     );
                 }
             }

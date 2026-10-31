@@ -120,7 +120,7 @@ class SystemSettingModel extends Model
     public function getMaintenanceDetails(): array
     {
         $active    = $this->isMaintenanceActive();
-        $message   = $this->getSetting('maintenance_message') ?: 'The GSO E-Ticketing System is currently undergoing maintenance and database synchronization. Please check back shortly.';
+        $message   = $this->getSetting('maintenance_message') ?: 'The system is currently undergoing scheduled maintenance. Please check back shortly.';
         $countdown = (int) ($this->getSetting('maintenance_countdown_seconds') ?: 30);
         $timestamp = $this->getSetting('maintenance_activated_at');
 

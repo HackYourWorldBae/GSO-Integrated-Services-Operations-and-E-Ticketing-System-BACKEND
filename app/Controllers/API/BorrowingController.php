@@ -95,15 +95,19 @@ class BorrowingController extends BaseController
         ]);
 
         $this->ticketModel->update($ticketId, [
-            'status'                => 'approved',
-            'status_label'          => 'Approved - Awaiting Inventory Assignment',
-            'is_emergency'          => 0,
-            'is_approval_delayed'   => 0,
-            'approval_delay_reason' => null,
-            'current_step'          => 3,
-            'reviewed_at'           => date('Y-m-d H:i:s'),
-            'reviewed_by'           => $this->currentUserId(),
-            'updated_at'            => date('Y-m-d H:i:s'),
+            'status'                   => 'approved',
+            'status_label'             => 'Approved - Awaiting Inventory Assignment',
+            'is_emergency'             => 0,
+            'is_approval_delayed'      => 0,
+            'approval_delay_reason'    => null,
+            'is_escalated_to_director' => 0,
+            'escalation_reason'        => null,
+            'escalated_at'             => null,
+            'escalated_by'             => null,
+            'current_step'             => 3,
+            'reviewed_at'              => date('Y-m-d H:i:s'),
+            'reviewed_by'              => $this->currentUserId(),
+            'updated_at'               => date('Y-m-d H:i:s'),
         ]);
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Approved', "Borrowing request approved by {$approverTitle}. Notes: {$notes}");
@@ -188,12 +192,13 @@ class BorrowingController extends BaseController
         ]);
 
         $this->ticketModel->update($ticketId, [
-            'status'         => 'declined',
-            'status_label'   => 'Declined',
-            'decline_reason' => $reason,
-            'is_archived'    => 1,
-            'completed_at'   => date('Y-m-d H:i:s'),
-            'updated_at'     => date('Y-m-d H:i:s'),
+            'status'                   => 'declined',
+            'status_label'             => 'Declined',
+            'decline_reason'           => $reason,
+            'is_archived'              => 1,
+            'is_escalated_to_director' => 0,
+            'completed_at'             => date('Y-m-d H:i:s'),
+            'updated_at'               => date('Y-m-d H:i:s'),
         ]);
 
         $this->logModel->logAction($ticketId, $this->currentUserId(), 'Borrowing Rejected', "Borrowing request declined. Reason: {$reason}");

@@ -86,9 +86,10 @@ class BorrowingRequestModel extends Model
     public function getQueue(string $status = '', int $limit = 100, int $offset = 0, int $unitId = 2): array
     {
         $builder = $this->builder()
-            ->select('borrowing_requests.*, tickets.service_type, tickets.submitted_at, users.first_name, users.last_name, users.email')
+            ->select('borrowing_requests.*, tickets.service_type, tickets.submitted_at, tickets.is_escalated_to_director, tickets.escalation_reason, tickets.escalated_at, tickets.escalated_by, tickets.is_approval_delayed, tickets.approval_delay_reason, tickets.status as ticket_status, users.first_name, users.last_name, users.email, esc_user.first_name as escalated_by_first_name, esc_user.last_name as escalated_by_last_name')
             ->join('tickets', 'tickets.id = borrowing_requests.ticket_id')
-            ->join('users', 'users.id = tickets.user_id');
+            ->join('users', 'users.id = tickets.user_id')
+            ->join('users as esc_user', 'esc_user.id = tickets.escalated_by', 'left');
 
         if ($unitId > 0) {
             $builder->where('tickets.unit_id', $unitId);

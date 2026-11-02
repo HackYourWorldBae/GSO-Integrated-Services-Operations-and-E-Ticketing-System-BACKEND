@@ -622,7 +622,17 @@ class AuthController extends BaseController
             $challenge = $this->mfaChallengeModel->createChallenge($user['id'], $ipAddress, $userAgent, 600);
 
             $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
-            $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $challenge['otp_code'], 10);
+            $sendResult = $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $challenge['otp_code'], 10, false);
+
+            if (empty($sendResult['success'])) {
+                $err = $sendResult['message'] ?? 'Email delivery failed.';
+                log_message('error', '[AuthController::login] MFA OTP dispatch failed for user ' . $user['id'] . ': ' . $err);
+                return $this->errorResponse(
+                    'Unable to send two-factor verification code: ' . $err . '. Please contact your system administrator or verify Resend email service configuration.',
+                    ['mfa_dispatch_error' => $err],
+                    ResponseInterface::HTTP_BAD_GATEWAY
+                );
+            }
 
             $this->activityLogModel->logEvent([
                 'event_type'     => 'AUTH_MFA_CHALLENGE_ISSUED',
@@ -859,7 +869,16 @@ class AuthController extends BaseController
         }
 
         $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
-        $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $resendResult['otp_code'], 10);
+        $sendResult = $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $resendResult['otp_code'], 10, false);
+        if (empty($sendResult['success'])) {
+            $err = $sendResult['message'] ?? 'Email delivery failed.';
+            log_message('error', '[AuthController::resendMfa] MFA OTP resend failed for user ' . $user['id'] . ': ' . $err);
+            return $this->errorResponse(
+                'Unable to resend verification code: ' . $err . '. Please verify Resend email service configuration.',
+                ['mfa_dispatch_error' => $err],
+                ResponseInterface::HTTP_BAD_GATEWAY
+            );
+        }
 
         $this->activityLogModel->logEvent([
             'event_type'     => 'AUTH_MFA_CHALLENGE_RESENT',
@@ -899,6 +918,250 @@ class AuthController extends BaseController
         }
 
         return $masked . '@' . $domain;
+    }
+
+    /**
+     * Send 2FA Setup OTP to authenticated user's registered institutional email.
+     * Authenticated endpoint: POST /api/v1/auth/2fa/send-otp
+     */
+    public function send2faSetupOtp(): ResponseInterface
+    {
+        try {
+            $userId = $this->currentUserId();
+            if (!$userId) {
+                return $this->errorResponse('Authentication required.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+            }
+
+            $user = $this->userModel->find($userId);
+            if (!$user) {
+                return $this->errorResponse('User record not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+            }
+
+            $isPersonnel = in_array(strtolower($user['role'] ?? ''), ['worker', 'personnel'], true);
+            if ($isPersonnel) {
+                return $this->errorResponse('Two-factor authentication is not available for worker accounts.', [], ResponseInterface::HTTP_BAD_REQUEST);
+            }
+
+            $email = trim((string) ($user['email'] ?? ''));
+            if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->errorResponse('A valid institutional email address is required to enable Two-Factor Authentication.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            // Check if Resend email service is configured
+            $settingModel = new \App\Models\SystemSettingModel();
+            if (!$settingModel->isResendConfigured()) {
+                return $this->errorResponse(
+                    'Resend email service is not configured. Please set your Resend API key in Superadmin Settings or in the backend .env file.',
+                    ['code' => 'RESEND_NOT_CONFIGURED'],
+                    ResponseInterface::HTTP_BAD_REQUEST
+                );
+            }
+
+            $ipAddress = $this->request->getIPAddress();
+            $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+
+            $challenge = $this->mfaChallengeModel->createChallenge($userId, $ipAddress, $userAgent, 600);
+            $fullName  = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
+
+            $emailRes = $this->emailService->sendMfaOtpEmail($email, $fullName, $challenge['otp_code'], 10, true);
+            if (empty($emailRes['success'])) {
+                $err = $emailRes['message'] ?? 'Resend delivery error.';
+                log_message('error', '[AuthController::send2faSetupOtp] Email dispatch failed: ' . $err);
+                return $this->errorResponse(
+                    'Failed to send verification email: ' . $err . '. Please check Resend API configuration.',
+                    ['resend_error' => $err],
+                    ResponseInterface::HTTP_BAD_GATEWAY
+                );
+            }
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_MFA_SETUP_INITIATED',
+                'severity'       => 'info',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => "Two-factor authentication setup OTP dispatched to email.",
+                'metadata'       => ['masked_email' => $this->maskEmail($email)],
+                'ip_address'     => $ipAddress,
+                'user_agent'     => $userAgent,
+            ]);
+
+            return $this->successResponse('Verification code dispatched to your email.', [
+                'temp_token'   => $challenge['temp_token'],
+                'masked_email' => $this->maskEmail($email),
+                'expires_in'   => 600,
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::send2faSetupOtp] ' . $e->getMessage());
+            return $this->errorResponse('An unexpected error occurred while initiating 2FA setup.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Resend 2FA Setup OTP to authenticated user.
+     * Authenticated endpoint: POST /api/v1/auth/2fa/resend-otp
+     */
+    public function resend2faSetupOtp(): ResponseInterface
+    {
+        try {
+            $userId = $this->currentUserId();
+            if (!$userId) {
+                return $this->errorResponse('Authentication required.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+            }
+
+            $body = $this->request->getJSON(true) ?? [];
+            $tempToken = trim((string) ($body['temp_token'] ?? $body['mfa_token'] ?? ''));
+            if ($tempToken === '') {
+                return $this->errorResponse('Verification session token is required.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+            }
+
+            $ipAddress = $this->request->getIPAddress();
+            $userAgent = substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255);
+
+            $resendResult = $this->mfaChallengeModel->resendChallenge($tempToken, $ipAddress, $userAgent);
+            if (!$resendResult['success']) {
+                return $this->errorResponse($resendResult['message'], [], ResponseInterface::HTTP_TOO_MANY_REQUESTS);
+            }
+
+            if ((string)$resendResult['user_id'] !== (string)$userId) {
+                return $this->errorResponse('Unauthorized verification session.', [], ResponseInterface::HTTP_FORBIDDEN);
+            }
+
+            $user = $this->userModel->find($userId);
+            if (!$user || empty($user['email'])) {
+                return $this->errorResponse('User record or email not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+            }
+
+            $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: 'User';
+            $emailRes = $this->emailService->sendMfaOtpEmail($user['email'], $fullName, $resendResult['otp_code'], 10, true);
+
+            if (empty($emailRes['success'])) {
+                $err = $emailRes['message'] ?? 'Resend delivery error.';
+                return $this->errorResponse(
+                    'Failed to resend verification email: ' . $err,
+                    ['resend_error' => $err],
+                    ResponseInterface::HTTP_BAD_GATEWAY
+                );
+            }
+
+            return $this->successResponse('A fresh verification code has been dispatched to your email.', [
+                'temp_token'   => $resendResult['temp_token'],
+                'masked_email' => $this->maskEmail($user['email']),
+                'expires_in'   => $resendResult['expires_in'] ?? 600,
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::resend2faSetupOtp] ' . $e->getMessage());
+            return $this->errorResponse('Could not resend verification code.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Verify OTP and enable 2FA on authenticated user's account.
+     * Authenticated endpoint: POST /api/v1/auth/2fa/verify-otp
+     */
+    public function verify2faSetupOtp(): ResponseInterface
+    {
+        try {
+            $userId = $this->currentUserId();
+            if (!$userId) {
+                return $this->errorResponse('Authentication required.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+            }
+
+            $body      = $this->request->getJSON(true) ?? [];
+            $tempToken = trim((string) ($body['temp_token'] ?? $body['mfa_token'] ?? ''));
+            $otpCode   = trim((string) ($body['otp_code'] ?? $body['otp'] ?? ''));
+
+            if ($tempToken === '' || $otpCode === '') {
+                return $this->errorResponse('Verification session token and 6-digit code are required.', [
+                    'otp_code' => 'Please enter the 6-digit verification code.',
+                ], ResponseInterface::HTTP_BAD_REQUEST);
+            }
+
+            $result = $this->mfaChallengeModel->verifyChallenge($tempToken, $otpCode);
+            if (!$result['valid']) {
+                $this->activityLogModel->logEvent([
+                    'event_type'     => 'AUTH_MFA_SETUP_FAILED',
+                    'severity'       => 'warning',
+                    'actor_id'       => $userId,
+                    'target_user_id' => $userId,
+                    'details'        => "2FA setup verification failed: " . ($result['message'] ?? 'Invalid code.'),
+                    'metadata'       => ['remaining_attempts' => $result['remaining_attempts'] ?? null],
+                    'ip_address'     => $this->request->getIPAddress(),
+                    'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
+                ]);
+
+                return $this->errorResponse($result['message'], [
+                    'remaining_attempts' => $result['remaining_attempts'] ?? null,
+                ], ResponseInterface::HTTP_UNAUTHORIZED);
+            }
+
+            if ((string)$result['user_id'] !== (string)$userId) {
+                return $this->errorResponse('Verification token does not match active session.', [], ResponseInterface::HTTP_FORBIDDEN);
+            }
+
+            // Activate 2FA on user record
+            $this->userModel->update($userId, ['is_mfa_enabled' => 1]);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_MFA_ENABLED',
+                'severity'       => 'notice',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => "Two-factor authentication (2FA) successfully verified and enabled.",
+                'ip_address'     => $this->request->getIPAddress(),
+                'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
+            ]);
+
+            $updatedUser = $this->userModel->find($userId);
+
+            return $this->successResponse('Two-Factor Authentication has been successfully enabled on your account.', [
+                'is_mfa_enabled' => 1,
+                'user'           => $this->userModel->formatUserResponse($updatedUser),
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::verify2faSetupOtp] ' . $e->getMessage());
+            return $this->errorResponse('Failed to complete 2FA setup.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Disable 2FA on authenticated user's account.
+     * Authenticated endpoint: POST /api/v1/auth/2fa/disable
+     */
+    public function disable2fa(): ResponseInterface
+    {
+        try {
+            $userId = $this->currentUserId();
+            if (!$userId) {
+                return $this->errorResponse('Authentication required.', [], ResponseInterface::HTTP_UNAUTHORIZED);
+            }
+
+            $user = $this->userModel->find($userId);
+            if (!$user) {
+                return $this->errorResponse('User record not found.', [], ResponseInterface::HTTP_NOT_FOUND);
+            }
+
+            $this->userModel->update($userId, ['is_mfa_enabled' => 0]);
+
+            $this->activityLogModel->logEvent([
+                'event_type'     => 'AUTH_MFA_DISABLED',
+                'severity'       => 'notice',
+                'actor_id'       => $userId,
+                'target_user_id' => $userId,
+                'details'        => "Two-factor authentication (2FA) was disabled.",
+                'ip_address'     => $this->request->getIPAddress(),
+                'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
+            ]);
+
+            $updatedUser = $this->userModel->find($userId);
+
+            return $this->successResponse('Two-Factor Authentication has been disabled.', [
+                'is_mfa_enabled' => 0,
+                'user'           => $this->userModel->formatUserResponse($updatedUser),
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', '[AuthController::disable2fa] ' . $e->getMessage());
+            return $this->errorResponse('Failed to disable 2FA.', [], ResponseInterface::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**

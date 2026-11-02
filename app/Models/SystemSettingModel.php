@@ -50,6 +50,11 @@ class SystemSettingModel extends Model
             if (!empty($envVal)) {
                 return $envVal;
             }
+        } elseif ($key === 'resend_notifications_enabled') {
+            $envVal = env('RESEND_NOTIFICATIONS_ENABLED', getenv('RESEND_NOTIFICATIONS_ENABLED') ?: null);
+            if ($envVal !== null && $envVal !== '') {
+                return (string) $envVal;
+            }
         }
 
         return $default;

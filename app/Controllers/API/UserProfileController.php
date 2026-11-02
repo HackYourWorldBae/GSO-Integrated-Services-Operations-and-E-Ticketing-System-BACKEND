@@ -66,17 +66,21 @@ class UserProfileController extends BaseController
             if (array_key_exists('is_mfa_enabled', $body)) {
                 $rawMfa  = $body['is_mfa_enabled'];
                 $enabled = ($rawMfa === true || $rawMfa === 1 || $rawMfa === '1' || $rawMfa === 'true') ? 1 : 0;
-                if ($enabled === 1) {
-                    $targetEmail = $updateData['email'] ?? ($currentUser['email'] ?? '');
-                    if (empty($targetEmail) || !filter_var($targetEmail, FILTER_VALIDATE_EMAIL)) {
+                if ($enabled === 0) {
+                    $updateData['is_mfa_enabled'] = 0;
+                } else {
+                    // Enabling requires email OTP verification unless already enabled
+                    $currentMfa = (int) ($currentUser['is_mfa_enabled'] ?? 0);
+                    if ($currentMfa === 1) {
+                        $updateData['is_mfa_enabled'] = 1;
+                    } else {
                         return $this->errorResponse(
-                            'A valid email address is required to enable Two-Factor Authentication (MFA).',
-                            ['is_mfa_enabled' => 'A valid email address is required to enable Two-Factor Authentication.'],
+                            'Enabling Two-Factor Authentication requires email OTP verification. Please use the 2FA setup prompt.',
+                            ['is_mfa_enabled' => 'Email verification required.'],
                             ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
                         );
                     }
                 }
-                $updateData['is_mfa_enabled'] = $enabled;
             }
 
             // Handle identifier: Username for personnel/field workers; institutional email for requestors & staff

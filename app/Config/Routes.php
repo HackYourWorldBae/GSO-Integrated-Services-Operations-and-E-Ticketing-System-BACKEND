@@ -69,6 +69,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('auth/signature/(:segment)','UserProfileController::getSignature/$1');
         $routes->get('auth/document-signatures', 'UserProfileController::getDocumentSignatures');
 
+        // -- Two-Factor Authentication (2FA Setup & Security Controls) --
+        $routes->post('auth/2fa/send-otp',    'AuthController::send2faSetupOtp');
+        $routes->post('auth/2fa/resend-otp',  'AuthController::resend2faSetupOtp');
+        $routes->post('auth/2fa/verify-otp',  'AuthController::verify2faSetupOtp');
+        $routes->post('auth/2fa/disable',     'AuthController::disable2fa');
+
         // -- Sub-Unit Head Delegation & Coverage (Acting Unit Head) --
         $routes->get('auth/delegation/units',    'DirectorDelegationController::getDelegationUnits');
         $routes->post('auth/assume-unit-head',   'DirectorDelegationController::assumeUnitHead');

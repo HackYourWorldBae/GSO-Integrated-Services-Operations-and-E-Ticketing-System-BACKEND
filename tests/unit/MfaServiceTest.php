@@ -39,4 +39,11 @@ final class MfaServiceTest extends CIUnitTestCase
         $this->assertFalse($result['valid']);
         $this->assertNotEmpty($result['message']);
     }
+
+    public function testUserModelFormatUserResponseHandlesNullGracefully(): void
+    {
+        $userModel = new \App\Models\UserModel();
+        $this->assertNull($userModel->formatUserResponse(null));
+        $this->assertNull($userModel->formatUserResponse([]));
+    }
 }

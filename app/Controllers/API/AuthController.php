@@ -1091,7 +1091,7 @@ class AuthController extends BaseController
 
                 return $this->errorResponse($result['message'], [
                     'remaining_attempts' => $result['remaining_attempts'] ?? null,
-                ], ResponseInterface::HTTP_UNAUTHORIZED);
+                ], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             if ((string)$result['user_id'] !== (string)$userId) {
@@ -1111,11 +1111,11 @@ class AuthController extends BaseController
                 'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
             ]);
 
-            $updatedUser = $this->userModel->find($userId);
+            $safeUser = $this->userModel->getSafeUser($userId);
 
             return $this->successResponse('Two-Factor Authentication has been successfully enabled on your account.', [
                 'is_mfa_enabled' => 1,
-                'user'           => $this->userModel->formatUserResponse($updatedUser),
+                'user'           => $safeUser,
             ]);
         } catch (\Throwable $e) {
             log_message('error', '[AuthController::verify2faSetupOtp] ' . $e->getMessage());
@@ -1152,11 +1152,11 @@ class AuthController extends BaseController
                 'user_agent'     => substr($this->request->getUserAgent()->getAgentString() ?? '', 0, 255),
             ]);
 
-            $updatedUser = $this->userModel->find($userId);
+            $safeUser = $this->userModel->getSafeUser($userId);
 
             return $this->successResponse('Two-Factor Authentication has been disabled.', [
                 'is_mfa_enabled' => 0,
-                'user'           => $this->userModel->formatUserResponse($updatedUser),
+                'user'           => $safeUser,
             ]);
         } catch (\Throwable $e) {
             log_message('error', '[AuthController::disable2fa] ' . $e->getMessage());

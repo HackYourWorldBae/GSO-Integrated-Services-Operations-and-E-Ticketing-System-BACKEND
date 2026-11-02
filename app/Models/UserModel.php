@@ -165,6 +165,18 @@ class UserModel extends Model
     }
 
     /**
+     * Format a user record safely for API responses (wrapper around getSafeUser).
+     */
+    public function formatUserResponse(?array $user): ?array
+    {
+        if (!$user || empty($user['id'])) {
+            return null;
+        }
+
+        return $this->getSafeUser((string) $user['id']) ?? $user;
+    }
+
+    /**
      * Cache for dynamic database schema capability checks.
      */
     protected static ?array $schemaCapabilities = null;

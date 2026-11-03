@@ -69,13 +69,7 @@ class OperationsHubController extends BaseController
         $this->materialModel->seedDefaultsIfEmpty();
         $this->holidayModel->seedDefaultsIfEmpty();
 
-        $workingHours = [
-            'work_start_time'      => $this->settingModel->getSetting('work_start_time', '08:00'),
-            'work_end_time'        => $this->settingModel->getSetting('work_end_time', '17:00'),
-            'lunch_start_time'     => $this->settingModel->getSetting('lunch_start_time', '12:00'),
-            'lunch_end_time'       => $this->settingModel->getSetting('lunch_end_time', '13:00'),
-            'standard_daily_hours' => (float) $this->settingModel->getSetting('standard_daily_hours', '8.0'),
-        ];
+        $workingHours = $this->buildWorkingHoursPayload();
 
         $holidays = $this->holidayModel->getActiveHolidays();
         $allMaterials = $this->materialModel->getByUnit('ALL', true);
@@ -467,79 +461,153 @@ class OperationsHubController extends BaseController
     // =========================================================================
 
     /**
-     * Get operational working hours.
+     * Helper to assemble the complete operational schedule & working hours configuration.
+     */
+    private function buildWorkingHoursPayload(): array
+    {
+        return [
+            'work_start_time'            => $this->settingModel->getSetting('work_start_time', '08:00'),
+            'work_end_time'              => $this->settingModel->getSetting('work_end_time', '17:00'),
+            'lunch_start_time'           => $this->settingModel->getSetting('lunch_start_time', '12:00'),
+            'lunch_end_time'             => $this->settingModel->getSetting('lunch_end_time', '13:00'),
+            'standard_daily_hours'       => (float) $this->settingModel->getSetting('standard_daily_hours', '8.0'),
+            'daily_continuation_enabled' => (bool) (int) $this->settingModel->getSetting('daily_continuation_enabled', '1'),
+            'continuation_start_time'    => $this->settingModel->getSetting('continuation_start_time', '08:00'),
+            'continuation_cutoff_time'   => $this->settingModel->getSetting('continuation_cutoff_time', '17:00'),
+            'lunch_break_enabled'        => (bool) (int) $this->settingModel->getSetting('lunch_break_enabled', '1'),
+            'morning_break_enabled'      => (bool) (int) $this->settingModel->getSetting('morning_break_enabled', '0'),
+            'morning_break_start'        => $this->settingModel->getSetting('morning_break_start', '10:00'),
+            'morning_break_end'          => $this->settingModel->getSetting('morning_break_end', '10:15'),
+            'afternoon_break_enabled'    => (bool) (int) $this->settingModel->getSetting('afternoon_break_enabled', '0'),
+            'afternoon_break_start'      => $this->settingModel->getSetting('afternoon_break_start', '15:00'),
+            'afternoon_break_end'        => $this->settingModel->getSetting('afternoon_break_end', '15:15'),
+            'exclude_weekends'           => (bool) (int) $this->settingModel->getSetting('exclude_weekends', '1'),
+            'exclude_saturday'           => (bool) (int) $this->settingModel->getSetting('exclude_saturday', '1'),
+            'exclude_sunday'             => (bool) (int) $this->settingModel->getSetting('exclude_sunday', '1'),
+        ];
+    }
+
+    /**
+     * Get operational working hours and schedule settings.
      * GET /api/v1/operations/working-hours
      */
     public function getWorkingHours(): ResponseInterface
     {
-        $config = [
-            'work_start_time'      => $this->settingModel->getSetting('work_start_time', '08:00'),
-            'work_end_time'        => $this->settingModel->getSetting('work_end_time', '17:00'),
-            'lunch_start_time'     => $this->settingModel->getSetting('lunch_start_time', '12:00'),
-            'lunch_end_time'       => $this->settingModel->getSetting('lunch_end_time', '13:00'),
-            'standard_daily_hours' => (float) $this->settingModel->getSetting('standard_daily_hours', '8.0'),
-        ];
-
-        return $this->successResponse('Working hours retrieved.', $config);
+        return $this->successResponse('Working hours retrieved.', $this->buildWorkingHoursPayload());
     }
 
     /**
-     * Update operational working hours.
+     * Update operational working hours, daily job continuation, time breaks, and weekend exclusions.
      * POST /api/v1/operations/working-hours
      */
     public function updateWorkingHours(): ResponseInterface
     {
         $body = $this->request->getJSON(true) ?? [];
 
+        $timeRegex = '/^([01]\d|2[0-3]):([0-5]\d)$/';
+
+        // 1. Core Work Hours
         $startTime  = trim($body['work_start_time'] ?? '08:00');
         $endTime    = trim($body['work_end_time'] ?? '17:00');
-        $lunchStart = trim($body['lunch_start_time'] ?? '12:00');
-        $lunchEnd   = trim($body['lunch_end_time'] ?? '13:00');
         $dailyHours = (float) ($body['standard_daily_hours'] ?? 8.0);
 
-        // Validate time format: HH:mm
-        $timeRegex = '/^([01]\d|2[0-3]):([0-5]\d)$/';
         if (!preg_match($timeRegex, $startTime) || !preg_match($timeRegex, $endTime)) {
-            return $this->errorResponse('Start time and end time must be in 24-hour format (e.g. 08:00, 17:00).');
+            return $this->errorResponse('Work start time and end time must be in 24-hour format (e.g. 08:00, 17:00).');
         }
-
-        if (!preg_match($timeRegex, $lunchStart) || !preg_match($timeRegex, $lunchEnd)) {
-            return $this->errorResponse('Lunch break times must be in 24-hour format (e.g. 12:00, 13:00).');
-        }
-
-        // Logical ordering checks
         if ($startTime >= $endTime) {
             return $this->errorResponse('Work start time must be earlier than work end time.');
         }
-
-        if ($lunchStart >= $lunchEnd) {
-            return $this->errorResponse('Lunch start time must be earlier than lunch end time.');
-        }
-
-        if ($lunchStart < $startTime || $lunchEnd > $endTime) {
-            return $this->errorResponse('Lunch break must fall completely within working hours.');
-        }
-
         if ($dailyHours <= 0 || $dailyHours > 24) {
             return $this->errorResponse('Standard daily hours must be between 1 and 24 hours.');
         }
 
+        // 2. Automatic Daily Continuation of Jobs
+        $continuationEnabled = isset($body['daily_continuation_enabled']) ? ((int) $body['daily_continuation_enabled'] ? 1 : 0) : 1;
+        $continuationStart   = trim($body['continuation_start_time'] ?? $startTime);
+        $continuationCutoff  = trim($body['continuation_cutoff_time'] ?? $endTime);
+
+        if (!preg_match($timeRegex, $continuationStart) || !preg_match($timeRegex, $continuationCutoff)) {
+            return $this->errorResponse('Job continuation start time and cutoff time must be in 24-hour format (e.g. 08:00, 17:00).');
+        }
+        if ($continuationStart >= $continuationCutoff) {
+            return $this->errorResponse('Job continuation resume time must be earlier than the evening cutoff time.');
+        }
+
+        // 3. Time Breaks
+        $lunchEnabled = isset($body['lunch_break_enabled']) ? ((int) $body['lunch_break_enabled'] ? 1 : 0) : 1;
+        $lunchStart   = trim($body['lunch_start_time'] ?? '12:00');
+        $lunchEnd     = trim($body['lunch_end_time'] ?? '13:00');
+
+        if (!preg_match($timeRegex, $lunchStart) || !preg_match($timeRegex, $lunchEnd)) {
+            return $this->errorResponse('Lunch break times must be in 24-hour format (e.g. 12:00, 13:00).');
+        }
+        if ($lunchStart >= $lunchEnd) {
+            return $this->errorResponse('Lunch start time must be earlier than lunch end time.');
+        }
+        if ($lunchStart < $startTime || $lunchEnd > $endTime) {
+            return $this->errorResponse('Lunch break must fall within standard daily working hours.');
+        }
+
+        $mornEnabled = isset($body['morning_break_enabled']) ? ((int) $body['morning_break_enabled'] ? 1 : 0) : 0;
+        $mornStart   = trim($body['morning_break_start'] ?? '10:00');
+        $mornEnd     = trim($body['morning_break_end'] ?? '10:15');
+
+        if ($mornEnabled) {
+            if (!preg_match($timeRegex, $mornStart) || !preg_match($timeRegex, $mornEnd)) {
+                return $this->errorResponse('Morning break times must be in 24-hour format (e.g. 10:00, 10:15).');
+            }
+            if ($mornStart >= $mornEnd) {
+                return $this->errorResponse('Morning break start must be earlier than break end time.');
+            }
+        }
+
+        $aftEnabled = isset($body['afternoon_break_enabled']) ? ((int) $body['afternoon_break_enabled'] ? 1 : 0) : 0;
+        $aftStart   = trim($body['afternoon_break_start'] ?? '15:00');
+        $aftEnd     = trim($body['afternoon_break_end'] ?? '15:15');
+
+        if ($aftEnabled) {
+            if (!preg_match($timeRegex, $aftStart) || !preg_match($timeRegex, $aftEnd)) {
+                return $this->errorResponse('Afternoon break times must be in 24-hour format (e.g. 15:00, 15:15).');
+            }
+            if ($aftStart >= $aftEnd) {
+                return $this->errorResponse('Afternoon break start must be earlier than break end time.');
+            }
+        }
+
+        // 4. Weekend Exclusion Policy
+        $excludeWeekends = isset($body['exclude_weekends']) ? ((int) $body['exclude_weekends'] ? 1 : 0) : 1;
+        $excludeSaturday = isset($body['exclude_saturday']) ? ((int) $body['exclude_saturday'] ? 1 : 0) : 1;
+        $excludeSunday   = isset($body['exclude_sunday']) ? ((int) $body['exclude_sunday'] ? 1 : 0) : 1;
+
+        // Persist Settings
         $this->settingModel->setSetting('work_start_time', $startTime, 'Daily operational starting time (HH:mm)');
         $this->settingModel->setSetting('work_end_time', $endTime, 'Daily operational ending time (HH:mm)');
+        $this->settingModel->setSetting('standard_daily_hours', (string) $dailyHours, 'Standard net operational hours per day');
+
+        $this->settingModel->setSetting('daily_continuation_enabled', (string) $continuationEnabled, 'Enable automatic multi-day job continuation');
+        $this->settingModel->setSetting('continuation_start_time', $continuationStart, 'Morning auto-continuation resume time (HH:mm)');
+        $this->settingModel->setSetting('continuation_cutoff_time', $continuationCutoff, 'Evening auto-continuation cutoff time (HH:mm)');
+
+        $this->settingModel->setSetting('lunch_break_enabled', (string) $lunchEnabled, 'Enable lunch break deduction');
         $this->settingModel->setSetting('lunch_start_time', $lunchStart, 'Daily lunch break start time (HH:mm)');
         $this->settingModel->setSetting('lunch_end_time', $lunchEnd, 'Daily lunch break end time (HH:mm)');
-        $this->settingModel->setSetting('standard_daily_hours', (string) $dailyHours, 'Standard net operational hours per day');
+
+        $this->settingModel->setSetting('morning_break_enabled', (string) $mornEnabled, 'Enable morning rest break deduction');
+        $this->settingModel->setSetting('morning_break_start', $mornStart, 'Morning break start time (HH:mm)');
+        $this->settingModel->setSetting('morning_break_end', $mornEnd, 'Morning break end time (HH:mm)');
+
+        $this->settingModel->setSetting('afternoon_break_enabled', (string) $aftEnabled, 'Enable afternoon rest break deduction');
+        $this->settingModel->setSetting('afternoon_break_start', $aftStart, 'Afternoon break start time (HH:mm)');
+        $this->settingModel->setSetting('afternoon_break_end', $aftEnd, 'Afternoon break end time (HH:mm)');
+
+        $this->settingModel->setSetting('exclude_weekends', (string) $excludeWeekends, 'Exclude weekends from job deadlines and turnaround calculations');
+        $this->settingModel->setSetting('exclude_saturday', (string) $excludeSaturday, 'Exclude Saturdays from working day calculations');
+        $this->settingModel->setSetting('exclude_sunday', (string) $excludeSunday, 'Exclude Sundays from working day calculations');
 
         WorkCalendar::clearCache();
 
-        $this->logAction('Working Hours Updated', "Operational hours updated: {$startTime} - {$endTime} (Lunch: {$lunchStart} - {$lunchEnd}, {$dailyHours}h/day).");
+        $this->logAction('Working Hours & Schedule Updated', "Operational schedule updated: Hours {$startTime}-{$endTime}, Continuation: {$continuationStart}-{$continuationCutoff}, Weekends Excluded: " . ($excludeWeekends ? 'Yes' : 'No') . '.');
 
-        return $this->successResponse('Working hours and SLA duration parameters successfully updated.', [
-            'work_start_time'      => $startTime,
-            'work_end_time'        => $endTime,
-            'lunch_start_time'     => $lunchStart,
-            'lunch_end_time'       => $lunchEnd,
-            'standard_daily_hours' => $dailyHours,
-        ]);
+        return $this->successResponse('Operational schedule, job continuation, time breaks, and weekend policies successfully updated.', $this->buildWorkingHoursPayload());
     }
 }

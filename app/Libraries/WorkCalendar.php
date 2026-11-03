@@ -68,19 +68,32 @@ class WorkCalendar
         }
 
         $config = [
-            'start_hour'   => self::WORK_START_HOUR,
-            'start_min'    => 0,
-            'end_hour'     => self::WORK_END_HOUR,
-            'end_min'      => 0,
-            'lunch_start'  => self::LUNCH_START,
-            'lunch_end'    => self::LUNCH_END,
-            'daily_hours'  => self::STANDARD_DAILY_HOURS,
+            'start_hour'                 => self::WORK_START_HOUR,
+            'start_min'                  => 0,
+            'end_hour'                   => self::WORK_END_HOUR,
+            'end_min'                    => 0,
+            'lunch_start'                => self::LUNCH_START,
+            'lunch_end'                  => self::LUNCH_END,
+            'daily_hours'                => self::STANDARD_DAILY_HOURS,
+            'daily_continuation_enabled' => true,
+            'continuation_start_time'    => '08:00',
+            'continuation_cutoff_time'   => '17:00',
+            'lunch_break_enabled'        => true,
+            'morning_break_enabled'      => false,
+            'morning_break_start'        => '10:00',
+            'morning_break_end'          => '10:15',
+            'afternoon_break_enabled'    => false,
+            'afternoon_break_start'      => '15:00',
+            'afternoon_break_end'        => '15:15',
+            'exclude_weekends'           => true,
+            'exclude_saturday'           => true,
+            'exclude_sunday'             => true,
         ];
 
         try {
             $settingModel = new \App\Models\SystemSettingModel();
-            $startTime = $settingModel->getSetting('work_start_time', '08:00');
-            $endTime   = $settingModel->getSetting('work_end_time', '17:00');
+            $startTime  = $settingModel->getSetting('work_start_time', '08:00');
+            $endTime    = $settingModel->getSetting('work_end_time', '17:00');
             $lunchStart = $settingModel->getSetting('lunch_start_time', '12:00');
             $lunchEnd   = $settingModel->getSetting('lunch_end_time', '13:00');
             $dailyHours = (float) $settingModel->getSetting('standard_daily_hours', '8.0');
@@ -102,6 +115,47 @@ class WorkCalendar
             if ($dailyHours > 0) {
                 $config['daily_hours'] = $dailyHours;
             }
+
+            // Automatic daily continuation of jobs settings
+            $continuationEnabled = $settingModel->getSetting('daily_continuation_enabled');
+            if ($continuationEnabled !== null) {
+                $config['daily_continuation_enabled'] = (bool) (int) $continuationEnabled;
+            }
+            $config['continuation_start_time']  = $settingModel->getSetting('continuation_start_time', $startTime ?: '08:00');
+            $config['continuation_cutoff_time'] = $settingModel->getSetting('continuation_cutoff_time', $endTime ?: '17:00');
+
+            // Time breaks settings
+            $lunchEnabled = $settingModel->getSetting('lunch_break_enabled');
+            if ($lunchEnabled !== null) {
+                $config['lunch_break_enabled'] = (bool) (int) $lunchEnabled;
+            }
+            $mornEnabled = $settingModel->getSetting('morning_break_enabled');
+            if ($mornEnabled !== null) {
+                $config['morning_break_enabled'] = (bool) (int) $mornEnabled;
+            }
+            $config['morning_break_start'] = $settingModel->getSetting('morning_break_start', '10:00');
+            $config['morning_break_end']   = $settingModel->getSetting('morning_break_end', '10:15');
+
+            $aftEnabled = $settingModel->getSetting('afternoon_break_enabled');
+            if ($aftEnabled !== null) {
+                $config['afternoon_break_enabled'] = (bool) (int) $aftEnabled;
+            }
+            $config['afternoon_break_start'] = $settingModel->getSetting('afternoon_break_start', '15:00');
+            $config['afternoon_break_end']   = $settingModel->getSetting('afternoon_break_end', '15:15');
+
+            // Weekend exclusion settings
+            $exWeekends = $settingModel->getSetting('exclude_weekends');
+            if ($exWeekends !== null) {
+                $config['exclude_weekends'] = (bool) (int) $exWeekends;
+            }
+            $exSat = $settingModel->getSetting('exclude_saturday');
+            if ($exSat !== null) {
+                $config['exclude_saturday'] = (bool) (int) $exSat;
+            }
+            $exSun = $settingModel->getSetting('exclude_sunday');
+            if ($exSun !== null) {
+                $config['exclude_sunday'] = (bool) (int) $exSun;
+            }
         } catch (\Throwable $e) {
             // Defensive fallback to standard constants
         }
@@ -111,12 +165,23 @@ class WorkCalendar
     }
 
     /**
-     * Checks if a given date falls on a weekend (Saturday or Sunday).
+     * Checks if a given date falls on a weekend, respecting institutional exclusion policy.
      */
     public static function isWeekend(DateTimeInterface $date): bool
     {
+        $cfg = self::getWorkingHoursConfig();
+        if (isset($cfg['exclude_weekends']) && !$cfg['exclude_weekends']) {
+            return false;
+        }
+
         $dayOfWeek = (int) $date->format('N'); // 1 (Mon) through 7 (Sun)
-        return $dayOfWeek >= 6;
+        $excludeSat = !isset($cfg['exclude_saturday']) || !empty($cfg['exclude_saturday']);
+        $excludeSun = !isset($cfg['exclude_sunday']) || !empty($cfg['exclude_sunday']);
+
+        if ($dayOfWeek === 6) return (bool) $excludeSat;
+        if ($dayOfWeek === 7) return (bool) $excludeSun;
+
+        return false;
     }
 
     /**
@@ -311,8 +376,8 @@ class WorkCalendar
                         $seconds = $windowEnd->getTimestamp() - $windowStart->getTimestamp();
                         $hours = $seconds / 3600.0;
 
-                        // Deduct lunch break if window intersects it
-                        if ($lunchStartH < $lunchEndH) {
+                        // Deduct lunch break if enabled and window intersects it
+                        if (!empty($cfg['lunch_break_enabled']) && $lunchStartH < $lunchEndH) {
                             $lunchStart = (new DateTime($dayYmd))->setTime($lunchStartH, 0, 0);
                             $lunchEnd   = (new DateTime($dayYmd))->setTime($lunchEndH, 0, 0);
 
@@ -321,6 +386,36 @@ class WorkCalendar
                                 $overlapEnd   = min($windowEnd, $lunchEnd);
                                 $lunchOverlapHours = ($overlapEnd->getTimestamp() - $overlapStart->getTimestamp()) / 3600.0;
                                 $hours = max(0.0, $hours - $lunchOverlapHours);
+                            }
+                        }
+
+                        // Deduct morning break if enabled
+                        if (!empty($cfg['morning_break_enabled']) && !empty($cfg['morning_break_start']) && !empty($cfg['morning_break_end'])) {
+                            [$mStartH, $mStartM] = array_pad(array_map('intval', explode(':', $cfg['morning_break_start'])), 2, 0);
+                            [$mEndH, $mEndM]     = array_pad(array_map('intval', explode(':', $cfg['morning_break_end'])), 2, 0);
+                            $mBreakStart = (new DateTime($dayYmd))->setTime($mStartH, $mStartM, 0);
+                            $mBreakEnd   = (new DateTime($dayYmd))->setTime($mEndH, $mEndM, 0);
+
+                            if ($windowStart < $mBreakEnd && $windowEnd > $mBreakStart) {
+                                $mOverlapStart = max($windowStart, $mBreakStart);
+                                $mOverlapEnd   = min($windowEnd, $mBreakEnd);
+                                $mOverlapHours = ($mOverlapEnd->getTimestamp() - $mOverlapStart->getTimestamp()) / 3600.0;
+                                $hours = max(0.0, $hours - $mOverlapHours);
+                            }
+                        }
+
+                        // Deduct afternoon break if enabled
+                        if (!empty($cfg['afternoon_break_enabled']) && !empty($cfg['afternoon_break_start']) && !empty($cfg['afternoon_break_end'])) {
+                            [$aStartH, $aStartM] = array_pad(array_map('intval', explode(':', $cfg['afternoon_break_start'])), 2, 0);
+                            [$aEndH, $aEndM]     = array_pad(array_map('intval', explode(':', $cfg['afternoon_break_end'])), 2, 0);
+                            $aBreakStart = (new DateTime($dayYmd))->setTime($aStartH, $aStartM, 0);
+                            $aBreakEnd   = (new DateTime($dayYmd))->setTime($aEndH, $aEndM, 0);
+
+                            if ($windowStart < $aBreakEnd && $windowEnd > $aBreakStart) {
+                                $aOverlapStart = max($windowStart, $aBreakStart);
+                                $aOverlapEnd   = min($windowEnd, $aBreakEnd);
+                                $aOverlapHours = ($aOverlapEnd->getTimestamp() - $aOverlapStart->getTimestamp()) / 3600.0;
+                                $hours = max(0.0, $hours - $aOverlapHours);
                             }
                         }
 

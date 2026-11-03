@@ -37,7 +37,7 @@ class SpecialHolidayModel extends Model
     protected $validationRules = [
         'holiday_date' => 'required',
         'name'         => 'required|min_length[2]|max_length[255]',
-        'type'         => 'required|in_list[special_non_working,regular,local_suspension,institutional]',
+        'type'         => 'required|in_list[special_non_working,institutional]',
         'is_recurring' => 'permit_empty',
         'is_active'    => 'permit_empty',
         'notes'        => 'permit_empty',

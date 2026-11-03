@@ -299,16 +299,23 @@ class OperationsHubController extends BaseController
     }
 
     // =========================================================================
-    // 3. Special Non-Working Holidays Management
+    // 3. Non-Working Days Management (Special Non-Working & University Days)
     // =========================================================================
 
     /**
-     * List all special non-working holiday dates.
+     * List all non-working day dates.
      * GET /api/v1/operations/holidays
      */
     public function getHolidays(): ResponseInterface
     {
         $this->holidayModel->seedDefaultsIfEmpty();
+
+        // Ensure deprecated regular and local_suspension types are removed from the registry
+        try {
+            $this->holidayModel->whereIn('type', ['regular', 'local_suspension'])->delete();
+        } catch (\Throwable $e) {
+            // ignore if already clean
+        }
 
         $activeOnly = $this->request->getGet('active_only') === '1';
         $builder = $this->holidayModel->orderBy('holiday_date', 'ASC');
@@ -317,14 +324,14 @@ class OperationsHubController extends BaseController
         }
         $holidays = $builder->findAll();
 
-        return $this->successResponse('Special holidays retrieved.', [
+        return $this->successResponse('Non-working days retrieved.', [
             'holidays' => $holidays,
             'total'    => count($holidays),
         ]);
     }
 
     /**
-     * Register a new special non-working holiday date.
+     * Register a new non-working day date.
      * POST /api/v1/operations/holidays
      */
     public function createHoliday(): ResponseInterface
@@ -334,22 +341,25 @@ class OperationsHubController extends BaseController
         $holidayDate = trim($body['holiday_date'] ?? '');
         $name        = sanitize_string($body['name'] ?? '');
         $type        = trim($body['type'] ?? 'special_non_working');
+        if (!in_array($type, ['special_non_working', 'institutional'], true)) {
+            $type = 'special_non_working';
+        }
         $isRecurring = !empty($body['is_recurring']) ? 1 : 0;
         $isActive    = isset($body['is_active']) ? ((int) $body['is_active'] ? 1 : 0) : 1;
         $notes       = sanitize_string($body['notes'] ?? '');
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $holidayDate)) {
-            return $this->errorResponse('Valid holiday date in YYYY-MM-DD format is required.');
+            return $this->errorResponse('Valid date in YYYY-MM-DD format is required.');
         }
 
         if (empty($name)) {
-            return $this->errorResponse('Holiday name/description is required.');
+            return $this->errorResponse('Non-working day name/description is required.');
         }
 
         // Check if exact date already registered
         $existing = $this->holidayModel->where('holiday_date', $holidayDate)->first();
         if ($existing) {
-            return $this->errorResponse("A holiday entry for {$holidayDate} ('{$existing['name']}') already exists.");
+            return $this->errorResponse("A non-working day entry for {$holidayDate} ('{$existing['name']}') already exists.");
         }
 
         $id = $this->holidayModel->insert([
@@ -362,26 +372,26 @@ class OperationsHubController extends BaseController
         ]);
 
         if (!$id) {
-            return $this->errorResponse('Failed to record special holiday.', $this->holidayModel->errors());
+            return $this->errorResponse('Failed to record non-working day.', $this->holidayModel->errors());
         }
 
         WorkCalendar::clearCache();
 
-        $this->logAction('Holiday Added', "Registered special non-working holiday '{$name}' on {$holidayDate}.");
+        $this->logAction('Non-Working Day Added', "Registered non-working day '{$name}' on {$holidayDate}.");
 
         $created = $this->holidayModel->find($id);
-        return $this->successResponse("Special holiday '{$name}' on {$holidayDate} registered successfully.", $created, ResponseInterface::HTTP_CREATED);
+        return $this->successResponse("Non-working day '{$name}' on {$holidayDate} registered successfully.", $created, ResponseInterface::HTTP_CREATED);
     }
 
     /**
-     * Update an existing special holiday entry.
+     * Update an existing non-working day entry.
      * PATCH /api/v1/operations/holidays/(:num)
      */
     public function updateHoliday(int $id): ResponseInterface
     {
         $holiday = $this->holidayModel->find($id);
         if (!$holiday) {
-            return $this->notFoundResponse('Special Holiday');
+            return $this->notFoundResponse('Non-Working Day');
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -394,7 +404,7 @@ class OperationsHubController extends BaseController
             }
             $existing = $this->holidayModel->where('holiday_date', $hDate)->where('id !=', $id)->first();
             if ($existing) {
-                return $this->errorResponse("Another holiday entry already exists for {$hDate}.");
+                return $this->errorResponse("Another entry already exists for {$hDate}.");
             }
             $updateData['holiday_date'] = $hDate;
         }
@@ -402,13 +412,16 @@ class OperationsHubController extends BaseController
         if (isset($body['name'])) {
             $name = sanitize_string($body['name']);
             if (empty($name)) {
-                return $this->errorResponse('Holiday name cannot be empty.');
+                return $this->errorResponse('Non-working day name cannot be empty.');
             }
             $updateData['name'] = $name;
         }
 
         if (isset($body['type'])) {
-            $updateData['type'] = trim($body['type']);
+            $type = trim($body['type']);
+            if (in_array($type, ['special_non_working', 'institutional'], true)) {
+                $updateData['type'] = $type;
+            }
         }
 
         if (isset($body['is_recurring'])) {
@@ -432,28 +445,28 @@ class OperationsHubController extends BaseController
 
         $updated = $this->holidayModel->find($id);
 
-        $this->logAction('Holiday Updated', "Updated holiday #{$id} ({$updated['name']} on {$updated['holiday_date']}).");
+        $this->logAction('Non-Working Day Updated', "Updated non-working day #{$id} ({$updated['name']} on {$updated['holiday_date']}).");
 
-        return $this->successResponse("Holiday entry '{$updated['name']}' updated.", $updated);
+        return $this->successResponse("Non-working day entry '{$updated['name']}' updated.", $updated);
     }
 
     /**
-     * Delete a special holiday entry.
+     * Delete a non-working day entry.
      * DELETE /api/v1/operations/holidays/(:num)
      */
     public function deleteHoliday(int $id): ResponseInterface
     {
         $holiday = $this->holidayModel->find($id);
         if (!$holiday) {
-            return $this->notFoundResponse('Special Holiday');
+            return $this->notFoundResponse('Non-Working Day');
         }
 
         $this->holidayModel->delete($id);
         WorkCalendar::clearCache();
 
-        $this->logAction('Holiday Deleted', "Deleted special holiday '{$holiday['name']}' on {$holiday['holiday_date']}.",);
+        $this->logAction('Non-Working Day Deleted', "Deleted non-working day '{$holiday['name']}' on {$holiday['holiday_date']}.");
 
-        return $this->successResponse("Holiday entry '{$holiday['name']}' deleted.");
+        return $this->successResponse("Non-working day entry '{$holiday['name']}' deleted.");
     }
 
     // =========================================================================

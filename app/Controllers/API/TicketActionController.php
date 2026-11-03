@@ -437,6 +437,10 @@ class TicketActionController extends BaseController
 
         $isReturnedByDirector = in_array($userRole, ['director', 'superadmin'], true);
 
+        if ($isReturnedByDirector && (int) $ticket['unit_id'] === (self::UNIT_MAP['FGMU'] ?? 1)) {
+            return $this->errorResponse("FGMU tickets require executive Director approval and cannot be returned to unit head.");
+        }
+
         $this->ticketModel->update($ticketId, [
             'is_escalated_to_director' => 0,
             'status_label'             => 'Pending Approval',

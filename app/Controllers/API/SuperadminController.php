@@ -725,7 +725,7 @@ class SuperadminController extends BaseController
 
         $currentUserId = $this->currentUserId();
         if ((string) $id === (string) $currentUserId) {
-            return $this->errorResponse('Cannot alter the status of your own Superadmin account.', [], ResponseInterface::HTTP_FORBIDDEN);
+            return $this->errorResponse('Cannot alter the status of your own System Admin account.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -752,7 +752,7 @@ class SuperadminController extends BaseController
                 'severity'       => in_array($newStatus, ['Suspended', 'Rejected'], true) ? 'warning' : 'notice',
                 'actor_id'       => $currentUserId,
                 'target_user_id' => $id,
-                'details'        => "Superadmin changed account status of {$existing['first_name']} {$existing['last_name']} from {$existing['status']} to {$newStatus}.",
+                'details'        => "System Admin changed account status of {$existing['first_name']} {$existing['last_name']} from {$existing['status']} to {$newStatus}.",
                 'metadata'       => ['previous_status' => $existing['status'], 'new_status' => $newStatus],
             ]);
 
@@ -774,7 +774,7 @@ class SuperadminController extends BaseController
 
         $currentUserId = $this->currentUserId();
         if ((string) $id === (string) $currentUserId) {
-            return $this->errorResponse('Cannot delete your own active Superadmin account.', [], ResponseInterface::HTTP_FORBIDDEN);
+            return $this->errorResponse('Cannot delete your own active System Admin account.', [], ResponseInterface::HTTP_FORBIDDEN);
         }
 
         // Check if user has active tickets
@@ -804,7 +804,7 @@ class SuperadminController extends BaseController
             'severity'       => 'critical',
             'actor_id'       => $currentUserId,
             'target_user_id' => $id,
-            'details'        => "Superadmin permanently deleted user account {$existing['first_name']} {$existing['last_name']} ({$existing['email']}).",
+            'details'        => "System Admin permanently deleted user account {$existing['first_name']} {$existing['last_name']} ({$existing['email']}).",
             'metadata'       => ['role' => $existing['role']],
         ]);
 
@@ -841,7 +841,7 @@ class SuperadminController extends BaseController
             'severity'       => 'info',
             'actor_id'       => $this->currentUserId(),
             'target_user_id' => $id,
-            'details'        => "Superadmin verified identity and approved request access for {$existing['first_name']} {$existing['last_name']} ({$existing['role']}).",
+            'details'        => "System Admin verified identity and approved request access for {$existing['first_name']} {$existing['last_name']} ({$existing['role']}).",
             'metadata'       => ['role' => $existing['role']],
         ]);
 
@@ -892,7 +892,7 @@ class SuperadminController extends BaseController
             'severity'       => 'warning',
             'actor_id'       => $this->currentUserId(),
             'target_user_id' => $id,
-            'details'        => "Superadmin rejected identity verification for {$existing['first_name']} {$existing['last_name']}. Reason: {$reason}",
+            'details'        => "System Admin rejected identity verification for {$existing['first_name']} {$existing['last_name']}. Reason: {$reason}",
             'metadata'       => ['reason' => $reason],
         ]);
 
@@ -1041,7 +1041,7 @@ class SuperadminController extends BaseController
             'severity'       => 'notice',
             'actor_id'       => $this->currentUserId(),
             'target_user_id' => $id,
-            'details'        => "Superadmin manually unlocked account for {$existing['first_name']} {$existing['last_name']}, clearing failed login lockout.",
+            'details'        => "System Admin manually unlocked account for {$existing['first_name']} {$existing['last_name']}, clearing failed login lockout.",
         ]);
 
         $safeUser = $this->userModel->getSafeUser($id);
@@ -1109,8 +1109,8 @@ class SuperadminController extends BaseController
         $eventType = $active ? 'MAINTENANCE_MODE_ACTIVATED' : 'MAINTENANCE_MODE_DEACTIVATED';
         $severity  = $active ? 'warning' : 'notice';
         $details   = $active
-            ? "Superadmin initiated Emergency Maintenance Mode (grace countdown: {$countdown}s). Active users alerted and new logins blocked."
-            : "Superadmin deactivated Emergency Maintenance Mode. Normal platform access restored.";
+            ? "System Admin initiated Emergency Maintenance Mode (grace countdown: {$countdown}s). Active users alerted and new logins blocked."
+            : "System Admin deactivated Emergency Maintenance Mode. Normal platform access restored.";
 
         try {
             $this->activityLogModel->insert([

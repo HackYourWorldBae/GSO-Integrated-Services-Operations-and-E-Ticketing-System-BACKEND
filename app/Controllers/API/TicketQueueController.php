@@ -261,7 +261,7 @@ class TicketQueueController extends BaseController
 
         if (strtoupper($unitCode) === 'ALL') {
             if (!in_array($this->currentUserRole(), ['director', 'superadmin'], true)) {
-                return $this->forbiddenResponse('Only the director or superadmin role can access global statistics.');
+                return $this->forbiddenResponse('Only the director or system admin role can access global statistics.');
             }
             // Performance Efficiency: aggregate stats are cached 60s to keep
             // dashboard polling cheap under concurrent load.

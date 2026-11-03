@@ -111,7 +111,7 @@ class SystemSettingController extends BaseController
             'severity'       => 'notice',
             'actor_id'       => $userId,
             'target_user_id' => null,
-            'details'        => 'Superadmin updated Resend email service configuration.',
+            'details'        => 'System Admin updated Resend email service configuration.',
             'metadata'       => [
                 'has_api_key' => !empty($body['api_key']),
                 'from_email'  => $body['from_email'] ?? null,

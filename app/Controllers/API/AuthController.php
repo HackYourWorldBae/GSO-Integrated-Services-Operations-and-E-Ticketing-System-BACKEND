@@ -951,7 +951,7 @@ class AuthController extends BaseController
             $settingModel = new \App\Models\SystemSettingModel();
             if (!$settingModel->isResendConfigured()) {
                 return $this->errorResponse(
-                    'Resend email service is not configured. Please set your Resend API key in Superadmin Settings or in the backend .env file.',
+                    'Resend email service is not configured. Please set your Resend API key in System Admin Settings or in the backend .env file.',
                     ['code' => 'RESEND_NOT_CONFIGURED'],
                     ResponseInterface::HTTP_BAD_REQUEST
                 );

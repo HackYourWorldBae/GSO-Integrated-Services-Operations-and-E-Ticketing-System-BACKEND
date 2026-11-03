@@ -331,22 +331,24 @@ class OperationsHubController extends BaseController
     }
 
     /**
-     * Register a new non-working day date.
+     * Register a new non-working day date or date range (working break).
      * POST /api/v1/operations/holidays
      */
     public function createHoliday(): ResponseInterface
     {
         $body = $this->request->getJSON(true) ?? [];
 
-        $holidayDate = trim($body['holiday_date'] ?? '');
-        $name        = sanitize_string($body['name'] ?? '');
-        $type        = trim($body['type'] ?? 'special_non_working');
+        $holidayDate  = trim($body['holiday_date'] ?? $body['start_date'] ?? '');
+        $endDate      = trim($body['end_date'] ?? '');
+        $name         = sanitize_string($body['name'] ?? '');
+        $type         = trim($body['type'] ?? 'special_non_working');
         if (!in_array($type, ['special_non_working', 'institutional'], true)) {
             $type = 'special_non_working';
         }
-        $isRecurring = !empty($body['is_recurring']) ? 1 : 0;
-        $isActive    = isset($body['is_active']) ? ((int) $body['is_active'] ? 1 : 0) : 1;
-        $notes       = sanitize_string($body['notes'] ?? '');
+        $isRecurring  = !empty($body['is_recurring']) ? 1 : 0;
+        $isActive     = isset($body['is_active']) ? ((int) $body['is_active'] ? 1 : 0) : 1;
+        $notes        = sanitize_string($body['notes'] ?? '');
+        $skipWeekends = !isset($body['skip_weekends']) || !empty($body['skip_weekends']);
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $holidayDate)) {
             return $this->errorResponse('Valid date in YYYY-MM-DD format is required.');
@@ -356,7 +358,71 @@ class OperationsHubController extends BaseController
             return $this->errorResponse('Non-working day name/description is required.');
         }
 
-        // Check if exact date already registered
+        // Multi-day Date Range (Working Break / Institutional Period)
+        if (!empty($endDate) && $endDate !== $holidayDate) {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
+                return $this->errorResponse('Valid end date in YYYY-MM-DD format is required.');
+            }
+
+            if ($endDate < $holidayDate) {
+                return $this->errorResponse('End date must be on or after start date.');
+            }
+
+            $start = new \DateTime($holidayDate);
+            $end   = new \DateTime($endDate);
+            $diff  = $start->diff($end)->days;
+
+            if ($diff > 60) {
+                return $this->errorResponse('Date range cannot exceed 60 days.');
+            }
+
+            $current = clone $start;
+            $createdRecords = [];
+
+            while ($current <= $end) {
+                $curDate = $current->format('Y-m-d');
+                $dayOfWeek = (int) $current->format('w'); // 0 = Sunday, 6 = Saturday
+
+                // If skipWeekends is enabled, bypass Saturdays and Sundays
+                if ($skipWeekends && ($dayOfWeek === 0 || $dayOfWeek === 6)) {
+                    $current->modify('+1 day');
+                    continue;
+                }
+
+                $existing = $this->holidayModel->where('holiday_date', $curDate)->first();
+                if ($existing) {
+                    $createdRecords[] = $existing;
+                } else {
+                    $id = $this->holidayModel->insert([
+                        'holiday_date' => $curDate,
+                        'name'         => $name,
+                        'type'         => $type,
+                        'is_recurring' => $isRecurring,
+                        'is_active'    => $isActive,
+                        'notes'        => $notes,
+                    ]);
+
+                    if ($id) {
+                        $createdRecords[] = $this->holidayModel->find($id);
+                    }
+                }
+
+                $current->modify('+1 day');
+            }
+
+            WorkCalendar::clearCache();
+
+            $totalAdded = count($createdRecords);
+            $this->logAction('Working Break Added', "Registered working break '{$name}' from {$holidayDate} to {$endDate} ({$totalAdded} dates).");
+
+            return $this->successResponse(
+                "Registered {$totalAdded} non-working break days for '{$name}' ({$holidayDate} to {$endDate}).",
+                $createdRecords,
+                ResponseInterface::HTTP_CREATED
+            );
+        }
+
+        // Single Date Handling
         $existing = $this->holidayModel->where('holiday_date', $holidayDate)->first();
         if ($existing) {
             return $this->errorResponse("A non-working day entry for {$holidayDate} ('{$existing['name']}') already exists.");

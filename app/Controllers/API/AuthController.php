@@ -77,6 +77,7 @@ class AuthController extends BaseController
         $passwordConfirm = (string) ($this->request->getPost('password_confirm') ?? '');
         $studentType     = strtolower(trim((string) ($this->request->getPost('student_type') ?? '')));
         $employeeType    = trim((string) ($this->request->getPost('employee_type') ?? ''));
+        $employeeSubtype = trim((string) ($this->request->getPost('employee_subtype') ?? ''));
         $organizationName = trim((string) ($this->request->getPost('organization_name') ?? ''));
         $college          = trim((string) ($this->request->getPost('college') ?? ''));
 
@@ -138,8 +139,14 @@ class AuthController extends BaseController
                 'Support / Administrative Staff',
             ];
 
+            if ($employeeType === 'Non-teaching Staff' && !empty($employeeSubtype)) {
+                $employeeType = $employeeSubtype;
+            }
+
             if (empty($employeeType)) {
                 $errors['employee_type'] = ['Please select your faculty or staff classification (Teaching Staff, Research and Extension Staff, or Support / Administrative Staff).'];
+            } elseif ($employeeType === 'Non-teaching Staff') {
+                $errors['employee_subtype'] = ['Please select your non-teaching staff subtype (Research and Extension Staff or Support / Administrative Staff).'];
             } elseif (!in_array($employeeType, $validEmployeeTypes, true)) {
                 $errors['employee_type'] = ['Invalid faculty or staff classification selected.'];
             } elseif ($employeeType === 'Teaching Staff') {
@@ -199,15 +206,17 @@ class AuthController extends BaseController
             $contactNumber = $cleanContact;
         }
 
-        // 6. Password Validation (Elder-friendly: min 8 chars, letters and numbers, no special symbols required)
+        // 6. Password Validation (min 8 chars, uppercase, lowercase, and numbers)
         if (empty($password)) {
             $errors['password'] = ['Password is required.'];
         } elseif (strlen($password) < 8) {
             $errors['password'] = ['Password must be at least 8 characters long.'];
         } elseif (strlen($password) > 64) {
             $errors['password'] = ['Password must not exceed 64 characters.'];
-        } elseif (!preg_match('/[a-zA-Z]/', $password)) {
-            $errors['password'] = ['Password must contain at least one letter.'];
+        } elseif (!preg_match('/[A-Z]/', $password)) {
+            $errors['password'] = ['Password must contain at least one capital letter (A-Z).'];
+        } elseif (!preg_match('/[a-z]/', $password)) {
+            $errors['password'] = ['Password must contain at least one small letter (a-z).'];
         } elseif (!preg_match('/[0-9]/', $password)) {
             $errors['password'] = ['Password must contain at least one number.'];
         }

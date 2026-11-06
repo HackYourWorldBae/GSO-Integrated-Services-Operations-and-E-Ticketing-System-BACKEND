@@ -80,6 +80,12 @@ class FeedbackController extends BaseController
             return $this->errorResponse('Feedback has already been submitted for this ticket.');
         }
 
+        // --- Validate Remarks (Mandatory Policy) ---
+        $remarks = trim(sanitize_string($body['remarks'] ?? ''));
+        if ($remarks === '') {
+            return $this->errorResponse('Remarks are required for evaluation. Please provide your comments or feedback.', [], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         // --- Validate Ratings ---
         $ratingFields     = ['quality_rating', 'efficiency_rating', 'timeliness_rating'];
         $completionStatus = sanitize_string($body['completion_status'] ?? 'on-time');
@@ -110,7 +116,7 @@ class FeedbackController extends BaseController
             'ticket_id'         => $ticketId,
             'user_id'           => $userId,
             'completion_status' => $completionStatus,
-            'remarks'           => sanitize_string($body['remarks'] ?? ''),
+            'remarks'           => $remarks,
             'created_at'        => date('Y-m-d H:i:s'),
         ], $ratings), true);
 

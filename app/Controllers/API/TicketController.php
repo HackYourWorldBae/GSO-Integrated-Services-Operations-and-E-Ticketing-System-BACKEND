@@ -240,6 +240,35 @@ class TicketController extends BaseController
             );
         }
 
+        // Policy Guard: Requestors must rate finished jobs before requesting a new service
+        $db = \Config\Database::connect();
+        $unratedJobs = $db->query(
+            "SELECT t.id, t.title, t.unit_id, t.service_type
+             FROM tickets t
+             WHERE t.user_id = ?
+               AND t.unit_id IN (1, 2)
+               AND (t.is_archived = 0 OR t.is_archived IS NULL)
+               AND (t.status = 'resolved' OR t.current_step >= 6)
+               AND t.status NOT IN ('closed', 'completed', 'declined', 'cancelled')
+               AND LOWER(COALESCE(t.service_type, '')) NOT LIKE '%borrowing%'
+               AND LOWER(COALESCE(t.title, '')) NOT LIKE '%borrowing%'
+               AND t.id NOT IN (SELECT ticket_id FROM ticket_feedbacks WHERE user_id = ?)
+             LIMIT 5",
+            [$userId, $userId]
+        )->getResultArray();
+
+        if (!empty($unratedJobs)) {
+            $unratedIds = array_column($unratedJobs, 'id');
+            return $this->errorResponse(
+                'Policy restriction: You have completed service requests awaiting rating and evaluation (' . implode(', ', $unratedIds) . '). Please submit your rating and remarks for your previous jobs before requesting a new service.',
+                [
+                    'unrated_tickets' => $unratedIds,
+                    'requires_rating' => true,
+                ],
+                ResponseInterface::HTTP_FORBIDDEN
+            );
+        }
+
         if (empty($body)) {
             return $this->errorResponse('Request body is empty.');
         }

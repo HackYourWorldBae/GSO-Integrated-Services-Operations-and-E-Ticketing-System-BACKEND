@@ -204,6 +204,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('operations/config',                   'OperationsHubController::getConfig');
         $routes->get('operations/materials',                'OperationsHubController::getMaterials');
         $routes->post('operations/materials',               'OperationsHubController::createMaterial',     ['filter' => 'role:admin,staff,director,superadmin']);
+        $routes->patch('operations/materials/(:num)/adjust-quantity', 'OperationsHubController::adjustMaterialQuantity/$1', ['filter' => 'role:admin,staff,director,superadmin']);
         $routes->patch('operations/materials/(:num)',       'OperationsHubController::updateMaterial/$1',  ['filter' => 'role:admin,staff,director,superadmin']);
         $routes->delete('operations/materials/(:num)',      'OperationsHubController::deleteMaterial/$1',  ['filter' => 'role:admin,staff,director,superadmin']);
         $routes->post('operations/materials/seed-defaults', 'OperationsHubController::seedDefaults',       ['filter' => 'role:admin,staff,director,superadmin']);

@@ -160,8 +160,10 @@ class OperationsHubController extends BaseController
         }
         $name         = sanitize_string($body['name'] ?? '');
         $unit         = sanitize_string($body['unit'] ?? 'pcs');
-        $defaultPrice = max(0.00, (float) ($body['default_price'] ?? 0));
-        $isActive     = isset($body['is_active']) ? ((int) $body['is_active'] ? 1 : 0) : 1;
+        $defaultPrice      = max(0.00, (float) ($body['default_price'] ?? 0));
+        $quantityTotal     = max(1, (int) ($body['quantity_total'] ?? $body['quantity_available'] ?? 50));
+        $quantityAvailable = max(0, min($quantityTotal, (int) ($body['quantity_available'] ?? $quantityTotal)));
+        $isActive          = isset($body['is_active']) ? ((int) $body['is_active'] ? 1 : 0) : 1;
 
         if (!in_array($unitCode, ['FGMU', 'LEAU'], true)) {
             return $this->errorResponse('Sub-unit must be either FGMU or LEAU.');
@@ -181,12 +183,14 @@ class OperationsHubController extends BaseController
         }
 
         $id = $this->materialModel->insert([
-            'unit_code'     => $unitCode,
-            'category'      => $category,
-            'name'          => $name,
-            'unit'          => $unit ?: 'pcs',
-            'default_price' => $defaultPrice,
-            'is_active'     => $isActive,
+            'unit_code'          => $unitCode,
+            'category'           => $category,
+            'name'               => $name,
+            'unit'               => $unit ?: 'pcs',
+            'default_price'      => $defaultPrice,
+            'quantity_available' => $quantityAvailable,
+            'quantity_total'     => $quantityTotal,
+            'is_active'          => $isActive,
         ]);
 
         if (!$id) {
@@ -251,6 +255,19 @@ class OperationsHubController extends BaseController
             $updateData['default_price'] = max(0.00, (float) $body['default_price']);
         }
 
+        if (isset($body['quantity_total'])) {
+            $newTotal = max(1, (int) $body['quantity_total']);
+            $updateData['quantity_total'] = $newTotal;
+            if (!isset($body['quantity_available'])) {
+                $curAvail = (int) ($material['quantity_available'] ?? $newTotal);
+                $updateData['quantity_available'] = min($newTotal, $curAvail);
+            }
+        }
+
+        if (isset($body['quantity_available'])) {
+            $updateData['quantity_available'] = max(0, (int) $body['quantity_available']);
+        }
+
         if (isset($body['is_active'])) {
             $updateData['is_active'] = (int) $body['is_active'] ? 1 : 0;
         }
@@ -265,6 +282,37 @@ class OperationsHubController extends BaseController
         $this->logAction('Material Updated', "Updated material #{$id} ({$updated['name']} - {$updated['unit_code']}) in central catalog.");
 
         return $this->successResponse("Material '{$updated['name']}' updated successfully.", $updated);
+    }
+
+    /**
+     * Adjust available quantity of a material item.
+     * PATCH /api/v1/operations/materials/(:num)/adjust-quantity
+     */
+    public function adjustMaterialQuantity(int $id): ResponseInterface
+    {
+        $material = $this->materialModel->find($id);
+        if (!$material) {
+            return $this->notFoundResponse('Material');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $newQuantity = max(0, (int) ($body['new_quantity'] ?? 0));
+        $totalQuantity = isset($body['quantity_total']) 
+            ? max(1, (int) $body['quantity_total']) 
+            : max($newQuantity, (int) ($material['quantity_total'] ?? 50));
+
+        $this->materialModel->update($id, [
+            'quantity_available' => $newQuantity,
+            'quantity_total'     => $totalQuantity,
+            'updated_at'         => date('Y-m-d H:i:s'),
+        ]);
+
+        $updated = $this->materialModel->find($id);
+        $this->logAction('Material Quantity Adjusted', "Adjusted available stock of '{$material['name']}' ({$material['unit_code']}) to {$newQuantity}.");
+
+        return $this->successResponse("Material stock for '{$material['name']}' updated successfully.", [
+            'material' => $updated,
+        ]);
     }
 
     /**

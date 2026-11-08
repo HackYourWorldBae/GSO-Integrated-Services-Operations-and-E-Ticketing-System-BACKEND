@@ -115,16 +115,15 @@ class InventoryController extends BaseController
             return $this->errorResponse('Item name is required.', ['name' => ['Item name is required.']], ResponseInterface::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Category restrictions:
-        // LEAU (unit 2) is for plants only.
-        // FGMU (unit 1) is for tools and equipment (tools, equipment, materials, others).
+        // Supported inventory categories:
+        // Tools, equipment, and others are supported across both units.
+        // LEAU additionally maintains plants; FGMU maintains tools & equipment.
         $rawCategory = sanitize_string($body['category'] ?? '');
-        if ($targetUnitId === 2) {
-            $category = 'plants';
-        } else {
-            $validCategories = ['tools', 'equipment', 'materials', 'others'];
-            $category = in_array($rawCategory, $validCategories, true) ? $rawCategory : 'tools';
-        }
+        $validCategories = ($targetUnitId === 2)
+            ? ['plants', 'tools', 'equipment', 'materials', 'others']
+            : ['tools', 'equipment', 'materials', 'others'];
+        $defaultCat = ($targetUnitId === 2 && !empty($rawCategory) && $rawCategory === 'plants') ? 'plants' : 'tools';
+        $category = in_array($rawCategory, $validCategories, true) ? $rawCategory : $defaultCat;
 
         $quantityTotal = max(1, (int) ($body['quantity_total'] ?? 1));
 
@@ -202,10 +201,11 @@ class InventoryController extends BaseController
                 if ($inputKey === 'category') {
                     $itemUnit = (int) $item['unit_id'];
                     $catVal = sanitize_string($newValue);
-                    if ($itemUnit === 2) {
-                        $catVal = 'plants';
-                    } elseif ($catVal === 'plants') {
-                        $catVal = 'tools';
+                    $validCats = ($itemUnit === 2)
+                        ? ['plants', 'tools', 'equipment', 'materials', 'others']
+                        : ['tools', 'equipment', 'materials', 'others'];
+                    if (!in_array($catVal, $validCats, true)) {
+                        $catVal = ($itemUnit === 2) ? 'plants' : 'tools';
                     }
                     if ($catVal !== $oldValue) {
                         $updateData['category'] = $catVal;
@@ -347,7 +347,11 @@ class InventoryController extends BaseController
 
         if ($targetUnitId === 2) {
             $categories = [
-                ['value' => 'plants', 'label' => 'Plants'],
+                ['value' => 'tools',        'label' => 'Tools'],
+                ['value' => 'equipment',    'label' => 'Equipment'],
+                ['value' => 'plants',       'label' => 'Plants'],
+                ['value' => 'materials',    'label' => 'Materials'],
+                ['value' => 'others',       'label' => 'Others'],
             ];
         } else {
             $categories = [

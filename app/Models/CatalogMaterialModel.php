@@ -26,6 +26,8 @@ class CatalogMaterialModel extends Model
         'name',
         'unit',
         'default_price',
+        'quantity_available',
+        'quantity_total',
         'is_active',
     ];
 
@@ -35,12 +37,14 @@ class CatalogMaterialModel extends Model
     protected $updatedField  = 'updated_at';
 
     protected $validationRules = [
-        'unit_code'     => 'required|in_list[FGMU,LEAU]',
-        'category'      => 'permit_empty|max_length[60]',
-        'name'          => 'required|min_length[2]|max_length[255]',
-        'unit'          => 'required|max_length[50]',
-        'default_price' => 'permit_empty|numeric|greater_than_equal_to[0]',
-        'is_active'     => 'permit_empty|in_list[0,1]',
+        'unit_code'          => 'required|in_list[FGMU,LEAU]',
+        'category'           => 'permit_empty|max_length[60]',
+        'name'               => 'required|min_length[2]|max_length[255]',
+        'unit'               => 'required|max_length[50]',
+        'default_price'      => 'permit_empty|numeric|greater_than_equal_to[0]',
+        'quantity_available' => 'permit_empty|integer|greater_than_equal_to[0]',
+        'quantity_total'     => 'permit_empty|integer|greater_than_equal_to[0]',
+        'is_active'          => 'permit_empty|in_list[0,1]',
     ];
 
     /**
@@ -216,19 +220,27 @@ class CatalogMaterialModel extends Model
                                ->getResultArray();
 
             if (!empty($results)) {
-                return $results;
+                return array_map(function ($item) {
+                    $item['quantity_available'] = isset($item['quantity_available']) ? (int) $item['quantity_available'] : 50;
+                    $item['quantity_total']     = isset($item['quantity_total']) ? (int) $item['quantity_total'] : max(50, $item['quantity_available']);
+                    return $item;
+                }, $results);
             }
         } catch (\Throwable $e) {
             // DB fallback
         }
 
         // Return baseline defaults if table is empty or inaccessible
-        return array_values(array_filter(self::DEFAULT_CATALOG, function ($item) use ($normalizedUnit) {
+        return array_values(array_map(function ($item) {
+            $item['quantity_available'] = $item['quantity_available'] ?? 50;
+            $item['quantity_total']     = $item['quantity_total'] ?? 50;
+            return $item;
+        }, array_filter(self::DEFAULT_CATALOG, function ($item) use ($normalizedUnit) {
             if ($normalizedUnit === 'ALL') {
                 return true;
             }
             return $item['unit_code'] === $normalizedUnit;
-        }));
+        })));
     }
 
     /**
@@ -245,12 +257,14 @@ class CatalogMaterialModel extends Model
             $seeded = 0;
             foreach (self::DEFAULT_CATALOG as $item) {
                 $this->insert([
-                    'unit_code'     => $item['unit_code'],
-                    'category'      => $item['category'],
-                    'name'          => $item['name'],
-                    'unit'          => $item['unit'],
-                    'default_price' => $item['default_price'],
-                    'is_active'     => 1,
+                    'unit_code'          => $item['unit_code'],
+                    'category'           => $item['category'],
+                    'name'               => $item['name'],
+                    'unit'               => $item['unit'],
+                    'default_price'      => $item['default_price'],
+                    'quantity_available' => $item['quantity_available'] ?? 50,
+                    'quantity_total'     => $item['quantity_total'] ?? 50,
+                    'is_active'          => 1,
                 ]);
                 $seeded++;
             }

@@ -691,6 +691,40 @@ BEGIN
         END IF;
     END IF;
 
+    -- ------------------------------------------------------------------------
+    -- 17. CATALOG MATERIALS INVENTORY UPGRADES (Available & Total Stock Tracking)
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'catalog_materials') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'catalog_materials' AND column_name = 'quantity_available') THEN
+            ALTER TABLE `catalog_materials` ADD COLUMN `quantity_available` INT(11) UNSIGNED NOT NULL DEFAULT 50 AFTER `default_price`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'catalog_materials' AND column_name = 'quantity_total') THEN
+            ALTER TABLE `catalog_materials` ADD COLUMN `quantity_total` INT(11) UNSIGNED NOT NULL DEFAULT 50 AFTER `quantity_available`;
+        END IF;
+
+        -- Ensure existing catalog materials without explicit stock values default to positive stock
+        UPDATE `catalog_materials`
+        SET `quantity_available` = 50, `quantity_total` = 50
+        WHERE `quantity_available` IS NULL OR (`quantity_available` = 0 AND `quantity_total` = 0);
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'catalog_materials' AND index_name = 'idx_catalog_quantities') THEN
+            ALTER TABLE `catalog_materials` ADD INDEX `idx_catalog_quantities` (`quantity_available`, `quantity_total`);
+        END IF;
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- 18. INVENTORY ITEMS UPGRADES (Cross-Unit Tools & Equipment Harmonization)
+    -- ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_db AND table_name = 'inventory_items') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'inventory_items' AND column_name = 'unit_id') THEN
+            ALTER TABLE `inventory_items` ADD COLUMN `unit_id` INT(11) UNSIGNED NOT NULL DEFAULT 2 AFTER `id`;
+        END IF;
+
+        -- Harmonize category ENUM to support tools, equipment, plants, materials, and others
+        ALTER TABLE `inventory_items` MODIFY COLUMN `category` ENUM('tools','equipment','plants','materials','others') NOT NULL DEFAULT 'tools';
+    END IF;
+
 END $$
 
 DELIMITER ;
@@ -1404,14 +1438,132 @@ CREATE TABLE IF NOT EXISTS `catalog_materials` (
   `name` varchar(255) NOT NULL,
   `unit` varchar(50) NOT NULL DEFAULT 'pcs',
   `default_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `quantity_available` int(11) UNSIGNED NOT NULL DEFAULT 50,
+  `quantity_total` int(11) UNSIGNED NOT NULL DEFAULT 50,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_catalog_unit_active` (`unit_code`, `is_active`),
   KEY `idx_catalog_category` (`category`),
-  KEY `idx_catalog_name` (`name`)
+  KEY `idx_catalog_name` (`name`),
+  KEY `idx_catalog_quantities` (`quantity_available`, `quantity_total`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Baseline catalog materials seed with initial available quantities
+INSERT IGNORE INTO `catalog_materials` (`id`, `unit_code`, `category`, `name`, `unit`, `default_price`, `quantity_available`, `quantity_total`, `is_active`) VALUES
+(1, 'FGMU', 'Plumbing', 'PVC Pipe 1/2 inch', 'lengths', 120.00, 50, 50, 1),
+(2, 'FGMU', 'Plumbing', 'PVC Pipe 3/4 inch', 'lengths', 165.00, 50, 50, 1),
+(3, 'FGMU', 'Plumbing', 'PVC Pipe 1 inch', 'lengths', 220.00, 50, 50, 1),
+(4, 'FGMU', 'Plumbing', 'PVC Elbow 1/2 inch', 'pcs', 15.00, 50, 50, 1),
+(5, 'FGMU', 'Plumbing', 'PVC Elbow 3/4 inch', 'pcs', 20.00, 50, 50, 1),
+(6, 'FGMU', 'Plumbing', 'PVC Tee 1/2 inch', 'pcs', 18.00, 50, 50, 1),
+(7, 'FGMU', 'Plumbing', 'PVC Coupling 1/2 inch', 'pcs', 12.00, 50, 50, 1),
+(8, 'FGMU', 'Plumbing', 'PVC Union 1/2 inch', 'pcs', 45.00, 50, 50, 1),
+(9, 'FGMU', 'Plumbing', 'PVC Cement (Solvent)', 'cans', 85.00, 50, 50, 1),
+(10, 'FGMU', 'Plumbing', 'Teflon Tape', 'rolls', 25.00, 50, 50, 1),
+(11, 'FGMU', 'Plumbing', 'Gate Valve 1/2 inch', 'pcs', 280.00, 50, 50, 1),
+(12, 'FGMU', 'Plumbing', 'Ball Valve 1/2 inch', 'pcs', 180.00, 50, 50, 1),
+(13, 'FGMU', 'Plumbing', 'Faucet (Lavatory)', 'pcs', 350.00, 50, 50, 1),
+(14, 'FGMU', 'Plumbing', 'Faucet (Kitchen Hose Bibb)', 'pcs', 220.00, 50, 50, 1),
+(15, 'FGMU', 'Plumbing', 'Angle Valve 1/2 inch', 'pcs', 140.00, 50, 50, 1),
+(16, 'FGMU', 'Plumbing', 'Flexible Hose 1/2 inch', 'pcs', 130.00, 50, 50, 1),
+(17, 'FGMU', 'Plumbing', 'P-Trap (Lavatory)', 'pcs', 190.00, 50, 50, 1),
+(18, 'FGMU', 'Plumbing', 'Floor Drain 4x4 Stainless', 'pcs', 160.00, 50, 50, 1),
+(19, 'FGMU', 'Electrical', 'THHN Wire #12 (3.5mm²)', 'meters', 38.00, 50, 50, 1),
+(20, 'FGMU', 'Electrical', 'THHN Wire #14 (2.0mm²)', 'meters', 28.00, 50, 50, 1),
+(21, 'FGMU', 'Electrical', 'THHN Wire #10 (5.5mm²)', 'meters', 55.00, 50, 50, 1),
+(22, 'FGMU', 'Electrical', 'PVC Conduit Pipe 1/2 inch', 'lengths', 95.00, 50, 50, 1),
+(23, 'FGMU', 'Electrical', 'Junction Box 4x4', 'pcs', 35.00, 50, 50, 1),
+(24, 'FGMU', 'Electrical', 'Utility Box 2x4', 'pcs', 25.00, 50, 50, 1),
+(25, 'FGMU', 'Electrical', 'Switch (Single Pole)', 'pcs', 95.00, 50, 50, 1),
+(26, 'FGMU', 'Electrical', 'Switch (3-Way)', 'pcs', 135.00, 50, 50, 1),
+(27, 'FGMU', 'Electrical', 'Outlet (Duplex Grounded)', 'pcs', 160.00, 50, 50, 1),
+(28, 'FGMU', 'Electrical', 'Circuit Breaker 20A Plug-in', 'pcs', 240.00, 50, 50, 1),
+(29, 'FGMU', 'Electrical', 'Circuit Breaker 30A Plug-in', 'pcs', 260.00, 50, 50, 1),
+(30, 'FGMU', 'Electrical', 'Electrical Tape (Big)', 'rolls', 45.00, 50, 50, 1),
+(31, 'FGMU', 'Electrical', 'LED Bulb 9W Daylight', 'pcs', 110.00, 50, 50, 1),
+(32, 'FGMU', 'Electrical', 'LED Bulb 18W Daylight', 'pcs', 180.00, 50, 50, 1),
+(33, 'FGMU', 'Electrical', 'LED Tube 18W (T8)', 'pcs', 220.00, 50, 50, 1),
+(34, 'FGMU', 'Electrical', 'LED Panel Light 18W Surface', 'pcs', 450.00, 50, 50, 1),
+(35, 'FGMU', 'Carpentry', 'Marine Plywood 1/4 inch', 'sheets', 420.00, 50, 50, 1),
+(36, 'FGMU', 'Carpentry', 'Marine Plywood 1/2 inch', 'sheets', 780.00, 50, 50, 1),
+(37, 'FGMU', 'Carpentry', 'Marine Plywood 3/4 inch', 'sheets', 1250.00, 50, 50, 1),
+(38, 'FGMU', 'Carpentry', 'Gypsum Board 1/2 inch', 'sheets', 390.00, 50, 50, 1),
+(39, 'FGMU', 'Carpentry', 'Metal Stud 2x3', 'lengths', 160.00, 50, 50, 1),
+(40, 'FGMU', 'Carpentry', 'Black Screw 1 inch', 'boxes', 180.00, 50, 50, 1),
+(41, 'FGMU', 'Carpentry', 'Concrete Nail 2 inch', 'kg', 90.00, 50, 50, 1),
+(42, 'FGMU', 'Carpentry', 'Common Nail 2 inch', 'kg', 75.00, 50, 50, 1),
+(43, 'FGMU', 'Carpentry', 'Common Nail 3 inch', 'kg', 75.00, 50, 50, 1),
+(44, 'FGMU', 'Carpentry', 'Door Knob (Heavy Duty Lockset)', 'pcs', 550.00, 50, 50, 1),
+(45, 'FGMU', 'Carpentry', 'Door Hinge 3.5x3.5 Stainless', 'pairs', 140.00, 50, 50, 1),
+(46, 'FGMU', 'Carpentry', 'Door Closer Pneumatic', 'pcs', 850.00, 50, 50, 1),
+(47, 'FGMU', 'Carpentry', 'Padlock Heavy Duty 50mm', 'pcs', 280.00, 50, 50, 1),
+(48, 'FGMU', 'Masonry', 'Portland Cement (Type 1)', 'bags', 250.00, 50, 50, 1),
+(49, 'FGMU', 'Masonry', 'Washed Sand', 'cu.m.', 850.00, 50, 50, 1),
+(50, 'FGMU', 'Masonry', 'Crushed Gravel 3/4', 'cu.m.', 950.00, 50, 50, 1),
+(51, 'FGMU', 'Masonry', 'CHB 4 inch', 'pcs', 18.00, 50, 50, 1),
+(52, 'FGMU', 'Masonry', 'Deformed Rebar 10mm', 'lengths', 195.00, 50, 50, 1),
+(53, 'FGMU', 'Masonry', 'Tie Wire #16', 'kg', 85.00, 50, 50, 1),
+(54, 'FGMU', 'Masonry', 'Tile Adhesive (25kg)', 'bags', 290.00, 50, 50, 1),
+(55, 'FGMU', 'Masonry', 'Tile Grout (2kg)', 'bags', 95.00, 50, 50, 1),
+(56, 'FGMU', 'Painting', 'Flat Latex Paint (White)', 'gallons', 620.00, 50, 50, 1),
+(57, 'FGMU', 'Painting', 'Semi-Gloss Latex Paint (White)', 'gallons', 720.00, 50, 50, 1),
+(58, 'FGMU', 'Painting', 'Quick Drying Enamel (White)', 'gallons', 780.00, 50, 50, 1),
+(59, 'FGMU', 'Painting', 'Epoxy Primer with Catalyst', 'gallons', 850.00, 50, 50, 1),
+(60, 'FGMU', 'Painting', 'Paint Thinner', 'gallons', 320.00, 50, 50, 1),
+(61, 'FGMU', 'Painting', 'Paint Roller 7 inch with Handle', 'pcs', 95.00, 50, 50, 1),
+(62, 'FGMU', 'Painting', 'Paint Brush 2 inch', 'pcs', 45.00, 50, 50, 1),
+(63, 'FGMU', 'Painting', 'Paint Brush 3 inch', 'pcs', 65.00, 50, 50, 1),
+(64, 'FGMU', 'Painting', 'Sandpaper #120', 'pcs', 18.00, 50, 50, 1),
+(65, 'FGMU', 'Painting', 'Polyester Putty with Hardener', 'kg', 195.00, 50, 50, 1),
+(66, 'FGMU', 'Aircon', 'Refrigerant R-410A (11.3kg)', 'kg', 480.00, 50, 50, 1),
+(67, 'FGMU', 'Aircon', 'Refrigerant R-32', 'kg', 520.00, 50, 50, 1),
+(68, 'FGMU', 'Aircon', 'Capacitor Dual 50+5 uF', 'pcs', 380.00, 50, 50, 1),
+(69, 'FGMU', 'Aircon', 'Aircon Insulation Tape (Aerotape)', 'rolls', 160.00, 50, 50, 1),
+(70, 'FGMU', 'Welding', 'Welding Rod 6013 (Special)', 'kg', 140.00, 50, 50, 1),
+(71, 'FGMU', 'Welding', 'Cutting Disc 4 inch', 'pcs', 35.00, 50, 50, 1),
+(72, 'FGMU', 'Welding', 'Grinding Disc 4 inch', 'pcs', 45.00, 50, 50, 1),
+(73, 'FGMU', 'Welding', 'Angle Bar 1/4 x 1-1/2 x 1-1/2', 'lengths', 620.00, 50, 50, 1),
+(74, 'FGMU', 'General', 'Silicone Sealant (Clear)', 'tubes', 165.00, 50, 50, 1),
+(75, 'FGMU', 'General', 'Vulca Seal Sealant', 'liters', 240.00, 50, 50, 1),
+(76, 'FGMU', 'General', 'Contact Cement (Rugby)', 'cans', 180.00, 50, 50, 1),
+(77, 'FGMU', 'General', 'Tox & Screw #8 Set', 'boxes', 140.00, 50, 50, 1),
+(78, 'LEAU', 'Grounds Maintenance', 'Nylon Trimmer Line 3.0mm (Grass Cutter)', 'rolls', 350.00, 50, 50, 1),
+(79, 'LEAU', 'Grounds Maintenance', 'Grass Cutter Blade (Metal 2-Tooth)', 'pcs', 220.00, 50, 50, 1),
+(80, 'LEAU', 'Grounds Maintenance', '2T Engine Oil for Brush Cutters', 'liters', 185.00, 50, 50, 1),
+(81, 'LEAU', 'Grounds Maintenance', 'Regular Unleaded Gasoline (Equipment Fuel)', 'liters', 65.00, 50, 50, 1),
+(82, 'LEAU', 'Grounds Maintenance', 'Heavy-Duty Garden Waste Sacks', 'pcs', 25.00, 50, 50, 1),
+(83, 'LEAU', 'Grounds Maintenance', 'Rake Bamboo / Metal Teeth Replacement', 'pcs', 120.00, 50, 50, 1),
+(84, 'LEAU', 'Seedlings & Plants', 'Carabao Grass Sod (Square Foot)', 'sq.ft.', 18.00, 50, 50, 1),
+(85, 'LEAU', 'Seedlings & Plants', 'Bermuda Grass Turf Sod', 'sq.ft.', 25.00, 50, 50, 1),
+(86, 'LEAU', 'Seedlings & Plants', 'Bougainvillea Potted Shrub', 'pcs', 150.00, 50, 50, 1),
+(87, 'LEAU', 'Seedlings & Plants', 'San Francisco Plant (Codiaeum variegatum)', 'pcs', 120.00, 50, 50, 1),
+(88, 'LEAU', 'Seedlings & Plants', 'Ficus Hedge Seedlings (Green Island)', 'pcs', 45.00, 50, 50, 1),
+(89, 'LEAU', 'Seedlings & Plants', 'Palmera Palm Seedling (Areca)', 'pcs', 280.00, 50, 50, 1),
+(90, 'LEAU', 'Seedlings & Plants', 'Yellow Bell Shrub Potted', 'pcs', 95.00, 50, 50, 1),
+(91, 'LEAU', 'Seedlings & Plants', 'Ornamental Bamboo Cutting', 'pcs', 75.00, 50, 50, 1),
+(92, 'LEAU', 'Soil & Fertilizers', 'Organic Garden Soil / Topsoil', 'bags', 85.00, 50, 50, 1),
+(93, 'LEAU', 'Soil & Fertilizers', 'Vermicast Organic Fertilizer (50kg)', 'bags', 320.00, 50, 50, 1),
+(94, 'LEAU', 'Soil & Fertilizers', 'Complete Fertilizer 14-14-14', 'kg', 60.00, 50, 50, 1),
+(95, 'LEAU', 'Soil & Fertilizers', 'Urea Fertilizer 46-0-0', 'kg', 55.00, 50, 50, 1),
+(96, 'LEAU', 'Soil & Fertilizers', 'Carbonized Rice Hull (CRH)', 'bags', 110.00, 50, 50, 1),
+(97, 'LEAU', 'Soil & Fertilizers', 'Coco Coir Dust / Fiber', 'bags', 95.00, 50, 50, 1),
+(98, 'LEAU', 'Soil & Fertilizers', 'Black Seedling Nursery Bags 4x6', 'packs', 80.00, 50, 50, 1),
+(99, 'LEAU', 'Tree Care', 'Chainsaw Bar & Chain Oil', 'liters', 220.00, 50, 50, 1),
+(100, 'LEAU', 'Tree Care', 'Tree Wound Pruning Sealant / Tar', 'cans', 290.00, 50, 50, 1),
+(101, 'LEAU', 'Tree Care', 'Heavy-Duty Tree Climbing / Pulling Rope (16mm)', 'meters', 65.00, 50, 50, 1),
+(102, 'LEAU', 'Tree Care', 'Heavy Duty Burlap Wrap', 'rolls', 380.00, 50, 50, 1),
+(103, 'LEAU', 'Tree Care', 'Tree Stake Bamboo Posts 2-meter', 'pcs', 45.00, 50, 50, 1),
+(104, 'LEAU', 'Irrigation', 'Garden Hose 3/4 inch Heavy-Duty (50m)', 'rolls', 1250.00, 50, 50, 1),
+(105, 'LEAU', 'Irrigation', 'Brass Adjustable Spray Nozzle', 'pcs', 180.00, 50, 50, 1),
+(106, 'LEAU', 'Irrigation', 'Impact Lawn Sprinkler Head', 'pcs', 250.00, 50, 50, 1),
+(107, 'LEAU', 'Irrigation', 'Stainless Hose Clamp 3/4 inch', 'pcs', 25.00, 50, 50, 1),
+(108, 'LEAU', 'Event Decoration', 'Floral Foam Brick (Oasis Wet)', 'boxes', 380.00, 50, 50, 1),
+(109, 'LEAU', 'Event Decoration', 'Satin Table & Stage Skirting Fabric', 'meters', 85.00, 50, 50, 1),
+(110, 'LEAU', 'Event Decoration', 'Artificial Palm Garland / Greenery Drapes', 'pcs', 210.00, 50, 50, 1),
+(111, 'LEAU', 'Event Decoration', 'Pot Wrap Decorative Foil (Gold/Green)', 'rolls', 140.00, 50, 50, 1),
+(112, 'LEAU', 'Event Decoration', 'Cable Ties Heavy Duty 12-inch', 'packs', 110.00, 50, 50, 1);
 
 -- ----------------------------------------------------------------------------
 -- Table structure for table `special_holidays` (Duration & SLA Counting)

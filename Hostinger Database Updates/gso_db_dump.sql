@@ -206,6 +206,35 @@ BEGIN
             ALTER TABLE `tickets` ADD COLUMN `approval_delayed_by` VARCHAR(36) DEFAULT NULL AFTER `approval_delayed_at`;
         END IF;
 
+        -- Ocular Required Materials & Requestor Confirmation fields
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_status') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_status` VARCHAR(30) NOT NULL DEFAULT 'none' AFTER `approval_delayed_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_notes') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_notes` TEXT DEFAULT NULL AFTER `required_materials_status`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_requested_at') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_requested_at` DATETIME DEFAULT NULL AFTER `required_materials_notes`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_requested_by') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_requested_by` VARCHAR(36) DEFAULT NULL AFTER `required_materials_requested_at`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_confirmed_at') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_confirmed_at` DATETIME DEFAULT NULL AFTER `required_materials_requested_by`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'required_materials_confirmed_by') THEN
+            ALTER TABLE `tickets` ADD COLUMN `required_materials_confirmed_by` VARCHAR(36) DEFAULT NULL AFTER `required_materials_confirmed_at`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'requestor_materials_note') THEN
+            ALTER TABLE `tickets` ADD COLUMN `requestor_materials_note` TEXT DEFAULT NULL AFTER `required_materials_confirmed_by`;
+        END IF;
+
         -- Director Escalation fields (Unit Head direct approval vs Director escalation)
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'is_escalated_to_director') THEN
             ALTER TABLE `tickets` ADD COLUMN `is_escalated_to_director` TINYINT(1) NOT NULL DEFAULT 0 AFTER `approval_delayed_by`;
@@ -970,6 +999,13 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `approval_delay_reason` text DEFAULT NULL,
   `approval_delayed_at` datetime DEFAULT NULL,
   `approval_delayed_by` varchar(36) DEFAULT NULL,
+  `required_materials_status` varchar(30) NOT NULL DEFAULT 'none',
+  `required_materials_notes` text DEFAULT NULL,
+  `required_materials_requested_at` datetime DEFAULT NULL,
+  `required_materials_requested_by` varchar(36) DEFAULT NULL,
+  `required_materials_confirmed_at` datetime DEFAULT NULL,
+  `required_materials_confirmed_by` varchar(36) DEFAULT NULL,
+  `requestor_materials_note` text DEFAULT NULL,
   `is_escalated_to_director` tinyint(1) NOT NULL DEFAULT 0,
   `escalation_reason` text DEFAULT NULL,
   `escalated_at` datetime DEFAULT NULL,
@@ -1229,6 +1265,28 @@ CREATE TABLE IF NOT EXISTS `ticket_materials` (
   KEY `idx_materials_assignment` (`assignment_id`),
   CONSTRAINT `fk_materials_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_materials_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `ticket_assignments` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `ticket_required_materials`
+CREATE TABLE IF NOT EXISTS `ticket_required_materials` (
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ticket_id` varchar(60) NOT NULL,
+  `catalog_material_id` int(11) UNSIGNED DEFAULT NULL,
+  `material_name` varchar(255) NOT NULL,
+  `quantity` decimal(10,2) NOT NULL DEFAULT 1.00,
+  `unit_measurement` varchar(50) NOT NULL DEFAULT 'pcs',
+  `inventory_status` varchar(30) NOT NULL DEFAULT 'empty',
+  `gso_available_qty` int(11) DEFAULT NULL,
+  `remarks` varchar(500) DEFAULT NULL,
+  `is_requestor_provided` tinyint(1) NOT NULL DEFAULT 0,
+  `provided_confirmed_at` datetime DEFAULT NULL,
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_trm_ticket` (`ticket_id`),
+  KEY `idx_trm_catalog` (`catalog_material_id`),
+  CONSTRAINT `fk_trm_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------

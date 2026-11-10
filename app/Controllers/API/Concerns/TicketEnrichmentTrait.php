@@ -40,8 +40,9 @@ trait TicketEnrichmentTrait
         $assignmentsData = $this->buildAssignmentMap($db, $ticketIds);
         $assignments     = $assignmentsData['single'] ?? [];
         $assignmentsList = $assignmentsData['all'] ?? [];
-        $feedbacks       = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
-        $materialsMap    = $this->buildMaterialsMap($db, $ticketIds);
+        $feedbacks             = $this->buildDetailMap($db, 'ticket_feedbacks',         'ticket_id', $ticketIds);
+        $materialsMap          = $this->buildMaterialsMap($db, $ticketIds);
+        $requiredMaterialsMap  = $this->buildRequiredMaterialsMap($db, $ticketIds);
         // Borrowing requests (one row per ticket via ticket_id UQ) so ticket
         // lists + full-info modals can show item / purpose / schedule.
         $borrowingMap    = $this->buildDetailMap($db, 'borrowing_requests',     'ticket_id', $ticketIds);
@@ -206,6 +207,20 @@ trait TicketEnrichmentTrait
                 ? $ticket['materials_stage']
                 : ($ticket['is_labor_only'] ? 'assessment' : (!empty($ticket['materials']) ? ($ticket['materials'][0]['stage'] ?? 'assessment') : 'none'));
             $ticket['materials_logged']    = !empty($ticket['materials_logged']) || !empty($ticket['materials']) || $ticket['is_labor_only'];
+
+            // Ocular Required Materials (pre-approval materials needed when GSO stock is short/empty)
+            $reqMaterials = $requiredMaterialsMap[$id] ?? [];
+            $ticket['required_materials']              = $reqMaterials;
+            $rawReqStatus                              = $ticket['required_materials_status'] ?? 'none';
+            $ticket['required_materials_status']       = !empty($rawReqStatus) && $rawReqStatus !== 'none'
+                ? $rawReqStatus
+                : (!empty($reqMaterials) ? 'awaiting_requestor' : 'none');
+            $ticket['required_materials_notes']        = $ticket['required_materials_notes'] ?? null;
+            $ticket['required_materials_requested_at'] = $ticket['required_materials_requested_at'] ?? null;
+            $ticket['required_materials_requested_by'] = $ticket['required_materials_requested_by'] ?? null;
+            $ticket['required_materials_confirmed_at'] = $ticket['required_materials_confirmed_at'] ?? null;
+            $ticket['required_materials_confirmed_by'] = $ticket['required_materials_confirmed_by'] ?? null;
+            $ticket['requestor_materials_note']        = $ticket['requestor_materials_note'] ?? null;
 
             // Director Escalation tracking
             $ticket['is_escalated_to_director'] = !empty($ticket['is_escalated_to_director']) ? 1 : 0;
@@ -403,6 +418,37 @@ trait TicketEnrichmentTrait
             $row['quantity']    = (float) ($row['quantity'] ?? 1);
             $row['unit_price']  = (float) ($row['unit_price'] ?? 0);
             $row['total_price'] = (float) ($row['total_price'] ?? ($row['quantity'] * $row['unit_price']));
+            $map[$tId][] = $row;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Query ticket_required_materials and return a map keyed by ticket_id.
+     */
+    private function buildRequiredMaterialsMap(\CodeIgniter\Database\ConnectionInterface $db, array $ticketIds): array
+    {
+        if (empty($ticketIds) || !$db->tableExists('ticket_required_materials')) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+        $rows = $db->query("
+            SELECT trm.*
+            FROM ticket_required_materials trm
+            WHERE trm.ticket_id IN ({$placeholders})
+            ORDER BY trm.id ASC
+        ", $ticketIds)->getResultArray();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $tId = $row['ticket_id'];
+            $row['id']                    = (int) ($row['id'] ?? 0);
+            $row['catalog_material_id']   = isset($row['catalog_material_id']) && $row['catalog_material_id'] !== null ? (int) $row['catalog_material_id'] : null;
+            $row['quantity']              = (float) ($row['quantity'] ?? 1);
+            $row['gso_available_qty']     = isset($row['gso_available_qty']) && $row['gso_available_qty'] !== null ? (int) $row['gso_available_qty'] : null;
+            $row['is_requestor_provided'] = !empty($row['is_requestor_provided']) ? 1 : 0;
             $map[$tId][] = $row;
         }
 

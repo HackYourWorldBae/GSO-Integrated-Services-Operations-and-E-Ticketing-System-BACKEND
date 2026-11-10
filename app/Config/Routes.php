@@ -85,6 +85,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->get('tickets/my-requests',       'TicketController::myRequests');
         $routes->get('tickets/completed',         'TicketController::completedRequests');
         $routes->patch('tickets/(:segment)/cancel','TicketController::cancel/$1');
+        $routes->patch('tickets/(:segment)/confirm-materials','TicketActionController::confirmRequestorMaterials/$1');
         $routes->get('tickets/(:segment)',        'TicketQueueController::show/$1');
         $routes->get('tickets/(:segment)/logs',   'TicketQueueController::logs/$1');
 
@@ -114,6 +115,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/decline',        'TicketActionController::decline/$1',               ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/complete',       'TicketActionController::complete/$1',              ['filter' => 'role:admin,worker,director']);
         $routes->post('tickets/(:segment)/materials',       'TicketActionController::saveMaterials/$1',         ['filter' => 'role:admin,worker,director']);
+        $routes->match(['post', 'put'], 'tickets/(:segment)/required-materials', 'TicketActionController::saveRequiredMaterials/$1', ['filter' => 'role:admin,staff,director']);
         $routes->patch('tickets/(:segment)/extend',         'TicketActionController::extendTicket/$1',          ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/reschedule',     'TicketActionController::rescheduleTicket/$1',      ['filter' => 'role:admin,director']);
 

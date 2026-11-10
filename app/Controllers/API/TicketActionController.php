@@ -5,6 +5,7 @@ namespace App\Controllers\API;
 use App\Controllers\BaseController;
 use App\Models\TicketModel;
 use App\Models\TicketLogModel;
+use App\Models\TicketRequiredMaterialModel;
 use App\Models\NotificationModel;
 use App\Models\UserModel;
 use App\Models\BorrowingRequestModel;
@@ -20,6 +21,8 @@ use Config\Database;
  * - PATCH /api/v1/tickets/{id}/approve
  * - PATCH /api/v1/tickets/{id}/delay-approval
  * - PATCH /api/v1/tickets/{id}/resume-approval
+ * - POST|PUT /api/v1/tickets/{id}/required-materials
+ * - PATCH /api/v1/tickets/{id}/confirm-materials
  * - PATCH /api/v1/tickets/{id}/decline
  * - PATCH /api/v1/tickets/{id}/complete
  * - POST  /api/v1/tickets/{id}/materials
@@ -964,12 +967,15 @@ class TicketActionController extends BaseController
             return $this->errorResponse('This ticket is not currently in an approval delayed state.');
         }
 
-        $now    = date('Y-m-d H:i:s');
-        $userId = $this->currentUserId();
+        $now         = date('Y-m-d H:i:s');
+        $userId      = $this->currentUserId();
+        $statusLabel = !empty($ticket['is_escalated_to_director'])
+            ? 'Pending Director Approval'
+            : 'Pending Approval';
 
         $this->ticketModel->update($ticketId, [
             'is_approval_delayed'   => 0,
-            'status_label'          => 'Pending Approval',
+            'status_label'          => $statusLabel,
             'updated_at'            => $now,
         ]);
 
@@ -997,7 +1003,462 @@ class TicketActionController extends BaseController
         return $this->successResponse('Ticket returned to general pending approval queue.', [
             'ticket_id'           => $ticketId,
             'is_approval_delayed' => 0,
-            'status_label'        => 'Pending Approval'
+            'status_label'        => $statusLabel,
+        ]);
+    }
+
+    /**
+     * Save or update required materials needed after an ocular assessment/inspection
+     * when GSO consumables inventory is short, empty, or unavailable.
+     *
+     * POST|PUT /tickets/:id/required-materials
+     */
+    public function saveRequiredMaterials(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        if ($forbidden = $this->assertUnitAccess((int) $ticket['unit_id'])) {
+            return $forbidden;
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Required materials can only be updated while a ticket is pending approval. Current status: {$ticket['status']}.");
+        }
+
+        if (empty($ticket['is_approval_delayed'])) {
+            return $this->errorResponse('Required materials for ocular assessment can only be added for tickets in the Approval Delays queue.');
+        }
+
+        $delayReason = strtolower((string) ($ticket['approval_delay_reason'] ?? ''));
+        if (!str_contains($delayReason, 'ocular') && !str_contains($delayReason, 'inspection')) {
+            return $this->errorResponse(
+                'Materials checklist is intended for tickets delayed due to ocular assessment or inspection.',
+                [],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $db = Database::connect();
+        if (!$db->tableExists('ticket_required_materials')) {
+            return $this->errorResponse(
+                'Database schema requires migration (ticket_required_materials table not found).',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+
+        $body         = $this->request->getJSON(true) ?? [];
+        $rawMaterials = $body['materials'] ?? null;
+        $notes        = trim(sanitize_string($body['notes'] ?? $body['required_materials_notes'] ?? ''));
+
+        if (!is_array($rawMaterials) || empty($rawMaterials)) {
+            return $this->errorResponse(
+                'Please add at least one needed material before saving.',
+                ['materials' => ['At least one material item is required.']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $allowedStatuses = ['empty', 'short', 'not_in_catalog', 'unavailable'];
+        $catalogLookup   = [];
+        $sanitizedRows   = [];
+
+        if ($db->tableExists('catalog_materials')) {
+            $catalogIds = array_values(array_filter(array_map(
+                static fn($r) => isset($r['catalog_material_id']) && is_numeric($r['catalog_material_id']) && (int) $r['catalog_material_id'] > 0
+                    ? (int) $r['catalog_material_id']
+                    : null,
+                $rawMaterials
+            )));
+            if (!empty($catalogIds)) {
+                $catalogRows = $db->table('catalog_materials')
+                    ->whereIn('id', array_unique($catalogIds))
+                    ->get()
+                    ->getResultArray();
+                foreach ($catalogRows as $cRow) {
+                    $catalogLookup[(int) $cRow['id']] = $cRow;
+                }
+            }
+        }
+
+        foreach ($rawMaterials as $idx => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $name = trim(sanitize_string($item['material_name'] ?? $item['name'] ?? ''));
+            if ($name === '') {
+                return $this->errorResponse(
+                    'Each material item must include a material name.',
+                    ['materials' => ["Item #" . ($idx + 1) . ' is missing a material name.']],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
+            $qty = (float) ($item['quantity'] ?? 0);
+            if ($qty <= 0) {
+                return $this->errorResponse(
+                    'Each material item must have a quantity greater than 0.',
+                    ['materials' => ["Quantity for '{$name}' must be greater than 0."]],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+
+            $unitMeasurement = trim(sanitize_string($item['unit_measurement'] ?? $item['unit'] ?? 'pcs'));
+            if ($unitMeasurement === '') {
+                $unitMeasurement = 'pcs';
+            }
+            $unitMeasurement = mb_substr($unitMeasurement, 0, 50);
+
+            $invStatus = strtolower(trim((string) ($item['inventory_status'] ?? 'empty')));
+            if (!in_array($invStatus, $allowedStatuses, true)) {
+                $invStatus = 'empty';
+            }
+
+            $catalogId = (isset($item['catalog_material_id']) && is_numeric($item['catalog_material_id']) && (int) $item['catalog_material_id'] > 0)
+                ? (int) $item['catalog_material_id']
+                : null;
+
+            $availableQty = null;
+            if ($catalogId !== null && isset($catalogLookup[$catalogId])) {
+                $availableQty = (int) ($catalogLookup[$catalogId]['quantity_available'] ?? 0);
+                if (!isset($item['inventory_status'])) {
+                    $invStatus = $availableQty <= 0 ? 'empty' : 'short';
+                }
+            } elseif (isset($item['gso_available_qty']) && is_numeric($item['gso_available_qty'])) {
+                $availableQty = max(0, (int) $item['gso_available_qty']);
+            }
+
+            $remarks = trim(sanitize_string($item['remarks'] ?? ''));
+            $remarks = $remarks !== '' ? mb_substr($remarks, 0, 500) : null;
+
+            $sanitizedRows[] = [
+                'ticket_id'           => $ticketId,
+                'catalog_material_id' => $catalogId,
+                'material_name'       => mb_substr($name, 0, 255),
+                'quantity'            => round($qty, 2),
+                'unit_measurement'    => $unitMeasurement,
+                'inventory_status'    => $invStatus,
+                'gso_available_qty'   => $availableQty,
+                'remarks'             => $remarks,
+            ];
+        }
+
+        if (empty($sanitizedRows)) {
+            return $this->errorResponse(
+                'Please add at least one valid material before saving.',
+                ['materials' => ['No valid material items provided.']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $now    = date('Y-m-d H:i:s');
+        $userId = $this->currentUserId();
+
+        $db->transStart();
+
+        $db->table('ticket_required_materials')->where('ticket_id', $ticketId)->delete();
+        $reqMaterialModel = new TicketRequiredMaterialModel();
+        $savedMaterials   = [];
+
+        foreach ($sanitizedRows as $row) {
+            $insertPayload = array_merge($row, [
+                'is_requestor_provided' => 0,
+                'provided_confirmed_at' => null,
+                'created_by'            => $userId,
+                'created_at'            => $now,
+                'updated_at'            => $now,
+            ]);
+            $insertedId = $reqMaterialModel->insert($insertPayload, true);
+            $savedMaterials[] = array_merge(['id' => (int) $insertedId], $insertPayload);
+        }
+
+        $ticketUpdate = ['updated_at' => $now];
+        if ($db->fieldExists('required_materials_status', 'tickets')) {
+            $ticketUpdate['required_materials_status'] = 'awaiting_requestor';
+        }
+        if ($db->fieldExists('required_materials_notes', 'tickets')) {
+            $ticketUpdate['required_materials_notes'] = ($notes !== '' ? $notes : null);
+        }
+        if ($db->fieldExists('required_materials_requested_at', 'tickets')) {
+            $ticketUpdate['required_materials_requested_at'] = $now;
+        }
+        if ($db->fieldExists('required_materials_requested_by', 'tickets')) {
+            $ticketUpdate['required_materials_requested_by'] = $userId;
+        }
+        if ($db->fieldExists('required_materials_confirmed_at', 'tickets')) {
+            $ticketUpdate['required_materials_confirmed_at'] = null;
+        }
+        if ($db->fieldExists('required_materials_confirmed_by', 'tickets')) {
+            $ticketUpdate['required_materials_confirmed_by'] = null;
+        }
+        if ($db->fieldExists('requestor_materials_note', 'tickets')) {
+            $ticketUpdate['requestor_materials_note'] = null;
+        }
+        $this->ticketModel->update($ticketId, $ticketUpdate);
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Failed to save required materials list. Please try again.');
+        }
+
+        $summaryItems = array_map(
+            static fn($m) => "{$m['material_name']} (" . rtrim(rtrim(number_format((float) $m['quantity'], 2, '.', ''), '0'), '.') . " {$m['unit_measurement']})",
+            $savedMaterials
+        );
+        $summaryText = implode(', ', $summaryItems);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Materials Needed Listed',
+            "Ocular assessment materials listed (" . count($savedMaterials) . " item(s)) with short/empty GSO stock: {$summaryText}" . ($notes !== '' ? " | Notes: {$notes}" : '')
+        );
+
+        $countLabel = count($savedMaterials);
+        $notifBody  = "After ocular inspection on your ticket (#{$ticketId}) for {$ticket['service_type']}, {$countLabel} needed material(s) were flagged as short or unavailable in GSO inventory. Please review the checklist and confirm once you already have them on-hand so processing can continue.";
+
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            'Materials Needed After Inspection',
+            $notifBody
+        );
+
+        $emailExtra = [
+            'Service Request'   => $ticket['service_type'],
+            'Materials Needed'  => $summaryText,
+        ];
+        if ($notes !== '') {
+            $emailExtra['GSO Inspector Notes'] = $notes;
+        }
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Materials Needed',
+            "After ocular assessment on your request #{$ticketId} ({$ticket['service_type']}), GSO inventory is short or unavailable for the listed materials. Once you already have these materials on-hand, please mark them ready on your ticket so approval can continue.",
+            $emailExtra
+        );
+
+        return $this->successResponse('Required materials saved and requestor notified.', [
+            'ticket_id'                       => $ticketId,
+            'required_materials_status'       => 'awaiting_requestor',
+            'required_materials_notes'        => ($notes !== '' ? $notes : null),
+            'required_materials_requested_at' => $now,
+            'required_materials'              => $savedMaterials,
+        ]);
+    }
+
+    /**
+     * Requestor confirms they already have all required materials on-hand so
+     * the ticket can return to the active approval queue.
+     *
+     * PATCH /tickets/:id/confirm-materials
+     */
+    public function confirmRequestorMaterials(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $userId = $this->currentUserId();
+        if ((string) $ticket['user_id'] !== (string) $userId) {
+            return $this->forbiddenResponse('Only the ticket requestor can confirm required materials readiness.');
+        }
+
+        if ($ticket['status'] !== 'pending') {
+            return $this->errorResponse("Materials confirmation is only available while ticket is pending approval. Current status: {$ticket['status']}.");
+        }
+
+        $db = Database::connect();
+        if (!$db->tableExists('ticket_required_materials')) {
+            return $this->errorResponse(
+                'Database schema requires migration (ticket_required_materials table not found).',
+                [],
+                ResponseInterface::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
+
+        $reqMaterialModel = new TicketRequiredMaterialModel();
+        $existingRows     = $reqMaterialModel->getByTicket($ticketId);
+
+        if (empty($existingRows)) {
+            return $this->errorResponse(
+                'No required materials have been listed for this ticket.',
+                [],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        if (($ticket['required_materials_status'] ?? 'none') === 'requestor_ready' && empty($ticket['is_approval_delayed'])) {
+            return $this->successResponse('Materials have already been confirmed ready for approval.', [
+                'ticket_id'                       => $ticketId,
+                'is_approval_delayed'             => 0,
+                'status_label'                    => $ticket['status_label'] ?? 'Pending Approval',
+                'required_materials_status'       => 'requestor_ready',
+                'required_materials_confirmed_at' => $ticket['required_materials_confirmed_at'] ?? null,
+                'requestor_materials_note'        => $ticket['requestor_materials_note'] ?? null,
+                'required_materials'              => $existingRows,
+            ]);
+        }
+
+        $body        = $this->request->getJSON(true) ?? [];
+        $materialIds = $body['material_ids'] ?? null;
+        $note        = trim(sanitize_string($body['note'] ?? $body['requestor_note'] ?? $body['requestor_materials_note'] ?? ''));
+        $note        = $note !== '' ? mb_substr($note, 0, 1000) : '';
+
+        $expectedIds = array_map(static fn($r) => (int) $r['id'], $existingRows);
+        if (!is_array($materialIds) || empty($materialIds)) {
+            return $this->errorResponse(
+                'Please check off every listed material before continuing approval.',
+                ['material_ids' => ['All listed materials must be confirmed on-hand.']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+        $providedIds = array_values(array_unique(array_map('intval', $materialIds)));
+        $missingIds  = array_diff($expectedIds, $providedIds);
+        if (!empty($missingIds)) {
+            return $this->errorResponse(
+                'Please check off every listed material before continuing approval.',
+                ['material_ids' => ['All listed materials must be confirmed on-hand.']],
+                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+            );
+        }
+
+        $now            = date('Y-m-d H:i:s');
+        $isEscalated    = !empty($ticket['is_escalated_to_director']);
+        $newStatusLabel = $isEscalated ? 'Pending Director Approval' : 'Pending Approval';
+
+        $db->transStart();
+
+        $db->table('ticket_required_materials')
+            ->where('ticket_id', $ticketId)
+            ->update([
+                'is_requestor_provided' => 1,
+                'provided_confirmed_at' => $now,
+                'updated_at'            => $now,
+            ]);
+
+        $ticketUpdate = [
+            'is_approval_delayed' => 0,
+            'status_label'        => $newStatusLabel,
+            'updated_at'          => $now,
+        ];
+        if ($db->fieldExists('required_materials_status', 'tickets')) {
+            $ticketUpdate['required_materials_status'] = 'requestor_ready';
+        }
+        if ($db->fieldExists('required_materials_confirmed_at', 'tickets')) {
+            $ticketUpdate['required_materials_confirmed_at'] = $now;
+        }
+        if ($db->fieldExists('required_materials_confirmed_by', 'tickets')) {
+            $ticketUpdate['required_materials_confirmed_by'] = $userId;
+        }
+        if ($db->fieldExists('requestor_materials_note', 'tickets')) {
+            $ticketUpdate['requestor_materials_note'] = ($note !== '' ? $note : null);
+        }
+
+        $this->ticketModel->update($ticketId, $ticketUpdate);
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->errorResponse('Failed to confirm materials readiness. Please try again.');
+        }
+
+        $updatedMaterials = $reqMaterialModel->getByTicket($ticketId);
+        $countLabel       = count($updatedMaterials);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $userId,
+            'Materials Confirmed by Requestor',
+            "Requestor marked all {$countLabel} needed material(s) as already on-hand" . ($note !== '' ? " (Note: {$note})" : '') . '. Returned ticket to approval queue.'
+        );
+
+        $unitId     = (int) $ticket['unit_id'];
+        $unitCode   = match ($unitId) {
+            1       => 'FGMU',
+            2       => 'LEAU',
+            3       => 'SSU',
+            default => 'GSO',
+        };
+
+        $staffMessage = "Requestor confirmed all needed materials are ready for #{$ticketId} ({$ticket['service_type']}). Ticket is now ready in your approval queue.";
+        $emailExtra   = [
+            'Unit'               => $unitCode,
+            'Service Request'    => $ticket['service_type'],
+            'Materials Checked'  => "{$countLabel} item(s) confirmed ready",
+        ];
+        if ($note !== '') {
+            $emailExtra['Requestor Note'] = $note;
+        }
+
+        try {
+            $unitAdmins = $db->query(
+                "SELECT id FROM users WHERE role IN ('admin', 'staff') AND unit_id = ? AND status = 'Active'",
+                [$unitId]
+            )->getResultArray();
+
+            foreach ($unitAdmins as $uAdmin) {
+                $this->notificationModel->createNotification(
+                    $uAdmin['id'],
+                    'success',
+                    'Requestor Materials Confirmed',
+                    $staffMessage
+                );
+            }
+
+            $this->notifyUnitAdminsByEmail(
+                $unitId,
+                $ticketId,
+                'Materials Confirmed - Ready in Approval Queue',
+                $staffMessage,
+                $emailExtra
+            );
+
+            if ($isEscalated || $unitId === 1) {
+                $directors = $db->query(
+                    "SELECT id, email, first_name, last_name, COALESCE(email_notifications_enabled, 1) AS email_opt_in FROM users WHERE role = 'director' AND status = 'Active'"
+                )->getResultArray();
+
+                $emailService = new ResendEmailService();
+                foreach ($directors as $dir) {
+                    $this->notificationModel->createNotification(
+                        $dir['id'],
+                        'success',
+                        'Requestor Materials Confirmed',
+                        $staffMessage
+                    );
+                    if (!empty($dir['email']) && (int) ($dir['email_opt_in'] ?? 1) === 1) {
+                        $dirName = trim(($dir['first_name'] ?? '') . ' ' . ($dir['last_name'] ?? '')) ?: 'Director';
+                        $emailService->sendTicketStatusUpdate(
+                            $dir['email'],
+                            $dirName,
+                            $ticketId,
+                            'Materials Confirmed - Ready in Approval Queue',
+                            $staffMessage,
+                            $emailExtra
+                        );
+                    }
+                }
+            }
+        } catch (\Throwable $notifyErr) {
+            log_message('error', '[TicketActionController::confirmRequestorMaterials] Staff notification failed: ' . $notifyErr->getMessage());
+        }
+
+        return $this->successResponse('Materials confirmed ready and ticket returned to the approval queue.', [
+            'ticket_id'                       => $ticketId,
+            'is_approval_delayed'             => 0,
+            'status_label'                    => $newStatusLabel,
+            'required_materials_status'       => 'requestor_ready',
+            'required_materials_confirmed_at' => $now,
+            'requestor_materials_note'        => ($note !== '' ? $note : null),
+            'required_materials'              => $updatedMaterials,
         ]);
     }
 

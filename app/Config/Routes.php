@@ -119,6 +119,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\API'], function ($rout
         $routes->patch('tickets/(:segment)/extend',         'TicketActionController::extendTicket/$1',          ['filter' => 'role:admin,director']);
         $routes->patch('tickets/(:segment)/reschedule',     'TicketActionController::rescheduleTicket/$1',      ['filter' => 'role:admin,director']);
 
+        // -- FGMU & LEAU Ocular Inspection Workflow (Admin & Director Roles) --
+        $routes->patch('tickets/(:segment)/set-inspection',   'TicketActionController::setUnderInspection/$1',   ['filter' => 'role:admin,director']);
+        $routes->patch('tickets/(:segment)/unset-inspection', 'TicketActionController::unsetUnderInspection/$1', ['filter' => 'role:admin,director']);
+
         // -- SSU Incident Report Workflow (Admin & Director Roles) --
         $routes->get('tickets/investigating/(:segment)',    'TicketQueueController::investigatingQueue/$1',    ['filter' => 'role:admin,director,superadmin']);
         $routes->patch('tickets/(:segment)/investigate',   'TicketActionController::setUnderInvestigation/$1', ['filter' => 'role:admin,director']);

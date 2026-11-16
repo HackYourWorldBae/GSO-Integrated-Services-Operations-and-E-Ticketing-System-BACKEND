@@ -230,6 +230,14 @@ trait TicketEnrichmentTrait
             $escUser = !empty($ticket['escalated_by']) ? ($usersMap[$ticket['escalated_by']] ?? null) : null;
             $ticket['escalated_by_name']        = $escUser ? trim(($escUser['first_name'] ?? '') . ' ' . ($escUser['last_name'] ?? '')) : null;
 
+            // Ocular Inspection status tracking (FGMU & LEAU Job Requests)
+            $hasInspectionNotation = !empty($ticket['staff_notation']) && (
+                str_contains(strtolower($ticket['staff_notation']), 'ocular inspection scheduled') ||
+                str_contains(strtolower($ticket['staff_notation']), '[set for ocular inspection') ||
+                str_contains(strtolower($ticket['staff_notation']), '[ocular inspection scheduled')
+            );
+            $ticket['is_under_inspection'] = (!empty($ticket['is_under_inspection']) || $hasInspectionNotation) ? 1 : 0;
+
             // Defensively normalize borrowing ticket status_label so it never shows "Queued for Dispatch"
             $isBorrowingTicket = BorrowingWorkflow::isBorrowingTicket($ticket);
 

@@ -56,6 +56,7 @@ class TicketModel extends Model
         'is_labor_only',
         'materials_stage',
         'is_under_investigation',
+        'is_under_inspection',
         'ssu_notation',
         'staff_notation',
         'submitted_at',

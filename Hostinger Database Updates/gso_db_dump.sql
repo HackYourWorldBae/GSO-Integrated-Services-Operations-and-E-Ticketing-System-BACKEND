@@ -190,6 +190,15 @@ BEGIN
             ALTER TABLE `tickets` ADD COLUMN `is_emergency` TINYINT(1) NOT NULL DEFAULT 0 AFTER `status_label`;
         END IF;
 
+        -- Ocular Inspection Scheduling fields (Procedural flow: New Requests -> Under Inspection)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'is_under_inspection') THEN
+            ALTER TABLE `tickets` ADD COLUMN `is_under_inspection` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_emergency`;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = current_db AND table_name = 'tickets' AND index_name = 'idx_tickets_is_under_inspection') THEN
+            ALTER TABLE `tickets` ADD INDEX `idx_tickets_is_under_inspection` (`is_under_inspection`);
+        END IF;
+
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_db AND table_name = 'tickets' AND column_name = 'is_approval_delayed') THEN
             ALTER TABLE `tickets` ADD COLUMN `is_approval_delayed` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_emergency`;
         END IF;
@@ -995,6 +1004,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `status` enum('pending','approved','processing','resolved','closed','declined','cancelled') NOT NULL DEFAULT 'pending',
   `status_label` varchar(100) NOT NULL DEFAULT 'Pending Approval',
   `is_emergency` tinyint(1) NOT NULL DEFAULT 0,
+  `is_under_inspection` tinyint(1) NOT NULL DEFAULT 0,
   `is_approval_delayed` tinyint(1) NOT NULL DEFAULT 0,
   `approval_delay_reason` text DEFAULT NULL,
   `approval_delayed_at` datetime DEFAULT NULL,
@@ -1051,6 +1061,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   KEY `idx_tickets_user` (`user_id`),
   KEY `idx_tickets_unit_status` (`unit_id`,`status`),
   KEY `idx_tickets_archived` (`is_archived`),
+  KEY `idx_tickets_is_under_inspection` (`is_under_inspection`),
   KEY `idx_tickets_approval_delayed` (`is_approval_delayed`),
   KEY `idx_tickets_escalated` (`is_escalated_to_director`),
   KEY `idx_tickets_submitted` (`submitted_at`),

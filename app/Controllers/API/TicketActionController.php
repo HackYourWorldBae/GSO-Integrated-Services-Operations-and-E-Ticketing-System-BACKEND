@@ -655,6 +655,165 @@ class TicketActionController extends BaseController
     }
 
     /**
+     * Flags a job request as Under Inspection for FGMU and LEAU.
+     * Procedural Step: Transitions ticket from "New Requests" to "Under Inspection" phase.
+     *
+     * PATCH /tickets/:id/set-inspection
+     */
+    public function setUnderInspection(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $unitId = (int) $ticket['unit_id'];
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
+        }
+
+        if (BorrowingWorkflow::isBorrowingTicket($ticket)) {
+            return $this->errorResponse('Borrowing requests do not undergo ocular inspection.');
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot be modified.');
+        }
+
+        $body = $this->request->getJSON(true) ?? [];
+        $inspector = trim($body['inspector'] ?? $body['inspector_name'] ?? '');
+        $date = trim($body['scheduled_date'] ?? $body['inspection_date'] ?? date('Y-m-d'));
+        $notes = trim($body['notes'] ?? $body['instructions'] ?? '');
+
+        $formattedDate = date('M j, Y', strtotime($date ?: date('Y-m-d')));
+        $notationHeader = "[OCULAR INSPECTION SCHEDULED - {$formattedDate}]";
+        $detailsArr = [];
+        if (!empty($date)) {
+            $detailsArr[] = "Scheduled Date: {$formattedDate}";
+        }
+        if (!empty($inspector)) {
+            $detailsArr[] = "Assigned Inspector: {$inspector}";
+        }
+        if (!empty($notes)) {
+            $detailsArr[] = "Instructions: {$notes}";
+        }
+        $fullNotation = $notationHeader . (empty($detailsArr) ? '' : "\n" . implode("\n", $detailsArr));
+
+        $updateData = [
+            'status'       => 'pending',
+            'status_label' => 'Under Inspection',
+            'current_step' => 3,
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ];
+
+        $db = Database::connect();
+        if ($db->fieldExists('is_under_inspection', 'tickets')) {
+            $updateData['is_under_inspection'] = 1;
+        }
+        if ($db->fieldExists('staff_notation', 'tickets')) {
+            $existing = trim($ticket['staff_notation'] ?? '');
+            $updateData['staff_notation'] = !empty($existing) ? ($fullNotation . "\n\n" . $existing) : $fullNotation;
+        }
+
+        $this->ticketModel->update($ticketId, $updateData);
+
+        $logDetail = "Job request set for ocular inspection" . (!empty($date) ? " on {$formattedDate}" : "") . (!empty($inspector) ? " by {$inspector}." : ".");
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Status Changed',
+            $logDetail
+        );
+
+        $unitCode = ($unitId === 1) ? 'FGMU' : 'LEAU';
+        $this->notificationModel->createNotification(
+            $ticket['user_id'],
+            'info',
+            "Job Request Set for Inspection",
+            "Your {$unitCode} job request (#{$ticketId}) has been scheduled for ocular inspection."
+        );
+
+        $this->notifyRequestorByEmail(
+            $ticket['user_id'],
+            $ticketId,
+            'Scheduled for Inspection',
+            "Your {$unitCode} job request (#{$ticketId}) has been set for on-site ocular inspection."
+        );
+
+        $updatedTicket = $this->ticketModel->find($ticketId);
+        $enriched = $this->enrichTickets([$updatedTicket]);
+
+        return $this->successResponse(
+            'Ticket set for ocular inspection.',
+            ['ticket' => $enriched[0] ?? $updatedTicket, 'ticket_id' => $ticketId]
+        );
+    }
+
+    /**
+     * Reverts a job request from "Under Inspection" back to "New Requests".
+     *
+     * PATCH /tickets/:id/unset-inspection
+     */
+    public function unsetUnderInspection(string $ticketId): ResponseInterface
+    {
+        $ticket = $this->ticketModel->find($ticketId);
+
+        if (!$ticket) {
+            return $this->notFoundResponse('Ticket');
+        }
+
+        $unitId = (int) $ticket['unit_id'];
+        if ($forbidden = $this->assertUnitAccess($unitId)) {
+            return $forbidden;
+        }
+
+        if ($ticket['is_archived']) {
+            return $this->errorResponse('Archived tickets cannot be modified.');
+        }
+
+        $updateData = [
+            'status'       => 'pending',
+            'status_label' => 'Pending Approval',
+            'current_step' => 2,
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ];
+
+        $db = Database::connect();
+        if ($db->fieldExists('is_under_inspection', 'tickets')) {
+            $updateData['is_under_inspection'] = 0;
+        }
+        if ($db->fieldExists('staff_notation', 'tickets') && !empty($ticket['staff_notation'])) {
+            $lines = explode("\n", $ticket['staff_notation']);
+            $filteredLines = array_filter($lines, function($line) {
+                $l = strtolower($line);
+                return !str_contains($l, 'ocular inspection scheduled') &&
+                       !str_contains($l, '[set for ocular inspection') &&
+                       !str_contains($l, 'assigned inspector:') &&
+                       !str_contains($l, 'scheduled date:');
+            });
+            $updateData['staff_notation'] = trim(implode("\n", $filteredLines)) ?: null;
+        }
+
+        $this->ticketModel->update($ticketId, $updateData);
+
+        $this->logModel->logAction(
+            $ticketId,
+            $this->currentUserId(),
+            'Status Changed',
+            'Ocular inspection status reverted back to New Requests queue.'
+        );
+
+        $updatedTicket = $this->ticketModel->find($ticketId);
+        $enriched = $this->enrichTickets([$updatedTicket]);
+
+        return $this->successResponse(
+            'Ticket reverted to New Requests.',
+            ['ticket' => $enriched[0] ?? $updatedTicket, 'ticket_id' => $ticketId]
+        );
+    }
+
+    /**
      * Adds a recommendation, news, or notation to a ticket to update the end user.
      * Works for all sub-units (FGMU, LEAU, SSU) including scheduled jobs, active jobs,
      * and SSU incident reports.

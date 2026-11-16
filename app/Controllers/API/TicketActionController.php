@@ -156,6 +156,30 @@ class TicketActionController extends BaseController
 
         $isBorrowing = BorrowingWorkflow::isBorrowingTicket($ticket);
 
+        // For non-borrowing LEAU job requests, direct approval by Unit Head requires either
+        // an ocular inspection result or a materials needed checklist.
+        if (!$isBorrowing && !$isExecutive && $unitId === 2) {
+            $hasNotation = !empty($ticket['staff_notation']) && (
+                str_contains(strtolower($ticket['staff_notation']), 'ocular inspection') ||
+                str_contains(strtolower($ticket['staff_notation']), '[ocular inspection') ||
+                str_contains(strtolower($ticket['staff_notation']), 'ocular assessment')
+            );
+            $hasMaterials = (!empty($ticket['required_materials_status']) && $ticket['required_materials_status'] !== 'none');
+            if (!$hasMaterials) {
+                $dbCheck = Database::connect();
+                if ($dbCheck->tableExists('ticket_required_materials')) {
+                    $hasMaterials = ($dbCheck->table('ticket_required_materials')->where('ticket_id', $ticketId)->countAllResults() > 0);
+                }
+            }
+            if (!$hasNotation && !$hasMaterials) {
+                return $this->errorResponse(
+                    'An ocular inspection result or materials needed checklist is required before direct approval.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
+        }
+
         $destUnitId = (int) $ticket['unit_id'];
         $unitCode = ($destUnitId === 1) ? 'FGMU' : 'LEAU';
         $approverTitle = $isExecutive ? 'Director' : "{$unitCode} Unit Head";
@@ -306,6 +330,31 @@ class TicketActionController extends BaseController
 
         if (!empty($ticket['is_escalated_to_director'])) {
             return $this->errorResponse("Ticket is already escalated to the Director.");
+        }
+
+        // For non-borrowing job requests, requesting Director approval requires either
+        // an ocular inspection result or a materials needed checklist.
+        $isBorrowing = BorrowingWorkflow::isBorrowingTicket($ticket);
+        if (!$isBorrowing && ((int) $ticket['unit_id'] === 1 || (int) $ticket['unit_id'] === 2)) {
+            $hasNotation = !empty($ticket['staff_notation']) && (
+                str_contains(strtolower($ticket['staff_notation']), 'ocular inspection') ||
+                str_contains(strtolower($ticket['staff_notation']), '[ocular inspection') ||
+                str_contains(strtolower($ticket['staff_notation']), 'ocular assessment')
+            );
+            $hasMaterials = (!empty($ticket['required_materials_status']) && $ticket['required_materials_status'] !== 'none');
+            if (!$hasMaterials) {
+                $dbCheck = Database::connect();
+                if ($dbCheck->tableExists('ticket_required_materials')) {
+                    $hasMaterials = ($dbCheck->table('ticket_required_materials')->where('ticket_id', $ticketId)->countAllResults() > 0);
+                }
+            }
+            if (!$hasNotation && !$hasMaterials) {
+                return $this->errorResponse(
+                    'An ocular inspection result or materials needed checklist is required before requesting Director approval.',
+                    [],
+                    ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
+                );
+            }
         }
 
         $body = $this->request->getJSON(true) ?? [];
@@ -1026,19 +1075,6 @@ class TicketActionController extends BaseController
 
         if ($ticket['status'] !== 'pending') {
             return $this->errorResponse("Required materials can only be updated while a ticket is pending approval. Current status: {$ticket['status']}.");
-        }
-
-        if (empty($ticket['is_approval_delayed'])) {
-            return $this->errorResponse('Required materials for ocular assessment can only be added for tickets in the Approval Delays queue.');
-        }
-
-        $delayReason = strtolower((string) ($ticket['approval_delay_reason'] ?? ''));
-        if (!str_contains($delayReason, 'ocular') && !str_contains($delayReason, 'inspection')) {
-            return $this->errorResponse(
-                'Materials checklist is intended for tickets delayed due to ocular assessment or inspection.',
-                [],
-                ResponseInterface::HTTP_UNPROCESSABLE_ENTITY
-            );
         }
 
         $db = Database::connect();
